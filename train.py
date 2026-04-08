@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--checkpoint-every", type=int, default=100, help="Save checkpoint every N iterations")
     p.add_argument("--output-dir", default="runs/default", help="Directory for logs and checkpoints")
     p.add_argument("--resume", action="store_true", help="Resume from latest checkpoint in output-dir")
+    p.add_argument("--kl-coef", type=float, default=0.0, help="KL penalty coefficient (0 = disabled)")
     p.add_argument("--seed", type=int, default=42, help="Random seed")
     p.add_argument(
         "--prompt",
@@ -72,6 +73,7 @@ def main() -> None:
         output_dir=args.output_dir,
         device=args.device,
         seed=args.seed,
+        kl_coef=args.kl_coef,
     )
 
     dtype_map = {
@@ -89,6 +91,7 @@ def main() -> None:
         device=args.device,
         torch_dtype=torch_dtype,
         device_map=args.device_map,
+        keep_ref_model=args.kl_coef > 0.0,
     )
 
     print(f"Building CountingEnv (max_count={args.max_count})")

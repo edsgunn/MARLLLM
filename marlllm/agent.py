@@ -103,6 +103,7 @@ class IndependentAgent(Agent):
         device: str = "cpu",
         torch_dtype: torch.dtype | str | None = "auto",
         device_map: str | dict | None = None,
+        keep_ref_model: bool = False,
     ) -> None:
         """
         Args:
@@ -113,6 +114,8 @@ class IndependentAgent(Agent):
             device_map: Passed to from_pretrained. Set to "auto" to shard a
                 large model across all available GPUs/CPU automatically.
                 If set, the explicit .to(device) call is skipped.
+            keep_ref_model: If True, load a frozen copy of the pretrained model
+                to use as the KL reference. Doubles memory usage for the backbone.
         """
         self._agent_id = agent_id
         self._character_prompt = character_prompt
@@ -135,7 +138,25 @@ class IndependentAgent(Agent):
             self._backbone = self._backbone.to(self.device)
 
         hidden_size = self._backbone.config.hidden_size
-        self._value_head = ValueHead(hidden_size).to(self.device)
+        model_dtype = next(self._backbone.parameters()).dtype
+        self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+
+        if keep_ref_model:
+            ref_kwargs: dict = {}
+            if torch_dtype is not None:
+                ref_kwargs["torch_dtype"] = torch_dtype
+            if device_map is not None:
+                ref_kwargs["device_map"] = device_map
+            self._ref_backbone = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path, **ref_kwargs
+            )
+            if device_map is None:
+                self._ref_backbone = self._ref_backbone.to(self.device)
+            for p in self._ref_backbone.parameters():
+                p.requires_grad_(False)
+            self._ref_backbone.eval()
+        else:
+            self._ref_backbone = None
 
     # ------------------------------------------------------------------ #
     # Agent interface                                                       #
@@ -232,3 +253,18 @@ class IndependentAgent(Agent):
         last_hidden = out.hidden_states[-1]       # (B, T, H)
         values = self._value_head(last_hidden.detach())  # (B, T) — detached
         return logits, values
+
+    @torch.no_grad()
+    def evaluate_ref(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """
+        Forward pass through the frozen reference model.
+        Returns logits (B, T, V), or None if no reference model was loaded.
+        """
+        if self._ref_backbone is None:
+            return None
+        out = self._ref_backbone(input_ids=input_ids, attention_mask=attention_mask)
+        return out.logits

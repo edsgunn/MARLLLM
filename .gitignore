@@ -49,6 +49,7 @@ Thumbs.db
 # IDEs
 .idea/
 .vscode/
+.claude/
 
 # SLURM
 slurm_*.log

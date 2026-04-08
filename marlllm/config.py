@@ -20,6 +20,7 @@ class TrainingConfig:
     alpha_perc: float = 1.0   # weight on L_perc
     alpha_act: float = 1.0    # weight on L_act
     normalise_returns: bool = True  # standardise G_t within batch (§9.3)
+    kl_coef: float = 0.0      # KL penalty weight: λ * KL(π_θ || π_ref) at ACT positions
 
     # Training loop
     episodes_per_iter: int = 8

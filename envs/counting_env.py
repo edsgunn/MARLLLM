@@ -53,9 +53,11 @@ class CountingEnv(AECEnv):
         self.max_count = max_count
         self.action_token_budget = 1  # read by Trainer
 
-        # Verify each integer tokenises to exactly one token
+        # Verify each integer 0..max_count tokenises to exactly one token.
+        # 0 is the seed observation emitted at episode start so the model
+        # always has a concrete predecessor to increment from.
         self._number_token_ids: dict[int, int] = {}
-        for n in range(1, max_count + 1):
+        for n in range(0, max_count + 1):
             ids = tokenizer.encode(str(n), add_special_tokens=False)
             if len(ids) != 1:
                 raise ValueError(
@@ -97,7 +99,10 @@ class CountingEnv(AECEnv):
         self._expected_next = 1
         self._step_count = 0
 
-        self._pending_obs = {"agent_0": []}  # no initial obs; agent moves first
+        # Seed observation: emit "0" so the model always has a concrete
+        # predecessor to increment from, rather than inferring the start
+        # from the prompt alone.
+        self._pending_obs = {"agent_0": [self._number_token_ids[0]]}
         self._cumulative_rewards = {"agent_0": 0.0}
         self._terminations = {"agent_0": False}
         self._truncations = {"agent_0": False}

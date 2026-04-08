@@ -83,9 +83,20 @@ class Trainer:
 
         for iteration in range(start_iteration, self.config.num_iterations + 1):
             # 1. Collect episodes
+            episode_results: list[str] = []
+            episode_correct_counts: list[int] = []
+            trace_traj = None
+            trace_info: dict = {}
             for _ in range(self.config.episodes_per_iter):
-                traj = self._collect_episode()
+                traj, ep_info = self._collect_episode()
                 self.store.store(traj)
+                if trace_traj is None:
+                    trace_traj = traj
+                    trace_info = ep_info
+                if "result" in ep_info:
+                    episode_results.append(ep_info["result"])
+                if "correct_count" in ep_info:
+                    episode_correct_counts.append(ep_info["correct_count"])
 
             # 2. Build batch
             trajectories = self.store.sample(batch_size=self.config.episodes_per_iter)
@@ -99,12 +110,14 @@ class Trainer:
             ).to(self.device)
 
             # 3. Forward pass + losses for each agent
-            total_loss = torch.tensor(0.0, device=self.device)
+            _model_dtype = next(next(iter(self.agents.values()))._backbone.parameters()).dtype
+            total_loss = torch.tensor(0.0, device=self.device, dtype=_model_dtype)
             all_metrics: dict[str, float] = {}
 
             for agent_id, agent in self.agents.items():
                 agent.train_mode()
                 logits, values = agent.evaluate(batch.input_ids, batch.attention_mask)
+                ref_logits = agent.evaluate_ref(batch.input_ids, batch.attention_mask)
                 agent_idx = self.agent_index[agent_id]
 
                 loss_val, metrics = self.loss.compute_loss(
@@ -115,6 +128,7 @@ class Trainer:
                     agent_id_mask=batch.agent_id_mask,
                     target_agent_idx=agent_idx,
                     config=self.config,
+                    ref_logits=ref_logits,
                 )
                 total_loss = total_loss + loss_val
                 all_metrics.update({f"{agent_id}/{k}": v for k, v in metrics.items()})
@@ -132,8 +146,18 @@ class Trainer:
             all_metrics["iteration"] = iteration
             all_metrics["wall_time"] = time.time() - self._start_time
 
+            # Episode outcome stats
+            n_eps = len(episode_results)
+            if n_eps > 0:
+                all_metrics["success_rate"] = episode_results.count("success") / n_eps
+                all_metrics["wrong_rate"] = episode_results.count("wrong") / n_eps
+            if episode_correct_counts:
+                all_metrics["mean_correct"] = sum(episode_correct_counts) / len(episode_correct_counts)
+
             if iteration % self.config.log_every == 0:
                 self._log_metrics(iteration, all_metrics)
+                if trace_traj is not None:
+                    self._write_trace(iteration, trace_traj, trace_info)
 
             self._write_metrics_jsonl(all_metrics)
 
@@ -147,7 +171,7 @@ class Trainer:
     # Episode collection                                                   #
     # ------------------------------------------------------------------ #
 
-    def _collect_episode(self):
+    def _collect_episode(self) -> tuple:
         """
         Run one episode via the PettingZoo AEC API and return a Trajectory.
 
@@ -161,6 +185,7 @@ class Trainer:
         """
         episode_history: list[EpisodeStep] = []
         token_count = 0
+        episode_info: dict = {}
 
         self.env.reset()
 
@@ -230,6 +255,12 @@ class Trainer:
             else:
                 self.env.step(None)
 
+        # Capture final episode info (result, correct_count) from env
+        for aid in self.env.possible_agents:
+            if aid in self.env.infos:
+                episode_info = self.env.infos[aid]
+                break
+
         # Prepend the primary agent's prompt as PAD-typed tokens.
         # This ensures the training forward pass conditions on the same prefix
         # as the rollout, keeping log-probs consistent across rollout and update.
@@ -245,10 +276,11 @@ class Trainer:
             )
             episode_history = [prompt_step] + episode_history
 
-        return self.tokeniser.build_trajectory(
+        traj = self.tokeniser.build_trajectory(
             episode_history=episode_history,
             agent_ids_present=list(self.agents.keys()),
         )
+        return traj, episode_info
 
     # ------------------------------------------------------------------ #
     # Checkpointing                                                        #
@@ -356,11 +388,45 @@ class Trainer:
             "agent_0/perc_loss",
             "agent_0/act_loss",
             "agent_0/value_loss",
+            "agent_0/kl",
+            "success_rate",
+            "mean_correct",
         ]:
             if key in metrics:
                 short = key.split("/")[-1]
                 parts.append(f"{short} {metrics[key]:.4f}")
         self._logger.info(" | ".join(parts))
+
+    def _write_trace(self, iteration: int, traj, ep_info: dict) -> None:
+        """
+        Decode and save the first episode of this iteration as a human-readable
+        trace file under <output_dir>/traces/iter_XXXXXX.txt.
+
+        Each line shows the token type, the decoded text, and the raw token ID(s),
+        so you can see exactly what the agent produced and what the env returned.
+        """
+        tok = list(self.agents.values())[0].tokenizer
+        traces_dir = Path(self.config.output_dir) / "traces"
+        traces_dir.mkdir(exist_ok=True)
+        path = traces_dir / f"iter_{iteration:06d}.txt"
+
+        lines: list[str] = [
+            f"=== Iteration {iteration} — episode trace ===",
+            f"result:        {ep_info.get('result', 'unknown')}",
+            f"correct_count: {ep_info.get('correct_count', '?')}",
+            f"episode_length:{ep_info.get('episode_length', '?')}",
+            "",
+        ]
+
+        type_labels = {0: "PROMPT", 1: "OBS   ", 2: "ACT   "}
+        for step in traj.steps:
+            label = type_labels.get(int(step.token_type), "??????")
+            decoded = tok.decode(step.token_ids, skip_special_tokens=False)
+            ids_str = " ".join(str(t) for t in step.token_ids)
+            lines.append(f"[{label}] {decoded!r:30s}  ids=[{ids_str}]")
+
+        with open(path, "w") as f:
+            f.write("\n".join(lines) + "\n")
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:

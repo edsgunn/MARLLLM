@@ -47,6 +47,7 @@ class Loss(ABC):
         agent_id_mask: torch.Tensor,    # (B, T)
         target_agent_idx: int,
         config: TrainingConfig,
+        ref_logits: torch.Tensor | None = None,  # (B, T, V) frozen reference, optional
     ) -> tuple[torch.Tensor, dict]: ...
 
 
@@ -73,6 +74,7 @@ class CCSMLoss(Loss):
         agent_id_mask: torch.Tensor,
         target_agent_idx: int,
         config: TrainingConfig,
+        ref_logits: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict]:
         surprises = _compute_obs_surprises(logits, input_ids, token_type_mask)
         returns = _compute_returns(surprises, token_type_mask, config.gamma)
@@ -84,7 +86,7 @@ class CCSMLoss(Loss):
         # ---- Perception loss ----
         obs_surprises = surprises[obs_mask]
         if obs_surprises.numel() == 0:
-            l_perc = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            l_perc = torch.tensor(0.0, device=logits.device, dtype=logits.dtype, requires_grad=True)
         else:
             l_perc = obs_surprises.mean()
 
@@ -118,11 +120,24 @@ class CCSMLoss(Loss):
             act_values = values[act_mask]
             l_val = F.mse_loss(act_values, act_returns_frozen)
         else:
-            l_act = torch.tensor(0.0, device=logits.device)
-            l_val = torch.tensor(0.0, device=logits.device)
-            advantages = torch.zeros(0, device=logits.device)
-            entropy = torch.tensor(0.0, device=logits.device)
-            act_returns = torch.zeros(0, device=logits.device)
+            l_act = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+            l_val = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+            advantages = torch.zeros(0, device=logits.device, dtype=logits.dtype)
+            entropy = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+            act_returns = torch.zeros(0, device=logits.device, dtype=logits.dtype)
+
+        # ---- KL penalty ----
+        # KL(π_θ || π_ref) at ACT positions, using the causal shift.
+        # Only computed when a reference model was provided and kl_coef > 0.
+        if ref_logits is not None and config.kl_coef > 0.0 and act_mask.any():
+            shifted_act_mask = act_mask[:, 1:]
+            act_logits_cur = logits[:, :-1, :][shifted_act_mask]       # (N_act, V)
+            act_logits_ref = ref_logits[:, :-1, :][shifted_act_mask]   # (N_act, V)
+            log_p = F.log_softmax(act_logits_cur, dim=-1)
+            log_p_ref = F.log_softmax(act_logits_ref, dim=-1)
+            kl = (log_p.exp() * (log_p - log_p_ref)).sum(dim=-1).mean()
+        else:
+            kl = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
         metrics = {
             "mean_surprise": obs_surprises.mean().item() if obs_surprises.numel() > 0 else 0.0,
@@ -132,9 +147,10 @@ class CCSMLoss(Loss):
             "perc_loss": l_perc.item(),
             "act_loss": l_act.item(),
             "value_loss": l_val.item(),
+            "kl": kl.item(),
         }
 
-        total = config.alpha_perc * l_perc + config.alpha_act * l_act + l_val
+        total = config.alpha_perc * l_perc + config.alpha_act * l_act + l_val + config.kl_coef * kl
         return total, metrics
 
 
@@ -170,7 +186,7 @@ def _compute_obs_surprises(
 
     # Pad back to (B, T) with 0 at position 0
     surprises = torch.cat(
-        [torch.zeros(B, 1, device=logits.device), surprises_shifted], dim=1
+        [torch.zeros(B, 1, device=logits.device, dtype=logits.dtype), surprises_shifted], dim=1
     )
     return surprises  # (B, T)
 
@@ -193,11 +209,11 @@ def _compute_returns(
     B, T = surprises.shape
     returns = torch.zeros_like(surprises)
 
-    running = torch.zeros(B, device=surprises.device)
+    running = torch.zeros(B, device=surprises.device, dtype=surprises.dtype)
 
     for t in range(T - 1, -1, -1):
-        obs_here = (token_type_mask[:, t] == int(TokenType.OBS)).float()
-        act_here = (token_type_mask[:, t] == int(TokenType.ACT)).float()
+        obs_here = (token_type_mask[:, t] == int(TokenType.OBS)).to(dtype=surprises.dtype)
+        act_here = (token_type_mask[:, t] == int(TokenType.ACT)).to(dtype=surprises.dtype)
 
         # If OBS: add this surprise to the running discounted sum
         running = obs_here * surprises[:, t] + gamma * running
@@ -247,7 +263,7 @@ def _action_entropy(
 
     act_logits = shifted_logits[shifted_act_mask]  # (N_act, V)
     if act_logits.numel() == 0:
-        return torch.tensor(0.0, device=logits.device)
+        return torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
     log_probs = F.log_softmax(act_logits, dim=-1)
     probs = log_probs.exp()
