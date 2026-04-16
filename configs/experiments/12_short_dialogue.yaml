@@ -1,0 +1,33 @@
+name: short_dialogue
+description: >
+  Qwen2.5-1.5B with only 4 dialogue turns per episode.
+  Forces agents to be concise and reach agreement quickly.
+  Tests whether CCSM can learn cooperative signalling under tight
+  communication budget, and establishes a lower bound on useful
+  dialogue length for this task.
+script: train_negotiation
+
+slurm:
+  time: "10:00:00"    # shorter episodes → faster per iter; 10 h budgeted
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 4
+token_budget: 64
+max_episode_tokens: 512
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/12_short_dialogue

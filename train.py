@@ -16,7 +16,15 @@ import torch
 
 
 def parse_args() -> argparse.Namespace:
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", default=None)
+    pre_args, _ = pre.parse_known_args()
+
     p = argparse.ArgumentParser(description="Train a CCSM agent on CountingEnv.")
+    p.add_argument("--config", default=None,
+                   help="Path to a YAML experiment config file. "
+                        "All keys map to their corresponding CLI flags; "
+                        "explicit CLI args override config file values.")
     p.add_argument("--model", default="gpt2", help="HuggingFace model ID or path")
     p.add_argument("--device", default="cpu", help="PyTorch device (cpu, cuda, mps)")
     p.add_argument(
@@ -44,6 +52,11 @@ def parse_args() -> argparse.Namespace:
         default="You are a counter that always outputs the next integer in sequence.",
         help="Character prompt for agent_0",
     )
+
+    if pre_args.config:
+        from marlllm.config_loader import apply_config_defaults
+        apply_config_defaults(p, pre_args.config)
+
     return p.parse_args()
 
 
@@ -60,7 +73,11 @@ def main() -> None:
         Trainer,
         TrainingConfig,
     )
+    from marlllm.config_loader import log_system_info
     from envs.counting_env import CountingEnv
+
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    log_system_info(args.output_dir, config_path=args.config)
 
     config = TrainingConfig(
         model_name_or_path=args.model,

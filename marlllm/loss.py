@@ -177,8 +177,14 @@ def _compute_obs_surprises(
     shifted_targets = input_ids[:, 1:]      # (B, T-1)
     shifted_types = token_type_mask[:, 1:]  # (B, T-1)
 
-    log_probs = F.log_softmax(shifted_logits, dim=-1)  # (B, T-1, V)
-    token_lp = log_probs.gather(2, shifted_targets.unsqueeze(-1)).squeeze(-1)  # (B, T-1)
+    # Use cross_entropy (fused NLL kernel) instead of log_softmax + gather.
+    # log_softmax would allocate a full (B, T-1, V) output tensor (~9 GB for
+    # Qwen vocab at typical batch sizes); cross_entropy never materialises it.
+    token_lp = -F.cross_entropy(
+        shifted_logits.reshape(-1, V),
+        shifted_targets.reshape(-1),
+        reduction="none",
+    ).reshape(B, T - 1)  # (B, T-1)
 
     # Mask to OBS positions only
     obs_mask = shifted_types == int(TokenType.OBS)
@@ -243,8 +249,13 @@ def _act_log_probs(
     shifted_targets = input_ids[:, 1:]    # (B, T-1)
     shifted_act_mask = act_mask[:, 1:]    # (B, T-1)
 
-    log_probs = F.log_softmax(shifted_logits, dim=-1)
-    token_lp = log_probs.gather(2, shifted_targets.unsqueeze(-1)).squeeze(-1)  # (B, T-1)
+    # Same fused cross_entropy trick as _compute_obs_surprises — avoids
+    # allocating the full (B, T-1, V) log_softmax output.
+    token_lp = -F.cross_entropy(
+        shifted_logits.reshape(-1, V),
+        shifted_targets.reshape(-1),
+        reduction="none",
+    ).reshape(B, T - 1)  # (B, T-1)
 
     return token_lp[shifted_act_mask]  # flat (N_act,)
 
@@ -262,10 +273,16 @@ def _action_entropy(
     shifted_act_mask = act_mask[:, 1:]
 
     act_logits = shifted_logits[shifted_act_mask]  # (N_act, V)
-    if act_logits.numel() == 0:
+    N = act_logits.shape[0]
+    if N == 0:
         return torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
-    log_probs = F.log_softmax(act_logits, dim=-1)
-    probs = log_probs.exp()
-    entropy = -(probs * log_probs).sum(dim=-1).mean()
-    return entropy
+    # Process in chunks to avoid allocating (N_act, V) × 2 for log_probs + probs.
+    # With Qwen vocab (150k) even a few thousand act positions is several GB.
+    CHUNK = 256
+    entropy_acc = act_logits.new_zeros(())
+    for start in range(0, N, CHUNK):
+        chunk = act_logits[start : start + CHUNK]  # (CHUNK, V)
+        log_p = F.log_softmax(chunk, dim=-1)       # (CHUNK, V) — freed each iter
+        entropy_acc = entropy_acc + -(log_p.exp() * log_p).sum()
+    return entropy_acc / N

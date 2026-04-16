@@ -1,0 +1,32 @@
+name: llama_1b
+description: >
+  Llama-3.2-1B (1B). Controls for model family vs. Qwen2.5-1.5B (exp 03).
+  Both are similar-scale modern small LLMs; comparing them isolates whether
+  pre-training corpus / architecture matters more than parameter count for
+  this negotiation task.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"    # ~5-7 h actual; 12 h budgeted
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: meta-llama/Llama-3.2-1B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/07_llama_1b

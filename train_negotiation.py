@@ -14,10 +14,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import torch
+
+# Must be set before the CUDA allocator is initialised (i.e. before the first
+# CUDA tensor is created).  expandable_segments lets PyTorch reuse fragmented
+# free blocks rather than requiring one large contiguous allocation, which
+# prevents OOMs caused by "X GiB reserved but unallocated" fragmentation.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 
 def _auto_device(idx: int, fallback: str) -> str:
@@ -28,7 +35,17 @@ def _auto_device(idx: int, fallback: str) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    # First pass: pull out --config so we can set YAML values as defaults
+    # before the full parse.  Explicit CLI args will still override them.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", default=None)
+    pre_args, _ = pre.parse_known_args()
+
     p = argparse.ArgumentParser(description="Two-agent CCSM training on DealOrNoDealEnv.")
+    p.add_argument("--config", default=None,
+                   help="Path to a YAML experiment config file. "
+                        "All keys map to their corresponding CLI flags; "
+                        "explicit CLI args override config file values.")
     p.add_argument("--model",   default="gpt2", help="HuggingFace model for both agents (overridden by --model-0/1)")
     p.add_argument("--model-0", default=None,   help="HuggingFace model for agent_0 (overrides --model)")
     p.add_argument("--model-1", default=None,   help="HuggingFace model for agent_1 (overrides --model)")
@@ -52,9 +69,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--kl-coef",  type=float, default=0.0,          help="KL penalty coefficient")
     p.add_argument("--seed",     type=int,   default=42)
     # --- distribution / memory ---
-    p.add_argument("--grad-accum", type=int, default=4,
+    p.add_argument("--grad-accum", type=int, default=8,
                    help="Gradient accumulation steps. Split each batch into N micro-batches "
-                        "to reduce peak VRAM usage (default 4).")
+                        "to reduce peak VRAM usage (default 8).")
     p.add_argument("--gradient-checkpointing", action="store_true",
                    help="Enable activation checkpointing to trade compute for VRAM.")
     p.add_argument("--compile", action="store_true",
@@ -77,6 +94,12 @@ def parse_args() -> argparse.Namespace:
         default="You are Agent B, negotiating to maximise your score.",
         help="Character prompt for agent_1",
     )
+
+    # Apply YAML config as defaults (CLI args still override).
+    if pre_args.config:
+        from marlllm.config_loader import apply_config_defaults
+        apply_config_defaults(p, pre_args.config)
+
     return p.parse_args()
 
 
@@ -92,6 +115,7 @@ def main() -> None:
         Trainer,
         TrainingConfig,
     )
+    from marlllm.config_loader import log_system_info
     from envs.deal_or_no_deal_env import DealOrNoDealEnv
 
     dtype_map = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
@@ -109,6 +133,10 @@ def main() -> None:
         if args.lora_modules
         else None
     )
+
+    # Write system_info.json and copy the config file before loading models.
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    log_system_info(args.output_dir, config_path=args.config)
 
     print(f"Loading agent_0: {model_0}  →  {device_0}")
     agent_0 = IndependentAgent(

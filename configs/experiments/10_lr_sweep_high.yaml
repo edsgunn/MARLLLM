@@ -1,0 +1,32 @@
+name: lr_sweep_high
+description: >
+  Qwen2.5-1.5B with lr=1e-4 (3× higher than baseline).
+  Part of the lr sweep (exps 03, 09, 10). Higher LR may accelerate early
+  learning but risks instability or reward collapse; compare loss curves
+  carefully against baseline and low-LR runs.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-4
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/10_lr_sweep_high

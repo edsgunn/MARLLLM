@@ -1,0 +1,32 @@
+name: qwen_1.5b_baseline
+description: >
+  Qwen2.5-1.5B (1.5B) baseline. Primary workhorse for ablations —
+  large enough to handle negotiation language but cheap enough for
+  sweeps. All other ablation configs use this model unless noted.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"    # ~5-7 h actual; 12 h budgeted
+  nodes: 1
+  gpus_per_node: 2    # agent_0 → cuda:0, agent_1 → cuda:1
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/03_qwen_1.5b_baseline

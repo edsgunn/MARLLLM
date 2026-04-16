@@ -140,6 +140,18 @@ class Trainer:
                     mb_token_type     = batch.token_type_mask[micro_start:micro_end].to(dev)
                     mb_agent_id       = batch.agent_id_mask[micro_start:micro_end].to(dev)
 
+                    # Trim to the actual max sequence length within this micro-batch.
+                    # The full batch is padded to the longest trajectory across ALL K
+                    # episodes; individual micro-batches are often much shorter.
+                    # This can shrink the logits tensor from (B, T_global, V) to
+                    # (B, T_local, V), reducing the dominant memory cost significantly.
+                    actual_len = int(mb_attention_mask.sum(dim=1).max())
+                    if actual_len < mb_input_ids.shape[1]:
+                        mb_input_ids      = mb_input_ids[:, :actual_len]
+                        mb_attention_mask = mb_attention_mask[:, :actual_len]
+                        mb_token_type     = mb_token_type[:, :actual_len]
+                        mb_agent_id       = mb_agent_id[:, :actual_len]
+
                     logits, values = agent.evaluate(mb_input_ids, mb_attention_mask)
                     ref_logits = agent.evaluate_ref(mb_input_ids, mb_attention_mask)
                     agent_idx = self.agent_index[agent_id]

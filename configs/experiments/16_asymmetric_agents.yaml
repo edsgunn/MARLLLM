@@ -1,0 +1,37 @@
+name: asymmetric_agents
+description: >
+  Asymmetric pair: agent_0 = GPT-2 medium (345M), agent_1 = Qwen2.5-1.5B.
+  Tests whether CCSM enables negotiation across models with very different
+  sizes, architectures, and pre-training distributions. The weaker agent
+  must learn to signal effectively despite its limited capacity, while the
+  stronger agent must adapt to a less fluent partner.
+script: train_negotiation
+
+slurm:
+  time: "14:00:00"    # speed bounded by larger agent; 14 h budgeted
+  nodes: 1
+  gpus_per_node: 2    # agent_0 → cuda:0, agent_1 → cuda:1
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+# Separate models for each agent
+model_0: gpt2-medium
+model_1: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/16_asymmetric_agents
+prompt_0: "You are Agent A negotiating to maximise your score. Be direct and concise."
+prompt_1: "You are Agent B negotiating to maximise your score. Be direct and concise."

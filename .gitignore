@@ -55,6 +55,7 @@ core
 # SLURM
 slurm_*.log
 *.slurm.out
+slurm_logs/
 
 # Secrets
 .env

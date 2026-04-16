@@ -1,0 +1,31 @@
+name: qwen_3b
+description: >
+  Qwen2.5-3B (3B). Mid-point in the Qwen scaling series.
+  Tests whether 2× model capacity produces meaningfully better
+  negotiation strategies than 1.5B at comparable compute.
+script: train_negotiation
+
+slurm:
+  time: "20:00:00"    # ~9-12 h actual; 20 h budgeted
+  nodes: 1
+  gpus_per_node: 2    # 3B × 2 agents ≈ 12 GB bfloat16 + opt; fits 2 × A100 40 GB
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-3B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/04_qwen_3b

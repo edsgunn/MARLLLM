@@ -1,0 +1,32 @@
+name: long_dialogue
+description: >
+  Qwen2.5-1.5B with 20 dialogue turns per episode (2× baseline).
+  Tests whether agents develop richer negotiation strategies when given
+  more communication rounds. Longer episodes also produce longer
+  trajectories, increasing GPU memory pressure — hence gradient_checkpointing.
+script: train_negotiation
+
+slurm:
+  time: "16:00:00"    # longer episodes → more time per iter; 16 h budgeted
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 20
+token_budget: 64
+max_episode_tokens: 2048   # doubled to accommodate longer episodes
+grad_accum: 8              # larger effective batch to compensate for longer sequences
+gradient_checkpointing: true
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/11_long_dialogue

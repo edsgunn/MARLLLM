@@ -1,0 +1,32 @@
+name: qwen_7b_lora_r64
+description: >
+  Qwen2.5-7B with LoRA r=64 (4× the rank of exp 05). Higher-rank adapters
+  can represent richer fine-tuning directions. Compare against r=16 to see
+  whether the extra parameter budget pays off on the negotiation task.
+script: train_negotiation
+
+slurm:
+  time: "24:00:00"    # slightly slower than r=16 due to larger adapter; 24 h budgeted
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-7B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 8
+gradient_checkpointing: true
+lora_r: 64
+lora_alpha: 128
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/06_qwen_7b_lora_r64

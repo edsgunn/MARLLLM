@@ -1,0 +1,31 @@
+name: qwen_0.5b
+description: >
+  Qwen2.5-0.5B (500M). Smallest "modern" instruction-capable model.
+  Fast iteration for hyperparameter search; establishes the lower end
+  of the Qwen scaling curve for this task.
+script: train_negotiation
+
+slurm:
+  time: "08:00:00"    # ~3-4 h actual; 8 h budgeted
+  nodes: 1
+  gpus_per_node: 1    # 0.5B × 2 agents ≈ 2 GB bfloat16; trivially fits 1 GPU
+  cpus_per_gpu: 8
+  mem: "40G"
+  partition: gpu
+
+model: Qwen/Qwen2.5-0.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/02_qwen_0.5b
