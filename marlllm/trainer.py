@@ -17,6 +17,7 @@ Key design notes:
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import logging
@@ -66,6 +67,7 @@ class Trainer:
         self.optimizer = AdamW(all_params, lr=config.lr)
 
         self._start_time = time.time()
+        self._rng_counter = config.seed  # advances per episode for distinct env scenarios
         self._setup_output_dir()
         self._logger = self._setup_logging()
         self._metrics_path = Path(config.output_dir) / "metrics.jsonl"
@@ -82,13 +84,13 @@ class Trainer:
         self._logger.info("Output directory: %s", self.config.output_dir)
 
         for iteration in range(start_iteration, self.config.num_iterations + 1):
-            # 1. Collect episodes
+            # 1. Collect episodes — all N episodes run simultaneously so every
+            # agent turn is a single batched forward pass instead of N serial ones.
             episode_results: list[str] = []
             episode_correct_counts: list[int] = []
             trace_traj = None
             trace_info: dict = {}
-            for _ in range(self.config.episodes_per_iter):
-                traj, ep_info = self._collect_episode()
+            for traj, ep_info in self._collect_episodes_batched(self.config.episodes_per_iter):
                 self.store.store(traj)
                 if trace_traj is None:
                     trace_traj = traj
@@ -105,44 +107,70 @@ class Trainer:
                 continue
 
             pad_id = self._pad_token_id()
+            # Keep batch on CPU; micro-batches are moved to each agent's device on demand.
             batch = RolloutBatch.from_trajectories(
                 trajectories, self.agent_index, pad_id
-            ).to(self.device)
+            )
 
-            # 3. Forward pass + losses for each agent
-            _model_dtype = next(next(iter(self.agents.values()))._backbone.parameters()).dtype
-            total_loss = torch.tensor(0.0, device=self.device, dtype=_model_dtype)
+            # 3. Forward pass + losses with gradient accumulation.
+            # The batch is split into grad_accum_steps micro-batches; gradients
+            # are accumulated across micro-batches and all agents before the
+            # optimizer step.  Each agent runs on its own device so two large
+            # models never compete for the same GPU's memory.
+            grad_accum = self.config.grad_accum_steps
+            K = batch.input_ids.shape[0]
+            # Split K trajectories as evenly as possible into grad_accum buckets.
+            micro_size = max(1, (K + grad_accum - 1) // grad_accum)
+            micro_starts = list(range(0, K, micro_size))
+            num_micros = len(micro_starts)
+
+            self.optimizer.zero_grad()
+            total_loss_scalar = 0.0
             all_metrics: dict[str, float] = {}
 
-            for agent_id, agent in self.agents.items():
-                agent.train_mode()
-                logits, values = agent.evaluate(batch.input_ids, batch.attention_mask)
-                ref_logits = agent.evaluate_ref(batch.input_ids, batch.attention_mask)
-                agent_idx = self.agent_index[agent_id]
+            for micro_start in micro_starts:
+                micro_end = min(micro_start + micro_size, K)
 
-                loss_val, metrics = self.loss.compute_loss(
-                    logits=logits,
-                    values=values,
-                    input_ids=batch.input_ids,
-                    token_type_mask=batch.token_type_mask,
-                    agent_id_mask=batch.agent_id_mask,
-                    target_agent_idx=agent_idx,
-                    config=self.config,
-                    ref_logits=ref_logits,
-                )
-                total_loss = total_loss + loss_val
-                all_metrics.update({f"{agent_id}/{k}": v for k, v in metrics.items()})
+                for agent_id, agent in self.agents.items():
+                    agent.train_mode()
+                    dev = agent.device
+
+                    mb_input_ids      = batch.input_ids[micro_start:micro_end].to(dev)
+                    mb_attention_mask = batch.attention_mask[micro_start:micro_end].to(dev)
+                    mb_token_type     = batch.token_type_mask[micro_start:micro_end].to(dev)
+                    mb_agent_id       = batch.agent_id_mask[micro_start:micro_end].to(dev)
+
+                    logits, values = agent.evaluate(mb_input_ids, mb_attention_mask)
+                    ref_logits = agent.evaluate_ref(mb_input_ids, mb_attention_mask)
+                    agent_idx = self.agent_index[agent_id]
+
+                    loss_val, metrics = self.loss.compute_loss(
+                        logits=logits,
+                        values=values,
+                        input_ids=mb_input_ids,
+                        token_type_mask=mb_token_type,
+                        agent_id_mask=mb_agent_id,
+                        target_agent_idx=agent_idx,
+                        config=self.config,
+                        ref_logits=ref_logits,
+                    )
+
+                    # Scale so the sum across micro-batches equals the full-batch loss.
+                    (loss_val / num_micros).backward()
+                    total_loss_scalar += loss_val.item() / num_micros
+
+                    for k, v in metrics.items():
+                        key = f"{agent_id}/{k}"
+                        all_metrics[key] = all_metrics.get(key, 0.0) + v / num_micros
 
             # 4. Gradient update
-            self.optimizer.zero_grad()
-            total_loss.backward()
             self.optimizer.step()
 
             # 5. Clear on-policy store
             self.store.clear()
 
             # 6. Log and checkpoint
-            all_metrics["total_loss"] = total_loss.item()
+            all_metrics["total_loss"] = total_loss_scalar
             all_metrics["iteration"] = iteration
             all_metrics["wall_time"] = time.time() - self._start_time
 
@@ -281,6 +309,156 @@ class Trainer:
             agent_ids_present=list(self.agents.keys()),
         )
         return traj, episode_info
+
+    # ------------------------------------------------------------------ #
+    # Batched episode collection                                           #
+    # ------------------------------------------------------------------ #
+
+    def _collect_episodes_batched(self, n: int) -> list[tuple]:
+        """
+        Run n episodes simultaneously, batching all per-agent turns into a
+        single (n, T) forward pass instead of n serial (1, T) calls.
+
+        At each "tick" we:
+          1. Inspect every active env's current agent and observation.
+          2. Group envs by which agent should act.
+          3. Call agent.act_batch() once per agent with all their contexts —
+             one GPU call instead of n GPU calls.
+          4. Step each env with its result.
+
+        This collapses ~(n × dialogue_turns × token_budget) serial forward
+        passes into ~(dialogue_turns × token_budget) batched ones, yielding
+        much higher GPU arithmetic intensity.
+        """
+        # --- Create n independent env copies ---
+        # Deep-copy so each env has its own Python state, but share the
+        # tokenizer object (read-only, no need to duplicate vocab tables).
+        envs: list = []
+        for k in range(n):
+            env_k = copy.deepcopy(self.env)
+            if hasattr(env_k, "_tok"):
+                env_k._tok = self.env._tok  # re-share tokenizer reference
+            # Give each env a unique-but-reproducible seed so they generate
+            # distinct scenarios rather than n identical copies.
+            env_k.reset(seed=self._rng_counter)
+            self._rng_counter += 1
+            envs.append(env_k)
+
+        # Per-env bookkeeping
+        histories:     list[list[EpisodeStep]]      = [[] for _ in range(n)]
+        contexts:      list[dict[str, list[int]]]   = [{} for _ in range(n)]
+        prompt_ids:    list[dict[str, list[int]]]   = [{} for _ in range(n)]
+        ep_infos:      list[dict]                   = [{} for _ in range(n)]
+        token_counts:  list[int]                    = [0] * n
+        active:        list[bool]                   = [True] * n
+
+        for k in range(n):
+            for agent_id in self.agents:
+                pt = self.config.character_prompts.get(agent_id, "")
+                pids = self.tokeniser.encode_prompt(pt)
+                prompt_ids[k][agent_id] = pids
+                contexts[k][agent_id] = list(pids)
+
+        # --- Step all envs until every one is done ---
+        while any(active):
+            # Groups for this tick
+            act_groups:  dict[str, list[int]] = {}  # agent_id -> [env indices]
+            null_indices: list[int] = []
+
+            for k in range(n):
+                if not active[k]:
+                    continue
+                env = envs[k]
+                if not env.agents:
+                    active[k] = False
+                    continue
+
+                agent_id = env.agent_selection
+                obs, _rew, term, trunc, _info = env.last()
+
+                # Append observation to this episode's history
+                obs_ids = self.tokeniser.encode_observation(obs)
+                if obs_ids:
+                    histories[k].append(EpisodeStep(
+                        agent_id=agent_id,
+                        token_ids=obs_ids,
+                        token_type=TokenType.OBS,
+                        log_probs=[],
+                        info={},
+                    ))
+                    for ctx_id in self.agents:
+                        contexts[k][ctx_id].extend(obs_ids)
+                    token_counts[k] += len(obs_ids)
+
+                if term or trunc:
+                    # Capture final info before stepping with None
+                    for aid in env.possible_agents:
+                        if aid in env.infos:
+                            ep_infos[k] = env.infos[aid]
+                            break
+                    null_indices.append(k)
+                elif token_counts[k] >= self.config.max_episode_tokens:
+                    null_indices.append(k)
+                elif agent_id in self.agents:
+                    act_groups.setdefault(agent_id, []).append(k)
+                else:
+                    null_indices.append(k)
+
+            # Execute null steps
+            for k in null_indices:
+                envs[k].step(None)
+                if not envs[k].agents:
+                    active[k] = False
+
+            # Execute batched act() — one GPU call per agent instead of one per env
+            for agent_id, env_indices in act_groups.items():
+                agent = self.agents[agent_id]
+                agent.eval_mode()
+                n_tokens = getattr(self.env, "action_token_budget", 1)
+
+                batch_contexts = [contexts[k][agent_id] for k in env_indices]
+                with torch.no_grad():
+                    batch_ids, batch_lps = agent.act_batch(
+                        contexts=batch_contexts,
+                        n_tokens=n_tokens,
+                        temperature=self.config.temperature,
+                    )
+
+                for j, k in enumerate(env_indices):
+                    act_ids = batch_ids[j]
+                    act_lps = batch_lps[j]
+                    histories[k].append(EpisodeStep(
+                        agent_id=agent_id,
+                        token_ids=act_ids,
+                        token_type=TokenType.ACT,
+                        log_probs=act_lps,
+                        info={},
+                    ))
+                    contexts[k][agent_id].extend(act_ids)
+                    token_counts[k] += len(act_ids)
+                    envs[k].step(act_ids)
+                    if not envs[k].agents:
+                        active[k] = False
+
+        # --- Build trajectories ---
+        primary = list(self.agents.keys())[0]
+        results = []
+        for k in range(n):
+            pids = prompt_ids[k].get(primary, [])
+            if pids:
+                histories[k] = [EpisodeStep(
+                    agent_id=primary,
+                    token_ids=pids,
+                    token_type=TokenType.PAD,
+                    log_probs=[],
+                    info={},
+                )] + histories[k]
+            traj = self.tokeniser.build_trajectory(
+                episode_history=histories[k],
+                agent_ids_present=list(self.agents.keys()),
+            )
+            results.append((traj, ep_infos[k]))
+        return results
 
     # ------------------------------------------------------------------ #
     # Checkpointing                                                        #

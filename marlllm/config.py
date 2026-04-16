@@ -39,3 +39,12 @@ class TrainingConfig:
     # Output / checkpointing
     output_dir: str = "runs/default"
     checkpoint_every: int = 100  # save a checkpoint every N iterations
+
+    # Distribution / memory
+    grad_accum_steps: int = 1          # split each batch into N micro-batches, accumulate grads
+    gradient_checkpointing: bool = False  # recompute activations during backward to save VRAM
+
+    # LoRA (PEFT) — set lora_r > 0 to enable; requires `peft` package
+    lora_r: int = 0                    # LoRA rank; 0 = full fine-tuning
+    lora_alpha: int = 16               # LoRA scaling factor
+    lora_target_modules: list[str] | None = None  # None = PEFT auto-detect

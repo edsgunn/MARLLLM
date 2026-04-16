@@ -45,6 +45,7 @@ runs/
 # OS
 .DS_Store
 Thumbs.db
+core
 
 # IDEs
 .idea/
