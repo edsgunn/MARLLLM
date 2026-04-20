@@ -11,7 +11,7 @@ slurm:
   gpus_per_node: 2    # agent_0 → cuda:0, agent_1 → cuda:1
   cpus_per_gpu: 8
   mem: "80G"
-  partition: gpu
+  partition: workq
 
 model: Qwen/Qwen2.5-1.5B
 dtype: bfloat16

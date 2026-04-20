@@ -13,7 +13,7 @@ slurm:
   gpus_per_node: 2
   cpus_per_gpu: 8
   mem: "80G"
-  partition: gpu
+  partition: workq
 
 model: Qwen/Qwen2.5-1.5B
 dtype: bfloat16

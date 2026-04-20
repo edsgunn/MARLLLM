@@ -11,7 +11,7 @@ slurm:
   gpus_per_node: 2    # 3B × 2 agents ≈ 12 GB bfloat16 + opt; fits 2 × A100 40 GB
   cpus_per_gpu: 8
   mem: "80G"
-  partition: gpu
+  partition: workq
 
 model: Qwen/Qwen2.5-3B
 dtype: bfloat16

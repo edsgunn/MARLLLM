@@ -11,7 +11,7 @@ slurm:
   gpus_per_node: 2
   cpus_per_gpu: 8
   mem: "80G"
-  partition: gpu
+  partition: workq
 
 model: meta-llama/Llama-3.2-3B
 dtype: bfloat16
