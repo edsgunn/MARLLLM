@@ -227,7 +227,7 @@ else
     exit 1
 fi"""
         python_cmd = (
-            f'uv run python "{project_dir}/{script}.py" --config "{config_path.resolve()}"'
+            f'uv run --no-sync python "{project_dir}/{script}.py" --config "{config_path.resolve()}"'
         )
 
     # ── Output-dir prefix remapping ───────────────────────────────────────
@@ -261,7 +261,7 @@ echo "Job ID       : $SLURM_JOB_ID"
 echo "Job name     : $SLURM_JOB_NAME"
 echo "Node         : $(hostname -s)"
 echo "GPUs         : $SLURM_GPUS"
-echo "CPUs/task    : $SLURM_CPUS_PER_TASK"
+echo "CPUs/GPU     : ${{SLURM_CPUS_PER_GPU:-N/A}}"
 echo "Working dir  : {project_dir}"
 echo "Config file  : {config_path.resolve()}"
 echo "================================================================"
