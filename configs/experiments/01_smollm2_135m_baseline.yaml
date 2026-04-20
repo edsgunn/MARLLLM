@@ -1,0 +1,37 @@
+name: smollm2_135m_baseline
+description: >
+  SmolLM2-135M baseline. Smallest tractable modern model to verify CCSM +
+  negotiation pipeline works end-to-end. Use as a sanity check: if loss
+  doesn't decrease here something is fundamentally wrong.
+
+  Replaces the original GPT-2 medium baseline: GPT-2 has a hard 1024
+  position limit, which the combined prompt + 10-turn × 64-token dialogue
+  + observation tokens routinely exceeds, causing an out-of-bounds wpe
+  lookup.  SmolLM2-135M supports 2048 positions, is Apache 2.0 (no
+  gating), and trains faster on a single GH200.
+script: train_negotiation
+
+slurm:
+  time: "06:00:00"    # ~1-2 h actual on GH200; 6 h budgeted
+  nodes: 1
+  gpus_per_node: 1    # both agents fit on 1 GPU at this size
+  cpus_per_gpu: 72
+  mem: "40G"
+  partition: workq
+
+model: HuggingFaceTB/SmolLM2-135M
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 512
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/01_smollm2_135m_baseline

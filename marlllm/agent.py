@@ -146,6 +146,7 @@ class IndependentAgent(Agent):
         lora_alpha: int = 16,
         lora_target_modules: list[str] | None = None,
         compile_model: bool = False,
+        attn_implementation: str | None = None,
     ) -> None:
         """
         Args:
@@ -181,6 +182,8 @@ class IndependentAgent(Agent):
             load_kwargs["torch_dtype"] = torch_dtype
         if device_map is not None:
             load_kwargs["device_map"] = device_map
+        if attn_implementation is not None:
+            load_kwargs["attn_implementation"] = attn_implementation
 
         self._backbone = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, **load_kwargs
@@ -282,6 +285,8 @@ class IndependentAgent(Agent):
         temperature: float = 1.0,
     ) -> tuple[list[int], list[float]]:
         """Sample n_tokens tokens, reusing KV cache across steps."""
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
         sampled_ids: list[int] = []
         sampled_lps: list[float] = []
 
@@ -337,6 +342,8 @@ class IndependentAgent(Agent):
             (list[list[int]], list[list[float]]) — token IDs and log-probs
             for each context, in the same order as the input.
         """
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
         B = len(contexts)
         if B == 1:
             # Avoid padding overhead for a single context.
@@ -404,6 +411,8 @@ class IndependentAgent(Agent):
         The LM backbone runs with output_hidden_states=True.
         Hidden states are detached before the value head (Option B).
         """
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
         out = self._backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -427,5 +436,7 @@ class IndependentAgent(Agent):
         """
         if self._ref_backbone is None:
             return None
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
         out = self._ref_backbone(input_ids=input_ids, attention_mask=attention_mask)
         return out.logits

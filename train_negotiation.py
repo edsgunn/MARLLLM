@@ -94,6 +94,12 @@ def parse_args() -> argparse.Namespace:
         default="You are Agent B, negotiating to maximise your score.",
         help="Character prompt for agent_1",
     )
+    p.add_argument(
+        "--attn-impl", default=None,
+        help="attn_implementation passed to from_pretrained for both agents. "
+             "Set to 'eager' to bypass the new SDPA path on nightly PyTorch "
+             "(required for GPT-2 and other older architectures).",
+    )
 
     # Apply YAML config as defaults (CLI args still override).
     if pre_args.config:
@@ -152,6 +158,7 @@ def main() -> None:
         lora_alpha=args.lora_alpha,
         lora_target_modules=lora_modules,
         compile_model=args.compile,
+        attn_implementation=args.attn_impl,
     )
 
     print(f"Loading agent_1: {model_1}  →  {device_1}")
@@ -168,6 +175,7 @@ def main() -> None:
         lora_alpha=args.lora_alpha,
         lora_target_modules=lora_modules,
         compile_model=args.compile,
+        attn_implementation=args.attn_impl,
     )
 
     print(f"Building DealOrNoDealEnv (dialogue_turns={args.dialogue_turns}, token_budget={args.token_budget})")

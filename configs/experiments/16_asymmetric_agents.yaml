@@ -1,22 +1,28 @@
 name: asymmetric_agents
 description: >
-  Asymmetric pair: agent_0 = GPT-2 medium (345M), agent_1 = Qwen2.5-1.5B.
+  Asymmetric pair: agent_0 = SmolLM2-135M, agent_1 = Qwen2.5-1.5B.
   Tests whether CCSM enables negotiation across models with very different
-  sizes, architectures, and pre-training distributions. The weaker agent
-  must learn to signal effectively despite its limited capacity, while the
-  stronger agent must adapt to a less fluent partner.
+  sizes, architectures, and pre-training distributions.  The weaker agent
+  (~10× fewer params) must learn to signal effectively despite its limited
+  capacity, while the stronger agent must adapt to a less fluent partner.
+
+  Previously used GPT-2 medium for agent_0 but GPT-2's 1024-position limit
+  is routinely blown past by the combined prompt + 10-turn dialogue +
+  observations, causing out-of-bounds wpe lookups.  SmolLM2-135M (Apache
+  2.0, 2048 positions) is the closest modern equivalent and avoids the
+  bug entirely.
 script: train_negotiation
 
 slurm:
   time: "14:00:00"    # speed bounded by larger agent; 14 h budgeted
   nodes: 1
-  gpus_per_node: 2    # agent_0 → cuda:0, agent_1 → cuda:1
-  cpus_per_gpu: 8
+  gpus_per_node: 2    # agent_0 -> cuda:0, agent_1 -> cuda:1
+  cpus_per_gpu: 72
   mem: "80G"
-  partition: gpu
+  partition: workq
 
 # Separate models for each agent
-model_0: gpt2-medium
+model_0: HuggingFaceTB/SmolLM2-135M
 model_1: Qwen/Qwen2.5-1.5B
 dtype: bfloat16
 iters: 500
