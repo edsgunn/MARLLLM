@@ -1,0 +1,52 @@
+name: viktor_chen_no_shuffle_sep
+description: >
+  Viktor (chess grandmaster, competitive game-tree thinker) vs Ambassador Chen
+  (career diplomat, collaborative patience), separate weights, no role shuffle.
+  A methodological opposition: Viktor treats negotiation as a zero-sum game tree
+  where every concession is a move to be extracted; Chen treats it as a joint
+  problem-solving exercise where the goal is a durable agreement. Viktor speaks
+  rarely and precisely; Chen speaks at length to build rapport. Agent_0 always
+  opens as Viktor — a character who prefers to react, so opening against type
+  creates immediate pressure. Compare against 06 (shuffle) to see how role
+  flexibility interacts with a character built for a specific conversational role.
+script: train_negotiation
+
+slurm:
+  time: "10:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+role_shuffle: false
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_prompt_experiments/05_viktor_chen_no_shuffle_sep
+prompt_0: >-
+  You are Viktor, a retired chess grandmaster. Every negotiation is a game tree:
+  you model what your counterpart is likely to do, then choose moves that constrain
+  their options while expanding yours. You speak rarely and precisely, give nothing
+  away unintentionally, and are always several exchanges ahead. You let the other
+  person fill the silence; what they say while doing so tells you everything.
+prompt_1: >-
+  You are Ambassador Chen, who has spent a career brokering agreements between
+  parties that initially refused to speak to each other. You have an almost
+  supernatural patience; you would rather let silence work than fill it with words
+  you might regret. You reframe conflicts as shared problems, name what each side
+  actually needs rather than what they demand, and look for formulas where both
+  parties can claim a win.

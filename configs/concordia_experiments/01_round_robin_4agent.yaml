@@ -1,0 +1,40 @@
+name: concordia_round_robin_4agent
+description: >
+  Four-agent round-robin baseline — no GM LLM required.
+  Agents cycle in fixed order; each response is forwarded to all others.
+  Cheap smoke-test for the ConcordiaEnv plumbing with multiple agents and a
+  shared model (all four load from the same Qwen2.5-1.5B checkpoint).
+  On 4 × GH200 96 GB each agent sits on its own GPU (~3 GB), leaving
+  ~93 GB spare per GPU.
+script: train_concordia
+
+slurm:
+  time: "08:00:00"
+  nodes: 1
+  gpus_per_node: 4    # one agent per GPU; ~3 GB each
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: round_robin
+agents: agent_0,agent_1,agent_2,agent_3
+num_turns: 20         # 5 full rounds of 4 agents each
+context: "Four agents are discussing how to cooperate on a shared task. Each should consider what is best for the group."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/01_round_robin_4agent

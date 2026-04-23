@@ -1,0 +1,38 @@
+name: shuffle_lr1e5_kl01
+description: >
+  Role shuffle ON: Qwen2.5-1.5B, separate weights, lr=1e-5, kl_coef=0.1.
+  Counterpart to 05_no_shuffle_lr1e5_kl01. Tests whether role symmetry and KL
+  anchoring together are sufficient to produce diverse, goal-directed dialogue.
+  This is expected to be one of the strongest separate-weights configurations:
+  the KL penalty keeps language quality up while the low LR and role shuffle
+  both combat instability and collapse.
+script: train_negotiation
+
+slurm:
+  time: "10:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+role_shuffle: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_role_experiments/06_shuffle_lr1e5_kl01
+prompt_0: "You are Agent A, negotiating to maximise your score."
+prompt_1: "You are Agent B, negotiating to maximise your score."

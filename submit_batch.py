@@ -204,13 +204,10 @@ def make_job_script(
         module_block = "# (no modules loaded)"
 
     # ── HF_HOME for model cache ───────────────────────────────────────────
-    # Default: use $PROJECTDIR/hf_cache if $PROJECTDIR is set, else $HOME/.cache/huggingface.
-    if hf_home:
-        hf_home_line = f'export HF_HOME="{hf_home}"'
-    else:
-        hf_home_line = (
-            'export HF_HOME="${PROJECTDIR:-$HOME}/hf_cache"'
-        )
+    # Default: project storage on Isambard AI (/lus/lfs1aip2 is not quota-limited).
+    # Override with --hf-home if running elsewhere.
+    _default_hf_home = "/lus/lfs1aip2/projects/a5l/egunn/hf_cache"
+    hf_home_line = f'export HF_HOME="{hf_home or _default_hf_home}"'
 
     # ── Venv / uv activation ──────────────────────────────────────────────
     if venv_activate:
@@ -391,9 +388,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--hf-home", default=None, metavar="PATH",
         help="Path for the HuggingFace model cache (HF_HOME).  "
-             "Defaults to $PROJECTDIR/hf_cache, falling back to "
-             "$HOME/hf_cache.  Point this at $PROJECTDIR or $SCRATCHDIR "
-             "to avoid filling your $HOME quota with large model weights.",
+             "Defaults to /lus/lfs1aip2/projects/a5l/egunn/hf_cache "
+             "(project storage, not quota-limited).  Override only if "
+             "running on a different system.",
     )
     p.add_argument(
         "--module", action="append", dest="modules", default=[],

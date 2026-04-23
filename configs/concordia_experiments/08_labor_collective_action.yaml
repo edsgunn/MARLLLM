@@ -1,0 +1,50 @@
+name: concordia_labor_collective_action
+description: >
+  Concordia Contest Scenario 3: Labor Collective Action.
+  Four workers decide each "day" whether to strike or work.
+  Strike success requires sufficient participation (threshold dynamics);
+  individual workers face a prisoner's-dilemma temptation to defect.
+  Tests whether CCSM agents learn reciprocity, reputation tracking, and
+  conditional cooperation across a multi-day horizon.
+
+  GPU layout (4 × GH200 96 GB):
+    cuda:0  worker_0  (1.5B, ~3 GB)
+    cuda:1  worker_1  (1.5B, ~3 GB)
+    cuda:2  worker_2  (1.5B, ~3 GB)
+    cuda:3  worker_3  (1.5B, ~3 GB) + GM (7B, ~14 GB) co-located
+  Total per GPU (cuda:3): ~17 GB of 96 GB — comfortable.
+script: train_concordia
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: labor
+agents: worker_0,worker_1,worker_2,worker_3
+num_turns: 7           # 7 days of strike/work decisions
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:3"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are a factory worker deciding whether to participate in collective action. Consider both your individual wage and solidarity with your colleagues."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 6144
+max_env_turns: 300
+
+iters: 500
+rollouts: 4            # 4 × 4-agent episodes per iteration
+lr: 3.0e-5
+grad_accum: 8
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/08_labor_collective_action

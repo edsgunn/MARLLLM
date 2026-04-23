@@ -1,0 +1,39 @@
+name: shared_no_shuffle_lr1e5_kl01
+description: >
+  Shared weights: Qwen2.5-1.5B, single backbone used by both agents, lr=1e-5,
+  kl_coef=0.1, no role shuffle. With shared weights, gradients from both
+  agents' trajectories update a single model, creating a policy that must
+  perform well in both first-mover and responder roles simultaneously. Without
+  role shuffle the first-mover pressure is entirely on the agent_0 side of
+  training, producing an asymmetric gradient signal on a symmetric model.
+  Baseline for the shared-weights block; compare against 10_shared_shuffle.
+script: train_negotiation
+
+slurm:
+  time: "08:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 72
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+role_shuffle: false
+shared_weights: true
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_role_experiments/09_shared_no_shuffle_lr1e5_kl01
+prompt_0: "You are Agent A, negotiating to maximise your score."
+prompt_1: "You are Agent B, negotiating to maximise your score."

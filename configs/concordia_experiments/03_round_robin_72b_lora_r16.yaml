@@ -1,0 +1,50 @@
+name: concordia_round_robin_72b_lora_r16
+description: >
+  Two-agent round-robin with Qwen2.5-72B + LoRA r=16.  This model cannot
+  run on a single GH200 (72B bfloat16 ≈ 144 GB > 96 GB per GPU).
+  device_map=auto shards each model across all 4 GPUs.  Since both agents
+  load into the same process, accelerate distributes agent_0 first (using
+  ~144 GB of the 384 GB pool) then agent_1 (another ~144 GB), leaving ~96 GB
+  for activations and LoRA optimizer state.  Backbone weights are frozen;
+  only the LoRA adapters (~100 MB per agent) are updated.
+
+  Memory budget (bfloat16, 4 × GH200 96 GB = 384 GB total):
+    agent_0 backbone  ≈ 144 GB
+    agent_1 backbone  ≈ 144 GB
+    LoRA adapters × 2 ≈   0.2 GB
+    Activations + opt ≈  30–50 GB  (gradient_checkpointing halves peak)
+    Headroom          ≈  46 GB ✓
+script: train_concordia
+
+slurm:
+  time: "24:00:00"
+  nodes: 1
+  gpus_per_node: 4    # required: model is too large for fewer GPUs
+  cpus_per_gpu: 72    # ARM Grace cores — needed for fast CPU offload during sharding
+  mem: "320G"
+  partition: workq
+
+scenario: round_robin
+agents: agent_0,agent_1
+num_turns: 10
+context: "Two highly capable agents are negotiating the allocation of shared resources."
+
+model: Qwen/Qwen2.5-72B
+device_map: auto      # essential: shards model across all 4 GPUs
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 100
+
+iters: 300
+rollouts: 2           # fewer rollouts: memory is tight, batches are large
+lr: 5.0e-5
+grad_accum: 16        # compensate for small rollout count
+gradient_checkpointing: true   # critical for fitting activations
+lora_r: 16
+lora_alpha: 32
+kl_coef: 0.0
+seed: 42
+log_every: 5
+checkpoint_every: 25
+output_dir: runs/concordia_experiments/03_round_robin_72b_lora_r16

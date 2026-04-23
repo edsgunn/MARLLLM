@@ -1,0 +1,38 @@
+name: concordia_round_robin
+description: >
+  Round-robin Concordia baseline — no GM LLM required.
+  Two agents alternate turns in a free-form discussion.
+  Good for validating the ConcordiaEnv plumbing before
+  adding a GameMaster model.
+script: train_concordia
+
+slurm:
+  time: "08:00:00"
+  nodes: 1
+  gpus_per_node: 2    # agent_0 → cuda:0, agent_1 → cuda:1
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: round_robin
+agents: agent_0,agent_1
+num_turns: 10
+context: "You are participating in a multi-agent negotiation discussion."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 2048
+max_env_turns: 100
+
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/concordia_round_robin

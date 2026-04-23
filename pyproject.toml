@@ -15,6 +15,8 @@ dependencies = [
     "pettingzoo>=1.24.0",
     "peft>=0.10.0",
     "pyyaml>=6.0",
+    "sentence-transformers>=5.4.1",
+    "gdm-concordia>=2.1.0",
 ]
 
 [project.optional-dependencies]

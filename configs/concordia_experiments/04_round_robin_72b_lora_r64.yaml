@@ -1,0 +1,44 @@
+name: concordia_round_robin_72b_lora_r64
+description: >
+  Two-agent round-robin with Qwen2.5-72B + LoRA r=64.  Higher-rank adapters
+  can represent richer fine-tuning directions at the cost of ~4× more adapter
+  parameters (~400 MB per agent vs ~100 MB at r=16).  Since adapter params
+  are tiny compared to the 144 GB frozen backbone this barely affects memory.
+  Compare against exp 03 to assess whether the extra expressivity helps on
+  long-horizon multi-agent dialogue tasks.
+
+  Memory budget: same as exp 03 (~288 GB backbone + ~0.8 GB adapters + acts).
+script: train_concordia
+
+slurm:
+  time: "24:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 72
+  mem: "320G"
+  partition: workq
+
+scenario: round_robin
+agents: agent_0,agent_1
+num_turns: 10
+context: "Two highly capable agents are negotiating the allocation of shared resources."
+
+model: Qwen/Qwen2.5-72B
+device_map: auto
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 100
+
+iters: 300
+rollouts: 2
+lr: 1.0e-5
+grad_accum: 16
+gradient_checkpointing: true
+lora_r: 64
+lora_alpha: 128
+kl_coef: 0.0
+seed: 42
+log_every: 5
+checkpoint_every: 25
+output_dir: runs/concordia_experiments/04_round_robin_72b_lora_r64

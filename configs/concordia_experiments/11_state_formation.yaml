@@ -1,0 +1,53 @@
+name: concordia_state_formation
+description: >
+  Concordia Contest Scenario 5: State Formation.
+  Four village elders face an external raider threat.
+  Forming an alliance costs resources but provides collective security.
+  Free-riders benefit from others' alliance contributions without paying;
+  this creates a classic public-goods game with asymmetric positions.
+  Tests long-horizon strategic reasoning, alliance negotiation, and
+  enforcement/sanctioning of defectors.
+
+  Most complex of the five contest scenarios: episodes span multiple phases
+  (threat assessment → negotiation → alliance decision → conflict resolution)
+  requiring agents to maintain coherent long-term strategies.
+
+  GPU layout (4 × GH200):
+    cuda:0  elder_0  (1.5B)
+    cuda:1  elder_1  (1.5B)
+    cuda:2  elder_2  (1.5B) + GM (7B, ~17 GB)
+    cuda:3  elder_3  (1.5B)
+script: train_concordia
+
+slurm:
+  time: "20:00:00"    # longer episodes require more wall time
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: state_formation
+agents: elder_0,elder_1,elder_2,elder_3
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:2"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are an elder representing your village. External raiders threaten the region. You must decide whether to invest resources in a collective defence alliance, knowing others may free-ride on your contribution."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 8192
+max_env_turns: 400
+
+iters: 500
+rollouts: 2            # long episodes: fewer per iteration
+lr: 3.0e-5
+grad_accum: 16
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/11_state_formation

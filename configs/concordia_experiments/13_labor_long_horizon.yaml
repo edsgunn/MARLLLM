@@ -1,0 +1,46 @@
+name: concordia_labor_long_horizon
+description: >
+  Labor Collective Action with a 14-day horizon (2× exp 08).
+  Over 14 days workers accumulate reputation and can observe past strike
+  outcomes, enabling richer reciprocity strategies (tit-for-tat, grim
+  trigger, etc.).  Tests whether CCSM can learn temporally extended
+  cooperation strategies rather than myopic per-turn optimisation.
+  Longer episodes also stress-test the context window: 14 days × ~200 tokens
+  per turn × 4 agents ≈ 11 000 tokens per episode.
+
+  Rollout count halved relative to exp 08 to keep iteration wall time stable.
+script: train_concordia
+
+slurm:
+  time: "20:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: labor
+agents: worker_0,worker_1,worker_2,worker_3
+num_turns: 14          # double the default 7-day horizon
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:3"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are a factory worker deciding whether to participate in collective action. Consider both your individual wage and solidarity with your colleagues."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 12288
+max_env_turns: 600
+
+iters: 500
+rollouts: 2
+lr: 3.0e-5
+grad_accum: 16
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/13_labor_long_horizon

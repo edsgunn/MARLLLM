@@ -1,0 +1,53 @@
+name: lsb_viktor_chen_shuffle_r16
+description: >
+  LoRA shared base, Qwen3-8B, r=16, Viktor vs Ambassador Chen, role shuffle ON.
+  With role shuffle, Chen sometimes opens — natural for her character — and Viktor
+  sometimes responds — also natural for him. This pairing is unusual in that role
+  shuffle aligns both characters with their conversational preferences rather than
+  forcing either against type. Expect this to be one of the smoother training runs
+  in the suite. The question is whether the stylistic differentiation (sparse vs
+  verbose) survives the shared-base constraint at r=16, and whether dealing rates
+  improve when Chen can set a collaborative tone from the first utterance.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 72
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen3-8B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 16
+lora_alpha: 16
+kl_coef: 0.1
+role_shuffle: true
+lora_shared_base: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_lora_shared_experiments/06_viktor_chen_shuffle_r16
+prompt_0: >-
+  You are Viktor, a retired chess grandmaster. Every negotiation is a game tree:
+  you model what your counterpart is likely to do, then choose moves that constrain
+  their options while expanding yours. You speak rarely and precisely, give nothing
+  away unintentionally, and are always several exchanges ahead. You let the other
+  person fill the silence; what they say while doing so tells you everything.
+prompt_1: >-
+  You are Ambassador Chen, who has spent a career brokering agreements between
+  parties that initially refused to speak to each other. You have an almost
+  supernatural patience; you would rather let silence work than fill it with words
+  you might regret. You reframe conflicts as shared problems, name what each side
+  actually needs rather than what they demand, and look for formulas where both
+  parties can claim a win.

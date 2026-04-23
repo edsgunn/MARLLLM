@@ -1,0 +1,59 @@
+name: concordia_haggling_72b_lora
+description: >
+  Haggling scenario with Qwen2.5-72B + LoRA r=16 as the trained merchants
+  and Qwen2.5-7B as the Concordia GameMaster.
+
+  This is the flagship large-model Concordia experiment.  The 72B backbone
+  cannot run on a single GH200 (144 GB > 96 GB per GPU), so device_map=auto
+  shards each merchant model across the 4 available GPUs.  The 7B GM is
+  small enough to co-locate on GPU 3 alongside the tail shards of agent_1.
+
+  Memory budget (bfloat16, 4 × GH200 96 GB = 384 GB):
+    merchant_0 backbone ≈ 144 GB  (spread via device_map=auto)
+    merchant_1 backbone ≈ 144 GB  (spread via device_map=auto)
+    GM Qwen2.5-7B       ≈  14 GB  (tail of cuda:3 shard)
+    LoRA adapters × 2   ≈   0.2 GB
+    Activations + opt   ≈  30–50 GB (gradient_checkpointing enabled)
+    Headroom            ≈  32 GB ✓
+
+  Why this matters: a 72B model has far richer priors about pricing,
+  negotiation strategies, and social norms than a 1.5B model.  LoRA
+  allows targeted adaptation of these priors toward reward maximisation
+  without destroying the pre-trained knowledge.
+script: train_concordia
+
+slurm:
+  time: "24:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 72    # ARM Grace — fast CPU for shard coordination
+  mem: "320G"
+  partition: workq
+
+scenario: haggling
+agents: merchant_0,merchant_1
+num_turns: 5
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:3"   # co-located with tail shards; 7B fits in remaining memory
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are an experienced merchant negotiating the best possible price. You understand the value of goods and how to read your counterpart's position."
+
+model: Qwen/Qwen2.5-72B
+device_map: auto
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 200
+rollouts: 2
+lr: 5.0e-5
+grad_accum: 16
+gradient_checkpointing: true
+lora_r: 16
+lora_alpha: 32
+kl_coef: 0.0
+seed: 42
+log_every: 5
+checkpoint_every: 20
+output_dir: runs/concordia_experiments/14_haggling_72b_lora

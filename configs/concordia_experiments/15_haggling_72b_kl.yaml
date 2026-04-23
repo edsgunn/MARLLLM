@@ -1,0 +1,57 @@
+name: concordia_haggling_72b_kl
+description: >
+  Haggling scenario with Qwen2.5-72B + LoRA r=16 + KL regularisation.
+  Builds on exp 14 by adding kl_coef=0.05 to prevent the 72B policy from
+  drifting into degenerate negotiation strategies (e.g. repetitive offers,
+  incoherent counter-proposals).
+
+  At 72B the pre-trained prior is very strong — a small KL coefficient
+  should be sufficient to maintain language quality while still allowing
+  meaningful strategy adaptation.  Use a lower lr than exp 14 to complement
+  the KL regularisation.
+
+  Memory budget: same as exp 14 plus ~144 GB for the reference backbone
+  copies → total ≈ 432 GB — just over the 384 GB limit.
+
+  SOLUTION: keep_ref_model uses the same frozen backbone weights as the
+  trained model (reference = copy of weights before update), so no extra
+  144 GB load is needed.  The framework freezes a copy of the LoRA weights
+  before each update step for the KL computation, not the full backbone.
+  Effective additional memory: ~0.2 GB (LoRA ref copy).
+script: train_concordia
+
+slurm:
+  time: "24:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 72
+  mem: "320G"
+  partition: workq
+
+scenario: haggling
+agents: merchant_0,merchant_1
+num_turns: 5
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:3"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are an experienced merchant negotiating the best possible price. You understand the value of goods and how to read your counterpart's position."
+
+model: Qwen/Qwen2.5-72B
+device_map: auto
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 200
+rollouts: 2
+lr: 2.0e-5            # conservative lr to complement KL regularisation
+grad_accum: 16
+gradient_checkpointing: true
+lora_r: 16
+lora_alpha: 32
+kl_coef: 0.05
+seed: 42
+log_every: 5
+checkpoint_every: 20
+output_dir: runs/concordia_experiments/15_haggling_72b_kl

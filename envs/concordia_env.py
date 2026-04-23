@@ -45,6 +45,7 @@ import queue
 import threading
 from typing import Any, Callable
 
+from concordia.typing import entity as entity_lib
 from pettingzoo import AECEnv
 from transformers import PreTrainedTokenizerBase
 
@@ -75,7 +76,7 @@ class _SimulationStopped(BaseException):
 # ---------------------------------------------------------------------------
 
 
-class StubAgent:
+class StubAgent(entity_lib.Entity):
     """Drop-in replacement for a Concordia EntityAgent.
 
     Replace the LLM-backed player agents in a Concordia simulation with
@@ -97,6 +98,10 @@ class StubAgent:
         # Connected by ConcordiaEnv before starting each episode
         self._obs_q: queue.Queue = None  # type: ignore[assignment]
         self._act_q: queue.Queue = None  # type: ignore[assignment]
+
+    @property
+    def name(self) -> str:
+        return self.agent_name
 
     # ---- called by ConcordiaEnv, not by user code -------------------------
 

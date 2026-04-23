@@ -16,6 +16,26 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase
 
 
+def _fix_cpu_buffers(model: nn.Module) -> None:
+    """Move CPU-resident buffers to the same device as the module's parameters.
+
+    accelerate's device_map="auto" can leave non-parameter buffers (e.g. the
+    RoPE inv_freq tensor) on CPU even when the surrounding parameters are on GPU,
+    causing a Triton "cpu tensor?" error at runtime.
+    """
+    for module in model.modules():
+        # Find what device this module's own parameters live on (if any).
+        param_devices = {p.device for p in module.parameters(recurse=False)}
+        gpu_devices = [d for d in param_devices if d.type != "cpu"]
+        target = gpu_devices[0] if gpu_devices else None
+
+        for buf_name, buf in list(module.named_buffers(recurse=False)):
+            if buf is not None and buf.device.type == "cpu":
+                dest = target or (torch.device("cuda:0") if torch.cuda.is_available() else None)
+                if dest is not None:
+                    setattr(module, buf_name, buf.to(dest))
+
+
 class Agent(ABC):
     """
     Interface that the Trainer and Loss see.
@@ -190,6 +210,11 @@ class IndependentAgent(Agent):
         )
         if device_map is None:
             self._backbone = self._backbone.to(self.device)
+        elif device_map == "auto":
+            # accelerate's device_map="auto" can leave non-parameter buffers (e.g.
+            # RoPE inv_freq) on CPU. Move each module's CPU buffers to whichever
+            # GPU the module's parameters live on (fall back to cuda:0).
+            _fix_cpu_buffers(self._backbone)
 
         if gradient_checkpointing:
             self._backbone.gradient_checkpointing_enable(
@@ -234,6 +259,8 @@ class IndependentAgent(Agent):
             )
             if device_map is None:
                 self._ref_backbone = self._ref_backbone.to(self.device)
+            elif device_map == "auto":
+                _fix_cpu_buffers(self._ref_backbone)
             for p in self._ref_backbone.parameters():
                 p.requires_grad_(False)
             self._ref_backbone.eval()
@@ -439,4 +466,240 @@ class IndependentAgent(Agent):
         if self.device.type == "cuda":
             torch.cuda.set_device(self.device)
         out = self._ref_backbone(input_ids=input_ids, attention_mask=attention_mask)
+        return out.logits
+
+
+# ============================================================================ #
+# Shared-base LoRA agent                                                        #
+# ============================================================================ #
+
+class LoRASharedBaseAgent(Agent):
+    """
+    Agent that shares a single PeftModel backbone with one other agent, but
+    owns a private LoRA adapter within that backbone.
+
+    Architecture
+    ------------
+    One AutoModelForCausalLM is loaded once (the 'base').  Two independent
+    LoRA adapter sets ('agent_0', 'agent_1') are added to it via PEFT's
+    multi-adapter API.  Each LoRASharedBaseAgent:
+      - activates its own adapter before every forward pass via set_adapter()
+      - owns an independent ValueHead
+      - exposes only its adapter parameters + value-head parameters via
+        parameters(), so the optimiser never sees the frozen base weights or
+        the other agent's adapter
+
+    Memory benefit
+    --------------
+    One 8 B bfloat16 model ≈ 16 GB.  Two independent 8 B models ≈ 32 GB.
+    With this class: 16 GB base + two tiny LoRA adapter sets ≈ 16.05 GB.
+    Fits on a single GH200 GPU where two full models would require two.
+
+    Adapter switching thread-safety
+    --------------------------------
+    The trainer processes agents sequentially in every loop (rollout and loss),
+    so set_adapter() is never called concurrently from two threads.  This is
+    safe as long as that invariant holds.
+
+    KL reference
+    ------------
+    When keep_ref_model=True, evaluate_ref() runs the backbone with ALL
+    LoRA adapters disabled (PEFT's disable_adapter context manager), exposing
+    the frozen pre-trained base as the reference.  Both agents therefore share
+    the same KL reference — the pre-trained base — which is exactly what we
+    want: each agent's LoRA delta is penalised for drifting from the prior.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        character_prompt: str,
+        shared_backbone: nn.Module,          # a PEFT PeftModel
+        adapter_name: str,
+        tokenizer: PreTrainedTokenizerBase,
+        device: torch.device | str,
+        keep_ref_model: bool = False,
+    ) -> None:
+        self._agent_id = agent_id
+        self._character_prompt = character_prompt
+        self._backbone = shared_backbone
+        self._adapter_name = adapter_name
+        self._tokenizer = tokenizer
+        self.device = torch.device(device)
+        self._keep_ref_model = keep_ref_model
+
+        hidden_size = shared_backbone.config.hidden_size
+        model_dtype = next(p for p in shared_backbone.parameters() if p.dtype.is_floating_point).dtype
+        self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _activate(self) -> None:
+        """Switch the backbone to this agent's LoRA adapter."""
+        self._backbone.set_adapter(self._adapter_name)
+
+    # ------------------------------------------------------------------ #
+    # Agent interface                                                      #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def agent_id(self) -> str:
+        return self._agent_id
+
+    @property
+    def character_prompt(self) -> str:
+        return self._character_prompt
+
+    @property
+    def tokenizer(self) -> PreTrainedTokenizerBase:
+        return self._tokenizer
+
+    def parameters(self) -> Iterable[nn.Parameter]:
+        # Yield only this adapter's trainable weights plus the private value head.
+        # The shared base weights are frozen (LoRA convention) and never appear here.
+        for name, param in self._backbone.named_parameters():
+            if f".{self._adapter_name}." in name and param.requires_grad:
+                yield param
+        yield from self._value_head.parameters()
+
+    def train_mode(self) -> None:
+        self._backbone.train()
+        self._value_head.train()
+
+    def eval_mode(self) -> None:
+        self._backbone.eval()
+        self._value_head.eval()
+
+    # ------------------------------------------------------------------ #
+    # Rollout: autoregressive sampling                                     #
+    # ------------------------------------------------------------------ #
+
+    @torch.no_grad()
+    def act(
+        self,
+        context_token_ids: list[int],
+        n_tokens: int,
+        temperature: float = 1.0,
+    ) -> tuple[list[int], list[float]]:
+        self._activate()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
+
+        sampled_ids: list[int] = []
+        sampled_lps: list[float] = []
+        input_ids = torch.tensor([context_token_ids], dtype=torch.long, device=self.device)
+        past_key_values = None
+
+        for _ in range(n_tokens):
+            out = self._backbone(
+                input_ids=input_ids,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+            logits = out.logits[:, -1, :]
+            past_key_values = out.past_key_values
+            if temperature != 1.0:
+                logits = logits / temperature
+            probs = F.softmax(logits, dim=-1)
+            token_id = torch.multinomial(probs, num_samples=1).item()
+            log_prob = F.log_softmax(logits, dim=-1)[0, token_id].item()
+            sampled_ids.append(int(token_id))
+            sampled_lps.append(float(log_prob))
+            input_ids = torch.tensor([[token_id]], dtype=torch.long, device=self.device)
+
+        return sampled_ids, sampled_lps
+
+    @torch.no_grad()
+    def act_batch(
+        self,
+        contexts: list[list[int]],
+        n_tokens: int,
+        temperature: float = 1.0,
+    ) -> tuple[list[list[int]], list[list[float]]]:
+        self._activate()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
+
+        B = len(contexts)
+        if B == 1:
+            ids, lps = self.act(contexts[0], n_tokens, temperature)
+            return [ids], [lps]
+
+        max_len = max(len(c) for c in contexts)
+        pad_id = self._tokenizer.pad_token_id
+        input_ids = torch.full((B, max_len), pad_id, dtype=torch.long, device=self.device)
+        attention_mask = torch.zeros(B, max_len, dtype=torch.long, device=self.device)
+        for i, ctx in enumerate(contexts):
+            L = len(ctx)
+            input_ids[i, max_len - L:] = torch.tensor(ctx, dtype=torch.long, device=self.device)
+            attention_mask[i, max_len - L:] = 1
+
+        all_ids: list[list[int]] = [[] for _ in range(B)]
+        all_lps: list[list[float]] = [[] for _ in range(B)]
+        past_key_values = None
+
+        for _ in range(n_tokens):
+            out = self._backbone(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+            logits = out.logits[:, -1, :]
+            past_key_values = out.past_key_values
+            if temperature != 1.0:
+                logits = logits / temperature
+            probs = F.softmax(logits, dim=-1)
+            next_toks = torch.multinomial(probs, num_samples=1)
+            log_probs_t = F.log_softmax(logits, dim=-1).gather(1, next_toks)
+            for i in range(B):
+                all_ids[i].append(int(next_toks[i, 0]))
+                all_lps[i].append(float(log_probs_t[i, 0]))
+            input_ids = next_toks
+            attention_mask = torch.cat(
+                [attention_mask, torch.ones(B, 1, dtype=torch.long, device=self.device)],
+                dim=1,
+            )
+
+        return all_ids, all_lps
+
+    # ------------------------------------------------------------------ #
+    # Training: differentiable forward pass                                #
+    # ------------------------------------------------------------------ #
+
+    def evaluate(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self._activate()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
+        out = self._backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+        )
+        logits = out.logits
+        last_hidden = out.hidden_states[-1]
+        values = self._value_head(last_hidden.detach())
+        return logits, values
+
+    @torch.no_grad()
+    def evaluate_ref(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor | None:
+        if not self._keep_ref_model:
+            return None
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
+        # The frozen pre-trained base (adapters disabled) serves as the reference
+        # for both agents — consistent with anchoring each LoRA delta to the prior.
+        with self._backbone.disable_adapter():
+            out = self._backbone(input_ids=input_ids, attention_mask=attention_mask)
         return out.logits

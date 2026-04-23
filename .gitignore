@@ -33,6 +33,8 @@ htmlcov/
 
 # Training runs (large, machine-generated)
 runs/
+slurm_scripts/
+slurm_logs/
 
 # Model weights and HuggingFace cache
 *.pt

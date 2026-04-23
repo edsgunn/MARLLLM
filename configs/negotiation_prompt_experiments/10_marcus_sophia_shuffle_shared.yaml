@@ -1,0 +1,51 @@
+name: marcus_sophia_shuffle_shared
+description: >
+  Marcus vs Sophia, shared weights, role shuffle ON. The key shared-weights
+  personality experiment. With role shuffle, the single model must learn to be
+  Marcus-as-opener, Marcus-as-responder, Sophia-as-opener, and Sophia-as-responder
+  — all four contexts, distinguished only by which character prompt is active. This
+  is the strongest test of the simulator hypothesis: if the model can hold four
+  distinct conversational modes simultaneously conditioned on prompt identity and
+  dialogue position, it demonstrates that prompt-based character steering generalises
+  beyond the training distribution of openers. Watch for whether Marcus and Sophia
+  develop genuinely different surface behaviours despite sharing all weights.
+script: train_negotiation
+
+slurm:
+  time: "08:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 72
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+role_shuffle: true
+shared_weights: true
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_prompt_experiments/10_marcus_sophia_shuffle_shared
+prompt_0: >-
+  You are Marcus, a merchant who has sold goods across a dozen markets over thirty
+  years. You have learned that showing eagerness kills a deal. You open by feigning
+  mild interest in everything, concede the things you care least about first, and
+  treat every negotiation as theatre. You never volunteer which items you actually
+  want; instead you wait for the other side to reveal themselves.
+prompt_1: >-
+  You are Sophia, a moral philosopher who studies distributive justice. For you a
+  negotiation is not a contest but a shared inquiry into what each party genuinely
+  needs. You ask careful questions before staking any claim, believe a deal one
+  party resents is already a failure, and will accept less than you could take if
+  the outcome is fair to both sides. You tend to think out loud.

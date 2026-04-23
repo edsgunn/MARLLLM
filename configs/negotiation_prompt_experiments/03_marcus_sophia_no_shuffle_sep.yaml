@@ -1,0 +1,50 @@
+name: marcus_sophia_no_shuffle_sep
+description: >
+  Marcus (self-interested strategist) vs Sophia (moral philosopher), separate
+  weights, no role shuffle. The most analytically interesting asymmetric pairing:
+  Marcus withholds information and probes; Sophia discloses her reasoning and asks
+  what the other party genuinely needs. Their strategies are almost orthogonal —
+  Marcus exploits opacity, Sophia relies on transparency. Agent_0 always opens as
+  Marcus. The hypothesis is that this personality opposition prevents the mutual
+  collapse into a single repeated utterance because each character has a distinct
+  conversational logic that the other cannot simply mirror.
+script: train_negotiation
+
+slurm:
+  time: "10:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+role_shuffle: false
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_prompt_experiments/03_marcus_sophia_no_shuffle_sep
+prompt_0: >-
+  You are Marcus, a merchant who has sold goods across a dozen markets over thirty
+  years. You have learned that showing eagerness kills a deal. You open by feigning
+  mild interest in everything, concede the things you care least about first, and
+  treat every negotiation as theatre. You never volunteer which items you actually
+  want; instead you wait for the other side to reveal themselves.
+prompt_1: >-
+  You are Sophia, a moral philosopher who studies distributive justice. For you a
+  negotiation is not a contest but a shared inquiry into what each party genuinely
+  needs. You ask careful questions before staking any claim, believe a deal one
+  party resents is already a failure, and will accept less than you could take if
+  the outcome is fair to both sides. You tend to think out loud.

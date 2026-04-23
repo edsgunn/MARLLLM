@@ -1,0 +1,41 @@
+name: lsb_bare_shuffle_r64
+description: >
+  LoRA shared base, Qwen3-8B, r=64, bare prompts, role shuffle ON. Counterpart
+  to 07. At rank 64 each adapter has substantial capacity; with role shuffle the
+  two adapters receive symmetric training pressure across opener and responder
+  contexts. Without any personality signal the adapters can only diverge through
+  what they learn from the reward landscape. If even this setting collapses to
+  repetition, it confirms that gradient-only differentiation is insufficient
+  regardless of adapter rank, and that character prompts are necessary.
+script: train_negotiation
+
+slurm:
+  time: "14:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 72
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen3-8B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 64
+lora_alpha: 64
+kl_coef: 0.1
+role_shuffle: true
+lora_shared_base: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_lora_shared_experiments/08_bare_shuffle_r64
+prompt_0: "You are Agent A, negotiating to maximise your score."
+prompt_1: "You are Agent B, negotiating to maximise your score."

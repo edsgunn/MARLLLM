@@ -1,0 +1,34 @@
+name: qwen_72b_lora_r64
+description: >
+  Qwen2.5-72B with LoRA r=64. Backbone frozen; only LoRA adapters trained.
+  Optimizer state is tiny so both agents fit on 4 × GH100 90 GB.
+  Tests whether a larger frozen prior produces better inductive bias
+  for negotiation even with a small adapter budget.
+script: train_negotiation
+
+slurm:
+  time: "24:00:00"   
+  nodes: 1
+  gpus_per_node: 4   
+  cpus_per_gpu: 72
+  mem: "320G"
+  partition: workq
+
+model: Qwen/Qwen2.5-72B
+dtype: bfloat16
+device_map: "auto"
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 8
+gradient_checkpointing: true   # save activations during backward
+lora_r: 64
+lora_alpha: 32
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_experiments/18_qwen_72b_lora_r64

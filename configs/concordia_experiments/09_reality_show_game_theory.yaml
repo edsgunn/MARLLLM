@@ -1,0 +1,53 @@
+name: concordia_reality_show_game_theory
+description: >
+  Concordia Contest Scenario 4: Reality Show.
+  Four players cycle through Prisoner's Dilemma, Chicken, and Stag Hunt
+  mini-games with communication phases between rounds.
+  Tests promise-keeping, strategic deception, and emergent norm formation
+  in a mixture of cooperation and competition incentives.
+  Concordia's GM narrates outcomes and updates player reputations.
+
+  This is arguably the most theoretically interesting scenario: players must
+  learn to signal credible commitments in natural language, track partner
+  reputations across games, and adapt strategy when norms shift.
+
+  GPU layout (4 × GH200):
+    cuda:0  player_0  (1.5B)
+    cuda:1  player_1  (1.5B)
+    cuda:2  player_2  (1.5B) + GM (7B) co-located  (~17 GB / 96 GB)
+    cuda:3  player_3  (1.5B)
+script: train_concordia
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: reality_show
+agents: player_0,player_1,player_2,player_3
+num_turns: 3           # 3 mini-games per episode
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:2"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are a contestant on a reality show. You must cooperate or compete strategically to maximise your points. Think carefully about what your opponents will do."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 6144
+max_env_turns: 300
+
+iters: 500
+rollouts: 4
+lr: 3.0e-5
+grad_accum: 8
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/09_reality_show_game_theory

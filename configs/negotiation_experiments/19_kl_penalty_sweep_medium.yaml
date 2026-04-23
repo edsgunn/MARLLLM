@@ -1,0 +1,33 @@
+name: kl_penalty_sweep_medium
+description: >
+  Qwen2.5-1.5B with KL penalty (kl_coef=0.5). The KL term penalises
+  divergence from the frozen reference model, acting as a form of RLHF-style
+  regularisation. Tests whether anchoring to the pre-trained prior helps
+  language quality while still allowing the policy to learn to negotiate.
+  Requires a frozen reference model copy (doubles VRAM for backbone weights).
+script: train_negotiation
+
+slurm:
+  time: "14:00:00"    # reference model adds memory + compute; 14 h budgeted
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.5
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_experiments/19_kl_penalty_sweep_medium

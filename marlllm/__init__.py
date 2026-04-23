@@ -1,4 +1,4 @@
-from marlllm.agent import Agent, IndependentAgent
+from marlllm.agent import Agent, IndependentAgent, LoRASharedBaseAgent
 from marlllm.config import TrainingConfig
 from marlllm.loss import CCSMLoss, Loss
 from marlllm.store import OnPolicyStore, TrajectoryStore
@@ -7,7 +7,7 @@ from marlllm.trainer import Trainer
 from marlllm.types import EpisodeStep, RolloutBatch, TokenType, Trajectory
 
 __all__ = [
-    "Agent", "IndependentAgent",
+    "Agent", "IndependentAgent", "LoRASharedBaseAgent",
     "TrainingConfig",
     "Loss", "CCSMLoss",
     "TrajectoryStore", "OnPolicyStore",

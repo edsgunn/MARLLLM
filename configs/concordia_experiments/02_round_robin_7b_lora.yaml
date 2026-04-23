@@ -1,0 +1,41 @@
+name: concordia_round_robin_7b_lora
+description: >
+  Two-agent round-robin with Qwen2.5-7B + LoRA r=16.
+  No GM LLM required, so all GPU memory is devoted to the trained agents.
+  7B at bfloat16 ≈ 14 GB; with LoRA the backbone is frozen so optimizer state
+  is tiny — both agents fit comfortably on 2 × GH200 96 GB.
+  Compare against exp 01 (1.5B full fine-tune) to isolate the effect of a
+  larger frozen prior.
+script: train_concordia
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 2    # 7B bfloat16 ≈ 14 GB; LoRA opt state tiny → fits GH200 96 GB
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: round_robin
+agents: agent_0,agent_1
+num_turns: 10
+context: "Two agents are negotiating the terms of a cooperative agreement."
+
+model: Qwen/Qwen2.5-7B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 100
+
+iters: 500
+rollouts: 8
+lr: 1.0e-4            # higher lr works well for LoRA
+grad_accum: 4
+gradient_checkpointing: true
+lora_r: 16
+lora_alpha: 32
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/02_round_robin_7b_lora

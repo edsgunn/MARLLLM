@@ -1,0 +1,53 @@
+name: concordia_pub_coordination
+description: >
+  Concordia Contest Scenario 1: Pub Coordination.
+  Four friends independently choose which pub to visit.
+  Some pubs close unexpectedly, introducing incomplete information.
+  Agents may communicate (via Concordia's dialogue mechanism) to coordinate,
+  but there is no guarantee others act on what they hear.
+  Tests theory-of-mind reasoning: each agent must model others' beliefs
+  and update their own choice accordingly.
+
+  This is the purest coordination scenario in the contest — no direct
+  competition, but coordination failure is costly (empty table vs friend group).
+
+  GPU layout (4 × GH200):
+    cuda:0  alice  (1.5B)
+    cuda:1  bob    (1.5B)
+    cuda:2  carol  (1.5B) + GM (7B, ~17 GB)
+    cuda:3  dave   (1.5B)
+script: train_concordia
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 4
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: pub_coordination
+agents: alice,bob,carol,dave
+num_turns: 1           # single coordination decision per episode
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:2"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+prompt: "You are trying to meet your friends at a pub tonight. Some pubs may be closed. Listen to what your friends say and choose wisely."
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 500
+rollouts: 4
+lr: 3.0e-5
+grad_accum: 8
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/10_pub_coordination

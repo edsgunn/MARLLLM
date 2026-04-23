@@ -1,0 +1,42 @@
+name: lsb_bare_no_shuffle_r16
+description: >
+  LoRA shared base, Qwen3-8B, r=16, bare prompts, no role shuffle. Reference
+  baseline for the entire lora-shared-base suite. One frozen 8B backbone;
+  two independent rank-16 LoRA adapters (one per agent) trained from the same
+  initialisation. The backbone is never updated — only the adapters diverge.
+  Agent_0 always opens. Compare against 02 (shuffle) to isolate role symmetry,
+  and against all prompt experiments to isolate the character-steering effect.
+  Memory footprint: ~16 GB for the base + negligible adapter weights, fitting
+  comfortably on a single GH200 GPU vs ~32 GB for two independent full models.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 72
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen3-8B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 16
+lora_alpha: 16
+kl_coef: 0.1
+role_shuffle: false
+lora_shared_base: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_lora_shared_experiments/01_bare_no_shuffle_r16
+prompt_0: "You are Agent A, negotiating to maximise your score."
+prompt_1: "You are Agent B, negotiating to maximise your score."

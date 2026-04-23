@@ -1,0 +1,54 @@
+name: lsb_marcus_sophia_shuffle_r64
+description: >
+  LoRA shared base, Qwen3-8B, r=64, Marcus vs Sophia, role shuffle ON. The
+  highest-capacity personality experiment in this suite, and the one most likely
+  to produce genuinely differentiated agent behaviours. Rank-64 adapters, distinct
+  character prompts, and symmetric role training together provide three independent
+  sources of adapter differentiation. The KL penalty anchors both adapters to the
+  same frozen pre-trained base, so divergence must happen within the LoRA delta —
+  constrained enough that the characters cannot drift into incoherence, expressive
+  enough that they develop distinct voices. This is the 'best effort' configuration
+  for this suite; if collapse persists here the problem requires architecture
+  changes beyond prompt and adapter design.
+script: train_negotiation
+
+slurm:
+  time: "14:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 72
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen3-8B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 64
+lora_alpha: 64
+kl_coef: 0.1
+role_shuffle: true
+lora_shared_base: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_lora_shared_experiments/10_marcus_sophia_shuffle_r64
+prompt_0: >-
+  You are Marcus, a merchant who has sold goods across a dozen markets over thirty
+  years. You have learned that showing eagerness kills a deal. You open by feigning
+  mild interest in everything, concede the things you care least about first, and
+  treat every negotiation as theatre. You never volunteer which items you actually
+  want; instead you wait for the other side to reveal themselves.
+prompt_1: >-
+  You are Sophia, a moral philosopher who studies distributive justice. For you a
+  negotiation is not a contest but a shared inquiry into what each party genuinely
+  needs. You ask careful questions before staking any claim, believe a deal one
+  party resents is already a failure, and will accept less than you could take if
+  the outcome is fair to both sides. You tend to think out loud.

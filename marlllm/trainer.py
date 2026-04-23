@@ -63,7 +63,15 @@ class Trainer:
         self.device = torch.device(config.device)
         self.agent_index = {aid: i for i, aid in enumerate(agents)}
 
-        all_params = list(p for a in agents.values() for p in a.parameters())
+        # Deduplicate by parameter identity so shared-weight agents (where both
+        # dict entries point to the same IndependentAgent) don't double-count.
+        seen_ids: set[int] = set()
+        all_params: list = []
+        for a in agents.values():
+            for p in a.parameters():
+                if id(p) not in seen_ids:
+                    seen_ids.add(id(p))
+                    all_params.append(p)
         self.optimizer = AdamW(all_params, lr=config.lr)
 
         self._start_time = time.time()

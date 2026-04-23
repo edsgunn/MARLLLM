@@ -1,0 +1,37 @@
+name: shuffle_lr1e5_kl05
+description: >
+  Role shuffle ON: Qwen2.5-1.5B, separate weights, lr=1e-5, kl_coef=0.5.
+  Counterpart to 07_no_shuffle_lr1e5_kl05. Maximum regularisation for separate
+  weights: strong KL anchor + low LR + role symmetry. If repetition collapse
+  persists here, the problem likely requires entropy bonus or a different
+  reward shaping, not further regularisation.
+script: train_negotiation
+
+slurm:
+  time: "10:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.5
+role_shuffle: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_role_experiments/08_shuffle_lr1e5_kl05
+prompt_0: "You are Agent A, negotiating to maximise your score."
+prompt_1: "You are Agent B, negotiating to maximise your score."

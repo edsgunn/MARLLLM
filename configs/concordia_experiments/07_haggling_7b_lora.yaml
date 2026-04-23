@@ -1,0 +1,46 @@
+name: concordia_haggling_7b_lora
+description: >
+  Haggling scenario with Qwen2.5-7B + LoRA r=16 as the trained merchants.
+  The larger frozen prior (7B vs 1.5B) should produce richer initial
+  negotiation strategies; LoRA keeps VRAM manageable.
+
+  GPU layout (4 × GH200):
+    cuda:0  merchant_0  (7B frozen + LoRA, ~14 GB)
+    cuda:1  merchant_1  (7B frozen + LoRA, ~14 GB)
+    cuda:2  GM          (7B, ~14 GB)
+    cuda:3  spare headroom / gradient accumulation buffer
+script: train_concordia
+
+slurm:
+  time: "20:00:00"
+  nodes: 1
+  gpus_per_node: 3
+  cpus_per_gpu: 8
+  mem: "120G"
+  partition: workq
+
+scenario: haggling
+agents: merchant_0,merchant_1
+num_turns: 5
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:2"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+
+model: Qwen/Qwen2.5-7B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 500
+rollouts: 4
+lr: 1.0e-4
+grad_accum: 8
+gradient_checkpointing: true
+lora_r: 16
+lora_alpha: 32
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/07_haggling_7b_lora

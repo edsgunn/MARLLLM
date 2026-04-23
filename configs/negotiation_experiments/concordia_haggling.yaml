@@ -1,0 +1,39 @@
+name: concordia_haggling
+description: >
+  Concordia Contest Scenario 2: Haggling.  Two merchants negotiate over
+  prices in Fruitville across num_turns rounds.  Requires a GM LLM and
+  a sentence-transformer embedder.
+script: train_concordia
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 4    # merchant_0 → cuda:0, merchant_1 → cuda:1, GM → cuda:2
+  cpus_per_gpu: 8
+  mem: "120G"
+  partition: workq
+
+scenario: haggling
+agents: merchant_0,merchant_1
+num_turns: 5
+
+model: Qwen/Qwen2.5-1.5B
+gm_model: google/gemma-2-9b
+embedder: sentence-transformers/all-MiniLM-L6-v2
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 500
+rollouts: 4
+lr: 3.0e-5
+grad_accum: 8
+gradient_checkpointing: true
+lora_r: 16
+lora_alpha: 16
+kl_coef: 0.01
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/experiments/concordia_haggling

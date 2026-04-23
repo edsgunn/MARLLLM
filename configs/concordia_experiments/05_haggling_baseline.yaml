@@ -1,0 +1,46 @@
+name: concordia_haggling_baseline
+description: >
+  Concordia Contest Scenario 2: Haggling.  Two merchants negotiate prices
+  in "Fruitville" over num_turns rounds.  Full fine-tune on Qwen2.5-1.5B.
+
+  GPU layout (3 × GH200 96 GB):
+    cuda:0  merchant_0  (1.5B, ~3 GB)
+    cuda:1  merchant_1  (1.5B, ~3 GB)
+    cuda:2  GM          (7B,  ~14 GB)  — frozen, never updated
+
+  Requires gdm-concordia and sentence-transformers installed.
+  The GM uses Qwen2.5-7B as the negotiation mediator/narrator.
+script: train_concordia
+
+slurm:
+  time: "14:00:00"
+  nodes: 1
+  gpus_per_node: 3
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: haggling
+agents: merchant_0,merchant_1
+num_turns: 5           # 5 rounds of bilateral bargaining
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:2"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.0
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/05_haggling_baseline

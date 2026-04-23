@@ -1,0 +1,47 @@
+name: concordia_haggling_kl_anchor
+description: >
+  Concordia haggling with KL regularisation (kl_coef=0.1).
+  The KL term penalises divergence from the frozen pre-trained reference,
+  keeping language fluent while still optimising for bargaining outcomes.
+  Hypothesis: KL anchoring reduces the mode-collapse risk on long-horizon
+  Concordia episodes where REINFORCE variance is high.
+  Doubles backbone VRAM (reference copy loaded alongside trained model).
+
+  GPU layout (3 × GH200):
+    cuda:0  merchant_0  (1.5B trained + 1.5B ref, ~6 GB each = 12 GB)
+    cuda:1  merchant_1  (1.5B trained + 1.5B ref, ~12 GB)
+    cuda:2  GM          (7B, ~14 GB)
+script: train_concordia
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 3
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+scenario: haggling
+agents: merchant_0,merchant_1
+num_turns: 5
+gm_model: Qwen/Qwen2.5-7B
+gm_device: "cuda:2"
+embedder: sentence-transformers/all-MiniLM-L6-v2
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+token_budget: 128
+max_episode_tokens: 4096
+max_env_turns: 200
+
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/concordia_experiments/06_haggling_kl_anchor

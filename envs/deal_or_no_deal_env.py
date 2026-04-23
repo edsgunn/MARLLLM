@@ -83,6 +83,7 @@ class DealOrNoDealEnv(AECEnv):
         action_token_budget: int = 64,
         max_item_count: int = 5,
         seed: int | None = None,
+        role_shuffle: bool = False,
     ) -> None:
         super().__init__()
 
@@ -91,6 +92,7 @@ class DealOrNoDealEnv(AECEnv):
         self.action_token_budget = action_token_budget  # read by Trainer
         self._max_item_count = max_item_count
         self._rng = random.Random(seed)
+        self._role_shuffle = role_shuffle
 
         self.possible_agents = ["agent_0", "agent_1"]
 
@@ -254,6 +256,8 @@ class DealOrNoDealEnv(AECEnv):
         }
 
         self.agents = list(self.possible_agents)
+        if self._role_shuffle:
+            self._rng.shuffle(self.agents)
         self._agent_selector = agent_selector.AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.next()
 
@@ -265,12 +269,14 @@ class DealOrNoDealEnv(AECEnv):
         self._deal_valid = False
         self._episode_scores = {"agent_0": 0, "agent_1": 0}
 
-        # agent_0 acts first; their context is pre-loaded.
-        # agent_1's context will be prepended by _deliver_obs on their first obs.
-        self._context_delivered = {"agent_0": True, "agent_1": False}
+        # First agent in the (possibly shuffled) order acts first.
+        # Their context is pre-loaded; the other's is prepended on first obs.
+        first_agent  = self.agents[0]
+        second_agent = self.agents[1]
+        self._context_delivered = {first_agent: True, second_agent: False}
         self._pending_obs = {
-            "agent_0": self._context_obs("agent_0"),
-            "agent_1": [],
+            first_agent:  self._context_obs(first_agent),
+            second_agent: [],
         }
 
         self._cumulative_rewards = {"agent_0": 0.0, "agent_1": 0.0}

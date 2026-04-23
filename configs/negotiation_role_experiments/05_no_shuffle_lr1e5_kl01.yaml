@@ -1,0 +1,38 @@
+name: no_shuffle_lr1e5_kl01
+description: >
+  New combination: Qwen2.5-1.5B, separate weights, lr=1e-5, kl_coef=0.1, no
+  role shuffle. The existing KL experiments (14, 19, 20) all used lr=3e-5;
+  this pairs the preferred low LR with a light KL anchor. KL should discourage
+  the repetition collapse seen in prior runs; the low LR prevents the reward
+  signal from overpowering the language prior. No-shuffle baseline required
+  because this lr+KL combo has no prior counterpart.
+script: train_negotiation
+
+slurm:
+  time: "10:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.1
+role_shuffle: false
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_role_experiments/05_no_shuffle_lr1e5_kl01
+prompt_0: "You are Agent A, negotiating to maximise your score."
+prompt_1: "You are Agent B, negotiating to maximise your score."
