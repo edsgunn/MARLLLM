@@ -1,0 +1,51 @@
+name: 2agent_char_lora_r16
+description: >
+  Baseline population experiment: two characters (Marcus and Sophia) with LoRA r=16
+  on a shared backbone, random_no_self pairing. Establishes the minimal population
+  setting — two distinct personas that must adapt to each other across games.
+  Compare against 02 (4-agent) to see whether a larger population improves diversity,
+  and against 09 (independent weights) to isolate the LoRA-sharing effect.
+script: train_population
+
+slurm:
+  time: "10:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+lora_shared_base: true
+lora_r: 16
+lora_alpha: 16
+pairing_strategy: random_no_self
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+kl_coef: 0.1
+role_shuffle: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/population_experiments/01_2agent_char_lora_r16
+
+character_prompts:
+  Marcus: >-
+    You are Marcus, a merchant who has sold goods across a dozen markets over thirty
+    years. You have learned that showing eagerness kills a deal. You open by feigning
+    mild interest in everything, concede the things you care least about first, and
+    treat every negotiation as theatre. You never volunteer which items you actually
+    want; instead you wait for the other side to reveal themselves.
+  Sophia: >-
+    You are Sophia, a pragmatic logistics manager who values certainty over optimism.
+    You research the other party before any meeting and always have a fallback position.
+    You make your first offer slightly worse than your target so you have room to
+    concede without giving anything real away. You keep a mental score of who has
+    given more so far and call it out when the balance tips too far.

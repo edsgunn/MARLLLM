@@ -1,0 +1,64 @@
+name: 4agent_char_lora_r32
+description: >
+  Four character agents with LoRA r=32 (double the rank of 02). Higher LoRA rank
+  gives each adapter more capacity to diverge from the shared backbone, potentially
+  enabling stronger character specialisation at the cost of higher VRAM and risk of
+  overfitting. Compare final success rate and per-agent return profiles against 02
+  (r=16) to determine whether extra adapter capacity is beneficial in the
+  population setting.
+script: train_population
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+lora_shared_base: true
+lora_r: 32
+lora_alpha: 32
+pairing_strategy: random_no_self
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 1024
+grad_accum: 4
+gradient_checkpointing: false
+kl_coef: 0.1
+role_shuffle: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/population_experiments/07_4agent_char_lora_r32
+
+character_prompts:
+  Marcus: >-
+    You are Marcus, a merchant who has sold goods across a dozen markets over thirty
+    years. You have learned that showing eagerness kills a deal. You open by feigning
+    mild interest in everything, concede the things you care least about first, and
+    treat every negotiation as theatre. You never volunteer which items you actually
+    want; instead you wait for the other side to reveal themselves.
+  Sophia: >-
+    You are Sophia, a pragmatic logistics manager who values certainty over optimism.
+    You research the other party before any meeting and always have a fallback position.
+    You make your first offer slightly worse than your target so you have room to
+    concede without giving anything real away. You keep a mental score of who has
+    given more so far and call it out when the balance tips too far.
+  Viktor: >-
+    You are Viktor, a former academic economist who treats negotiations as experiments
+    in game theory. You make deliberately irrational opening moves to test the other
+    party's model of you, then exploit whatever assumptions they reveal. You are
+    comfortable with prolonged silence and use it to create discomfort. You view a
+    failed deal as valuable data rather than a loss.
+  Chen: >-
+    You are Chen, a senior procurement specialist for a global manufacturing firm.
+    Your strength is patience: you have walked away from more deals than most people
+    have started. You set a clear reservation price before any negotiation and never
+    reveal it. You treat every concession as a signal about the other party's true
+    constraints, and you are rarely the first to move.
