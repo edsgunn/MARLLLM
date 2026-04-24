@@ -600,31 +600,28 @@ class Trainer:
         Decode and save the first episode of this iteration as a human-readable
         trace file under <output_dir>/traces/iter_XXXXXX.txt.
 
-        Each line shows the token type, the decoded text, and the raw token ID(s),
-        so you can see exactly what the agent produced and what the env returned.
+        The trace has two sections:
+          1. ENVIRONMENT OVERVIEW — chronological event log showing which agent
+             sent what to whom, including action→observation routing arrows.
+          2. PER-AGENT CONTEXT — each agent's full context window with broadcast
+             observations annotated.
         """
+        from marlllm.trace_utils import format_trace
+
         tok = list(self.agents.values())[0].tokenizer
         traces_dir = Path(self.config.output_dir) / "traces"
         traces_dir.mkdir(exist_ok=True)
         path = traces_dir / f"iter_{iteration:06d}.txt"
 
-        lines: list[str] = [
-            f"=== Iteration {iteration} — episode trace ===",
-            f"result:        {ep_info.get('result', 'unknown')}",
-            f"correct_count: {ep_info.get('correct_count', '?')}",
-            f"episode_length:{ep_info.get('episode_length', '?')}",
-            "",
-        ]
-
-        type_labels = {0: "PROMPT", 1: "OBS   ", 2: "ACT   "}
-        for step in traj.steps:
-            label = type_labels.get(int(step.token_type), "??????")
-            decoded = tok.decode(step.token_ids, skip_special_tokens=False)
-            ids_str = " ".join(str(t) for t in step.token_ids)
-            lines.append(f"[{label}] {decoded!r:30s}  ids=[{ids_str}]")
-
+        text = format_trace(
+            iteration=iteration,
+            traj=traj,
+            ep_info=ep_info,
+            tokenizer=tok,
+            character_prompts=self.config.character_prompts,
+        )
         with open(path, "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write(text)
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:
