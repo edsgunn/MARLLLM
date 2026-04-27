@@ -21,7 +21,7 @@ rollouts: 8
 lr: 3.0e-5
 dialogue_turns: 10
 token_budget: 128
-max_episode_tokens: 2048
+max_episode_tokens: 4096
 grad_accum: 8
 gradient_checkpointing: true
 lora_r: 0
@@ -29,4 +29,4 @@ kl_coef: 0.0
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/experiments/13_large_token_budget
+output_dir: runs/negotiation_experiments/13_large_token_budget

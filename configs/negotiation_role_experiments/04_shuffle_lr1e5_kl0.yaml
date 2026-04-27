@@ -21,7 +21,7 @@ rollouts: 8
 lr: 1.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
+max_episode_tokens: 2048
 grad_accum: 4
 gradient_checkpointing: false
 lora_r: 0

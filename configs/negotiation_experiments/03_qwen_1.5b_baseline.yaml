@@ -20,7 +20,7 @@ rollouts: 8
 lr: 3.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
+max_episode_tokens: 2048
 grad_accum: 4
 gradient_checkpointing: false
 
@@ -29,4 +29,4 @@ kl_coef: 0.0
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/experiments/03_qwen_1.5b_baseline
+output_dir: runs/negotiation_experiments/03_qwen_1.5b_baseline

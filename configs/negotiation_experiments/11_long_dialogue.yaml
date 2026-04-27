@@ -21,7 +21,7 @@ rollouts: 8
 lr: 3.0e-5
 dialogue_turns: 20
 token_budget: 64
-max_episode_tokens: 2048   # doubled to accommodate longer episodes
+max_episode_tokens: 4096   # 20 turns x 64 budget + ~220-token context obs
 grad_accum: 8              # larger effective batch to compensate for longer sequences
 gradient_checkpointing: true
 lora_r: 0
@@ -29,4 +29,4 @@ kl_coef: 0.0
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/experiments/11_long_dialogue
+output_dir: runs/negotiation_experiments/11_long_dialogue

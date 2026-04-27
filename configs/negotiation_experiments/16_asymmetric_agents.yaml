@@ -30,7 +30,7 @@ rollouts: 8
 lr: 3.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
+max_episode_tokens: 2048
 grad_accum: 4
 gradient_checkpointing: false
 lora_r: 0
@@ -38,6 +38,6 @@ kl_coef: 0.0
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/experiments/16_asymmetric_agents
+output_dir: runs/negotiation_experiments/16_asymmetric_agents
 prompt_0: "You are Agent A negotiating to maximise your score. Be direct and concise."
 prompt_1: "You are Agent B negotiating to maximise your score. Be direct and concise."

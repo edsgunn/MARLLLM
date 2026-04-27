@@ -310,6 +310,7 @@ class DealOrNoDealEnv(AECEnv):
                 "score":        0,
                 "items":        list(self._items),
                 "values":       list(self._values[a]),
+                "must_act":     False,
             }
             for a in self.agents
         }
@@ -350,12 +351,14 @@ class DealOrNoDealEnv(AECEnv):
                 self._pending_obs["agent_1"] = list(prompt)
                 for a in self.agents:
                     self._infos[a]["phase"] = "selection"
+                    self._infos[a]["must_act"] = True
 
         # ---- selection phase ----
         elif self._phase == "selection":
             self._allocations[agent] = self._parse_allocation(action)
             self._selection_submitted.add(agent)
             self._pending_obs[agent] = []
+            self._infos[agent]["must_act"] = False
 
             if len(self._selection_submitted) >= len(self.possible_agents):
                 self._resolve()
@@ -365,6 +368,7 @@ class DealOrNoDealEnv(AECEnv):
                     self._cumulative_rewards[a] = float(self._episode_scores[a])
                     self._infos[a]["phase"]    = "done"
                     self._infos[a]["outcome"]  = "deal" if self._deal_valid else "no_deal"
+                    self._infos[a]["result"]   = "success" if self._deal_valid else "wrong"
                     self._infos[a]["score"]    = self._episode_scores[a]
                 self._phase = "done"
 
@@ -408,6 +412,5 @@ class DealOrNoDealEnv(AECEnv):
             raise ValueError("Only None is valid for a terminated agent.")
         agent = self.agent_selection
         self.agents.remove(agent)
-        self._cumulative_rewards[agent] = 0.0
         if self.agents:
             self.agent_selection = self._agent_selector.next()

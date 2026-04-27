@@ -250,13 +250,14 @@ class Trainer:
             prompt_text = self.config.character_prompts.get(agent_id, "")
             pids = self.tokeniser.encode_prompt(prompt_text)
             prompt_ids_per_agent[agent_id] = pids
-            contexts[agent_id] = list(pids)
+            formatter = self.agents[agent_id].context_formatter
+            contexts[agent_id] = formatter.wrap_prompt(pids)
 
         for agent_id in self.env.agent_iter():
             # env.last() returns (obs, reward, terminated, truncated, info)
             # for the current agent_selection. Always call before checking
             # termination so we don't miss the terminal observation.
-            obs, _rew, term, trunc, _info = self.env.last()
+            obs, _rew, term, trunc, info = self.env.last()
 
             obs_ids = self.tokeniser.encode_observation(obs)
             if obs_ids:
@@ -268,14 +269,19 @@ class Trainer:
                     info={},
                 )
                 episode_history.append(obs_step)
-                contexts[agent_id].extend(obs_ids)
+                formatter = self.agents[agent_id].context_formatter
+                contexts[agent_id].extend(formatter.wrap_observation(obs_ids))
                 token_count += len(obs_ids)
 
             if term or trunc:
                 self.env.step(None)
                 continue
 
-            if token_count >= self.config.max_episode_tokens:
+            # Respect the env's must_act flag: if the env signals that the agent
+            # must act this turn (e.g. a commit phase), never skip it due to the
+            # token budget — otherwise the agent submits an empty action.
+            if (token_count >= self.config.max_episode_tokens
+                    and not info.get("must_act", False)):
                 self.env.step(None)
                 continue
 
@@ -299,7 +305,8 @@ class Trainer:
                     info={},
                 )
                 episode_history.append(act_step)
-                contexts[agent_id].extend(act_ids)
+                formatter = self.agents[agent_id].context_formatter
+                contexts[agent_id].extend(formatter.wrap_action(act_ids))
                 token_count += len(act_ids)
 
                 self.env.step(act_ids)
@@ -465,7 +472,7 @@ class Trainer:
                     continue
 
                 agent_id = env.agent_selection
-                obs, _rew, term, trunc, _info = env.last()
+                obs, _rew, term, trunc, info = env.last()
 
                 # Append observation to this episode's history (raw ids) and
                 # the formatted version to the context buffer for act().
@@ -489,7 +496,8 @@ class Trainer:
                             ep_infos[k] = env.infos[aid]
                             break
                     null_indices.append(k)
-                elif token_counts[k] >= self.config.max_episode_tokens:
+                elif (token_counts[k] >= self.config.max_episode_tokens
+                      and not info.get("must_act", False)):
                     null_indices.append(k)
                 elif agent_id in self.agents:
                     act_groups.setdefault(agent_id, []).append(k)

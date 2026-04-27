@@ -1,11 +1,11 @@
-name: 4agent_char_lora_r16_shuffle
+name: 4agent_char_lora_r16_selfplay
 description: >
-  Four character agents with LoRA r=16 and role_shuffle enabled. Role shuffle
-  randomly assigns which agent moves first each episode, preventing agents from
-  locking in first-mover or responder strategies. Tests whether eliminating role
-  asymmetry in the population setting improves policy robustness or disrupts the
-  character-conditioned strategies observed in 02. Direct comparison with 02
-  isolates the role_shuffle effect on population dynamics.
+  Four character agents with LoRA r=16 and random_with_self pairing — agents can
+  be paired against themselves (e.g. Marcus vs Marcus). Self-play episodes test
+  intra-persona consistency: a character negotiating against itself must develop
+  an internally coherent strategy rather than adapting to an opponent. Compared
+  with 02 (no self-play), determines whether self-play episodes act as a useful
+  regulariser or introduce degenerate equilibria.
 script: train_population
 
 slurm:
@@ -21,21 +21,21 @@ dtype: bfloat16
 lora_shared_base: true
 lora_r: 16
 lora_alpha: 16
-pairing_strategy: random_no_self
+pairing_strategy: random_with_self
 iters: 500
 rollouts: 8
 lr: 1.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
+max_episode_tokens: 2048
 grad_accum: 4
 gradient_checkpointing: false
 kl_coef: 0.1
-role_shuffle: true
+role_shuffle: false
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/population_experiments/04_4agent_char_lora_r16_shuffle
+output_dir: runs/negotiation_population_experiments/05_4agent_char_lora_r16_selfplay
 
 character_prompts:
   Marcus: >-

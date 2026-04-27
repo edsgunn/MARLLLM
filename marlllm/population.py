@@ -459,7 +459,7 @@ class PopulationTrainer:
 
                 env_role = env.agent_selection
                 pop_name = env_role_to_name[k][env_role]
-                obs, _rew, term, trunc, _info = env.last()
+                obs, _rew, term, trunc, info = env.last()
 
                 obs_ids = self.tokeniser.encode_observation(obs)
                 if obs_ids:
@@ -480,7 +480,8 @@ class PopulationTrainer:
                             ep_infos[k] = env.infos[aid]
                             break
                     null_indices.append(k)
-                elif token_counts[k] >= self.config.max_episode_tokens:
+                elif (token_counts[k] >= self.config.max_episode_tokens
+                      and not info.get("must_act", False)):
                     null_indices.append(k)
                 elif pop_name in self.population:
                     act_groups.setdefault(pop_name, []).append(k)

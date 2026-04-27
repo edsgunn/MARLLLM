@@ -28,14 +28,14 @@ pairing_strategy: random_no_self
 iters: 500
 rollouts: 10
 lr: 1.0e-5
-max_episode_tokens: 2048
+max_episode_tokens: 5120  # sized for long_deal: 16 turns x 128 budget + ~220-token context obs
 grad_accum: 4
 gradient_checkpointing: false
 kl_coef: 0.1
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/population_experiments/11_4agent_multienv_lora_r16
+output_dir: runs/negotiation_population_experiments/11_4agent_multienv_lora_r16
 
 # Global character prompts: list[str] → one is sampled per episode.
 # These are the fallback used when an env spec has no override for a character.

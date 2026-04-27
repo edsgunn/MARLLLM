@@ -1,41 +1,40 @@
-name: 4agent_char_lora_r16_selfplay
+name: 4agent_char_independent
 description: >
-  Four character agents with LoRA r=16 and random_with_self pairing — agents can
-  be paired against themselves (e.g. Marcus vs Marcus). Self-play episodes test
-  intra-persona consistency: a character negotiating against itself must develop
-  an internally coherent strategy rather than adapting to an opponent. Compared
-  with 02 (no self-play), determines whether self-play episodes act as a useful
-  regulariser or introduce degenerate equilibria.
+  Four character agents each with a fully independent copy of the model weights
+  (no LoRA, no shared backbone). Each agent fine-tunes all parameters of its own
+  model. This is the most expressive configuration but requires 4x the VRAM and
+  means the agents have no shared inductive bias. Compare against 02 (LoRA shared
+  backbone) to quantify the trade-off between expressivity and shared structure.
+  Note: uses gradient_checkpointing to fit 4 full models on one node.
 script: train_population
 
 slurm:
-  time: "10:00:00"
+  time: "12:00:00"
   nodes: 1
-  gpus_per_node: 1
+  gpus_per_node: 2
   cpus_per_gpu: 8
-  mem: "80G"
+  mem: "160G"
   partition: workq
 
 model: Qwen/Qwen2.5-1.5B
 dtype: bfloat16
-lora_shared_base: true
-lora_r: 16
-lora_alpha: 16
-pairing_strategy: random_with_self
+lora_shared_base: false
+lora_r: 0
+pairing_strategy: random_no_self
 iters: 500
 rollouts: 8
 lr: 1.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
-grad_accum: 4
-gradient_checkpointing: false
+max_episode_tokens: 2048
+grad_accum: 8
+gradient_checkpointing: true
 kl_coef: 0.1
 role_shuffle: false
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/population_experiments/05_4agent_char_lora_r16_selfplay
+output_dir: runs/negotiation_population_experiments/09_4agent_char_independent
 
 character_prompts:
   Marcus: >-

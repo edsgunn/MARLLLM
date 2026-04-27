@@ -1,12 +1,11 @@
-name: 4agent_char_lora_r16_roundrobin
+name: 4agent_char_lora_r16_shuffle
 description: >
-  Four character agents with LoRA r=16 and round_robin pairing. Every ordered
-  (A,B) pair appears exactly once per cycle of 12 episodes, guaranteeing uniform
-  exposure across all pairings regardless of batch size. Compared with 02 (random
-  pairing), tests whether deterministic coverage of all pairings leads to more
-  balanced per-agent training or whether the stochasticity of random pairing is
-  beneficial. Particularly informative when rollouts per iteration is small
-  relative to the number of unique pairings.
+  Four character agents with LoRA r=16 and role_shuffle enabled. Role shuffle
+  randomly assigns which agent moves first each episode, preventing agents from
+  locking in first-mover or responder strategies. Tests whether eliminating role
+  asymmetry in the population setting improves policy robustness or disrupts the
+  character-conditioned strategies observed in 02. Direct comparison with 02
+  isolates the role_shuffle effect on population dynamics.
 script: train_population
 
 slurm:
@@ -22,21 +21,21 @@ dtype: bfloat16
 lora_shared_base: true
 lora_r: 16
 lora_alpha: 16
-pairing_strategy: round_robin
+pairing_strategy: random_no_self
 iters: 500
-rollouts: 12
+rollouts: 8
 lr: 1.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
+max_episode_tokens: 2048
 grad_accum: 4
 gradient_checkpointing: false
 kl_coef: 0.1
-role_shuffle: false
+role_shuffle: true
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/population_experiments/06_4agent_char_lora_r16_roundrobin
+output_dir: runs/negotiation_population_experiments/04_4agent_char_lora_r16_shuffle
 
 character_prompts:
   Marcus: >-

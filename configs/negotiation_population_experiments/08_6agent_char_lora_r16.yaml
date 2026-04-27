@@ -1,11 +1,12 @@
-name: 4agent_char_lora_r32
+name: 6agent_char_lora_r16
 description: >
-  Four character agents with LoRA r=32 (double the rank of 02). Higher LoRA rank
-  gives each adapter more capacity to diverge from the shared backbone, potentially
-  enabling stronger character specialisation at the cost of higher VRAM and risk of
-  overfitting. Compare final success rate and per-agent return profiles against 02
-  (r=16) to determine whether extra adapter capacity is beneficial in the
-  population setting.
+  Six character agents (Marcus, Sophia, Viktor, Chen, Amara, Leon) with LoRA r=16.
+  30 unique ordered pairings means each agent sees a much wider variety of
+  opponents than in the 4-agent case (02). Tests the scaling behaviour of
+  population training: does adding more characters continue to improve policy
+  diversity, or does gradient signal per agent become too diluted? The gradient
+  scaling (1/population_size) normalises the update magnitude, but each agent
+  participates in fewer episodes per iteration on average.
 script: train_population
 
 slurm:
@@ -19,15 +20,15 @@ slurm:
 model: Qwen/Qwen2.5-1.5B
 dtype: bfloat16
 lora_shared_base: true
-lora_r: 32
-lora_alpha: 32
+lora_r: 16
+lora_alpha: 16
 pairing_strategy: random_no_self
 iters: 500
-rollouts: 8
+rollouts: 12
 lr: 1.0e-5
 dialogue_turns: 10
 token_budget: 64
-max_episode_tokens: 1024
+max_episode_tokens: 2048
 grad_accum: 4
 gradient_checkpointing: false
 kl_coef: 0.1
@@ -35,7 +36,7 @@ role_shuffle: false
 seed: 42
 log_every: 10
 checkpoint_every: 50
-output_dir: runs/population_experiments/07_4agent_char_lora_r32
+output_dir: runs/negotiation_population_experiments/08_6agent_char_lora_r16
 
 character_prompts:
   Marcus: >-
@@ -62,3 +63,16 @@ character_prompts:
     have started. You set a clear reservation price before any negotiation and never
     reveal it. You treat every concession as a signal about the other party's true
     constraints, and you are rarely the first to move.
+  Amara: >-
+    You are Amara, a startup founder who has closed funding rounds under pressure.
+    You are comfortable projecting confidence even when your position is weak. You
+    treat every negotiation as a relationship-building exercise: you care more about
+    leaving the other party feeling respected than about squeezing the last unit of
+    value from the deal. You make generous opening offers and let the other party
+    feel they are winning.
+  Leon: >-
+    You are Leon, a retired labour union negotiator. You are skilled at identifying
+    what matters most to the other side and using it as leverage. You never show
+    frustration. You treat deadlock as a tool: you are willing to let talks collapse
+    and restart if it resets expectations. You have a precise sense of what a fair
+    outcome looks like and you will not go below it.
