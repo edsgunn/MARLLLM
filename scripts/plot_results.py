@@ -60,19 +60,23 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
     for k in keys:
         data[k] = np.array([r.get(k, float("nan")) for r in rows], dtype=float)
 
-    # Discover entity prefixes from keys (e.g. agent_0, player_0, worker_2 ...)
-    # Any key of the form "<word>_<int>/<metric>" is an entity key.
+    # Discover entity prefixes from keys.
+    # Matches both numeric-suffixed names (agent_0, player_1) and plain names
+    # (Marcus, Sophia). Excludes known non-agent top-level namespaces.
     import re as _re
-    entity_prefix_re = _re.compile(r"^([a-zA-Z_]+\d+)/(.+)$")
+    _SKIP_PREFIXES = {"env_episodes"}
+    entity_prefix_re = _re.compile(r"^([A-Za-z][A-Za-z0-9_]*)/(.+)$")
     entity_metrics: dict[str, set[str]] = {}  # prefix -> set of metric names
     for k in keys:
         m = entity_prefix_re.match(k)
         if m:
             prefix, metric = m.group(1), m.group(2)
-            entity_metrics.setdefault(prefix, set()).add(metric)
+            if prefix not in _SKIP_PREFIXES:
+                entity_metrics.setdefault(prefix, set()).add(metric)
 
-    # Find the ordered list of entity prefixes sharing the same base name
-    # e.g. ["player_0", "player_1", "player_2"] or ["agent_0", "agent_1"]
+    # Find the ordered list of entity prefixes.
+    # Prefer numeric-suffixed groups (agent_0, agent_1 …); fall back to
+    # alphabetical order for named agents (Marcus, Sophia, Viktor …).
     base_re = _re.compile(r"^([a-zA-Z_]+)(\d+)$")
     base_groups: dict[str, list[tuple[int, str]]] = {}
     for prefix in entity_metrics:
@@ -81,11 +85,15 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
             base, idx = bm.group(1), int(bm.group(2))
             base_groups.setdefault(base, []).append((idx, prefix))
 
-    # Use the largest group as "the agents"
     if base_groups:
         best_base = max(base_groups, key=lambda b: len(base_groups[b]))
         ordered_prefixes = [p for _, p in sorted(base_groups[best_base])]
+    elif entity_metrics:
+        ordered_prefixes = sorted(entity_metrics.keys())
+    else:
+        ordered_prefixes = []
 
+    if ordered_prefixes:
         all_metrics: set[str] = set()
         for p in ordered_prefixes:
             all_metrics |= entity_metrics.get(p, set())
@@ -95,6 +103,8 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
                       if f"{p}/{metric}" in data]
             if series:
                 data[f"agents/{metric}"] = np.stack(series)  # (n_agents, T)
+
+        data["agent_names"] = ordered_prefixes
 
     return data
 
@@ -125,6 +135,7 @@ def _agent_mean(data: dict, key: str) -> np.ndarray | None:
 def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     iters = data.get("iteration", np.arange(len(data["total_loss"])))
     has_kl = np.any(data.get("agents/kl", np.zeros(1)) != 0)
+    agent_names: list[str] = data.get("agent_names", [])
 
     # Layout: 3 rows always; optional KL row appended
     n_rows = 3 + (1 if has_kl else 0)
@@ -178,7 +189,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     if "agents/entropy" in data:
         for i, series in enumerate(data["agents/entropy"]):
             ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    label=f"agent_{i}")
+                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
         ax.legend(loc="upper right")
     ax.set_title("Policy entropy (per agent)")
     ax.set_ylabel("entropy (nats)")
@@ -188,7 +199,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     if "agents/act_loss" in data:
         for i, series in enumerate(data["agents/act_loss"]):
             ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    label=f"agent_{i}")
+                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
         ax.legend(loc="upper right")
     ax.set_title("Action loss — REINFORCE (per agent)")
     ax.set_ylabel("loss")
@@ -197,7 +208,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     if "agents/value_loss" in data:
         for i, series in enumerate(data["agents/value_loss"]):
             ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    label=f"agent_{i}")
+                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
         ax.legend(loc="upper right")
     ax.set_title("Value loss (per agent)")
     ax.set_ylabel("loss")
@@ -208,7 +219,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
         if "agents/kl" in data:
             for i, series in enumerate(data["agents/kl"]):
                 ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                        label=f"agent_{i}")
+                        label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
             ax.legend()
         ax.set_title("KL from reference (per agent)")
         ax.set_ylabel("KL")
@@ -217,7 +228,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
         if "agents/perc_loss" in data:
             for i, series in enumerate(data["agents/perc_loss"]):
                 ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                        label=f"agent_{i}")
+                        label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
             ax.legend()
         ax.set_title("Perception loss — NTP on obs tokens (per agent)")
         ax.set_ylabel("loss")

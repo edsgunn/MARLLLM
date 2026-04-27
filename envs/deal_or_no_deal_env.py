@@ -18,14 +18,6 @@ Scoring
   score = sum(items_received[i] * values[i])
   No deal (parse failure or allocations don't sum to totals): both score 0.
 
-Shared-context note
--------------------
-The Trainer adds every obs to every agent's context window.  This means each
-agent sees the other's private context obs.  This is a known limitation of the
-current trainer design; strict information asymmetry would require a modified
-Trainer.  The negotiation remains non-trivial because the agents have different
-valuations and must produce utterances the other can respond to coherently.
-
 Observation sequencing
 ----------------------
 agent_0 acts first (selector is initialised to agent_0 at reset).
@@ -149,19 +141,47 @@ class DealOrNoDealEnv(AECEnv):
         items_str = ", ".join(f"{c[i]} {ITEM_NAMES[i]}" for i in range(N_ITEMS))
         vals_str  = ", ".join(f"{ITEM_NAMES[i]}={v[i]}" for i in range(N_ITEMS))
         return self._enc(
-            f"Negotiation. Items: {items_str}. "
-            f"Your values: {vals_str}. "
-            f"Max score: {MAX_VALUE_SUM}. "
-            f"Agree on how to split the items."
+            f"NEGOTIATION TASK\n"
+            f"You are negotiating with another agent to divide a set of items between you.\n"
+            f"\n"
+            f"Items to divide: {items_str}\n"
+            f"Your private values: {vals_str} (out of a max total of {MAX_VALUE_SUM})\n"
+            f"The other agent has different private values that you do not know.\n"
+            f"\n"
+            f"HOW TO PLAY\n"
+            f"- You will take turns exchanging messages with the other agent to negotiate.\n"
+            f"- Try to persuade the other agent to agree to a split that gives you high-value items.\n"
+            f"- You may reveal or conceal your values as you see fit.\n"
+            f"- After {self._max_dialogue_turns} dialogue turns, both agents must each submit a proposed allocation.\n"
+            f"\n"
+            f"HOW THE DEAL IS RESOLVED\n"
+            f"- Each agent independently submits which items they want to keep.\n"
+            f"- The deal succeeds only if your allocation and the other agent's allocation together "
+            f"account for ALL available items exactly (no item left over, none taken twice).\n"
+            f"- If the deal succeeds: your score = sum of (items you receive * your values).\n"
+            f"- If the deal fails: both agents score 0.\n"
+            f"\n"
+            f"ALLOCATION FORMAT (used at the end)\n"
+            f"When asked to submit your allocation, reply with exactly:\n"
+            f"books=N hats=N balls=N\n"
+            f"where N is the number of each item you want to keep.\n"
+            f"Example: if there are 2 books, 1 hat, 3 balls and you want all the books and one ball:\n"
+            f"books=2 hats=0 balls=1\n"
         )
 
     def _selection_prompt_obs(self) -> list[int]:
         c = self._items
         avail = ", ".join(f"{c[i]} {ITEM_NAMES[i]}" for i in range(N_ITEMS))
+        totals = ", ".join(f"{ITEM_NAMES[i]}={c[i]}" for i in range(N_ITEMS))
         return self._enc(
-            f"State your proposed share (items YOU want to keep). "
-            f"Available: {avail}. "
-            f"Reply: books=N hats=N balls=N"
+            f"SUBMIT YOUR ALLOCATION\n"
+            f"Dialogue is over. Now each agent independently submits the items they want to keep.\n"
+            f"Total items available: {avail}\n"
+            f"The deal succeeds only if your allocation and the other agent's add up to exactly: {totals}.\n"
+            f"If they do not sum correctly, both agents score 0.\n"
+            f"\n"
+            f"Reply with ONLY the following format (replace N with numbers):\n"
+            f"books=N hats=N balls=N"
         )
 
     def _outcome_obs(self, agent: str) -> list[int]:

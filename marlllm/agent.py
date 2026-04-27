@@ -313,7 +313,7 @@ class IndependentAgent(Agent):
     ) -> tuple[list[int], list[float]]:
         """Sample n_tokens tokens, reusing KV cache across steps."""
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
         sampled_ids: list[int] = []
         sampled_lps: list[float] = []
 
@@ -370,7 +370,7 @@ class IndependentAgent(Agent):
             for each context, in the same order as the input.
         """
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
         B = len(contexts)
         if B == 1:
             # Avoid padding overhead for a single context.
@@ -439,7 +439,7 @@ class IndependentAgent(Agent):
         Hidden states are detached before the value head (Option B).
         """
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
         out = self._backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -464,7 +464,7 @@ class IndependentAgent(Agent):
         if self._ref_backbone is None:
             return None
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
         out = self._ref_backbone(input_ids=input_ids, attention_mask=attention_mask)
         return out.logits
 
@@ -585,7 +585,7 @@ class LoRASharedBaseAgent(Agent):
     ) -> tuple[list[int], list[float]]:
         self._activate()
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
 
         sampled_ids: list[int] = []
         sampled_lps: list[float] = []
@@ -620,7 +620,7 @@ class LoRASharedBaseAgent(Agent):
     ) -> tuple[list[list[int]], list[list[float]]]:
         self._activate()
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
 
         B = len(contexts)
         if B == 1:
@@ -676,7 +676,7 @@ class LoRASharedBaseAgent(Agent):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         self._activate()
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
         out = self._backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -697,7 +697,7 @@ class LoRASharedBaseAgent(Agent):
         if not self._keep_ref_model:
             return None
         if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+            torch.cuda.set_device(self.device.index or 0)
         # The frozen pre-trained base (adapters disabled) serves as the reference
         # for both agents — consistent with anchoring each LoRA delta to the prior.
         with self._backbone.disable_adapter():

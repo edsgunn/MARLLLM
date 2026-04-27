@@ -471,8 +471,10 @@ class PopulationTrainer:
                         log_probs=[],
                         info={},
                     ))
-                    for role_ctx in contexts[k]:
-                        contexts[k][role_ctx].extend(obs_ids)
+                    # Only add the observation to the receiving agent's context.
+                    # The PettingZoo AEC API guarantees env.last() delivers the
+                    # observation only to the currently-selected agent.
+                    contexts[k][env_role].extend(obs_ids)
                     token_counts[k] += len(obs_ids)
 
                 if term or trunc:
@@ -559,19 +561,24 @@ class PopulationTrainer:
         """
         trajectories: list[Trajectory] = []
         for history, _ep_info, _pairing, pids, _env_name in agent_episodes:
-            padded: list[EpisodeStep] = []
+            steps: list[EpisodeStep] = []
             prompt = pids.get(pop_name, [])
             if prompt:
-                padded.append(EpisodeStep(
+                steps.append(EpisodeStep(
                     agent_id=pop_name,
                     token_ids=prompt,
                     token_type=TokenType.PAD,
                     log_probs=[],
                     info={},
                 ))
-            padded.extend(history)
+            for step in history:
+                # Include only steps belonging to this population member.
+                # Other agents' steps are excluded entirely so the transformer
+                # never attends to tokens pop_name did not observe during rollout.
+                if step.agent_id == pop_name:
+                    steps.append(step)
             traj = self.tokeniser.build_trajectory(
-                episode_history=padded,
+                episode_history=steps,
                 agent_ids_present=list(self.population.keys()),
             )
             trajectories.append(traj)

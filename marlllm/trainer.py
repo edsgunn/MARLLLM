@@ -94,65 +94,71 @@ class Trainer:
         for iteration in range(start_iteration, self.config.num_iterations + 1):
             # 1. Collect episodes — all N episodes run simultaneously so every
             # agent turn is a single batched forward pass instead of N serial ones.
+            # Each episode yields per-agent trajectory views (other agents' steps
+            # are masked as PAD in each view) so every agent trains only on the
+            # tokens it actually observed during rollout.
             episode_results: list[str] = []
             episode_correct_counts: list[int] = []
             trace_traj = None
             trace_info: dict = {}
-            for traj, ep_info in self._collect_episodes_batched(self.config.episodes_per_iter):
-                self.store.store(traj)
+            per_agent_trajs: dict[str, list] = {aid: [] for aid in self.agents}
+
+            for agent_traj_dict, ep_info in self._collect_episodes_batched(
+                self.config.episodes_per_iter
+            ):
+                for aid, traj in agent_traj_dict.items():
+                    if aid == "_combined":
+                        continue
+                    per_agent_trajs[aid].append(traj)
                 if trace_traj is None:
-                    trace_traj = traj
+                    # Use the combined-view trajectory (stored under the first
+                    # agent key) for the environment-overview trace only.
+                    trace_traj = agent_traj_dict.get("_combined") or next(
+                        iter(agent_traj_dict.values())
+                    )
                     trace_info = ep_info
                 if "result" in ep_info:
                     episode_results.append(ep_info["result"])
                 if "correct_count" in ep_info:
                     episode_correct_counts.append(ep_info["correct_count"])
 
-            # 2. Build batch
-            trajectories = self.store.sample(batch_size=self.config.episodes_per_iter)
-            if not trajectories:
-                self._logger.warning("iter %d: empty trajectory store, skipping update", iteration)
-                continue
-
+            # 2. Per-agent forward pass + losses with gradient accumulation.
+            # Each agent trains on its own N trajectories (the episodes it
+            # participated in, from its own observation perspective).  Both
+            # agents' backward passes accumulate into the shared optimizer
+            # before the step, matching the previous gradient magnitude.
             pad_id = self._pad_token_id()
-            # Keep batch on CPU; micro-batches are moved to each agent's device on demand.
-            batch = RolloutBatch.from_trajectories(
-                trajectories, self.agent_index, pad_id
-            )
-
-            # 3. Forward pass + losses with gradient accumulation.
-            # The batch is split into grad_accum_steps micro-batches; gradients
-            # are accumulated across micro-batches and all agents before the
-            # optimizer step.  Each agent runs on its own device so two large
-            # models never compete for the same GPU's memory.
-            grad_accum = self.config.grad_accum_steps
-            K = batch.input_ids.shape[0]
-            # Split K trajectories as evenly as possible into grad_accum buckets.
-            micro_size = max(1, (K + grad_accum - 1) // grad_accum)
-            micro_starts = list(range(0, K, micro_size))
-            num_micros = len(micro_starts)
-
             self.optimizer.zero_grad()
             total_loss_scalar = 0.0
             all_metrics: dict[str, float] = {}
 
-            for micro_start in micro_starts:
-                micro_end = min(micro_start + micro_size, K)
+            for agent_id, agent in self.agents.items():
+                trajs = per_agent_trajs[agent_id]
+                if not trajs:
+                    continue
 
-                for agent_id, agent in self.agents.items():
-                    agent.train_mode()
-                    dev = agent.device
+                batch = RolloutBatch.from_trajectories(
+                    trajs, self.agent_index, pad_id
+                )
+
+                K = batch.input_ids.shape[0]
+                grad_accum = max(1, min(self.config.grad_accum_steps, K))
+                micro_size = max(1, (K + grad_accum - 1) // grad_accum)
+                micro_starts = list(range(0, K, micro_size))
+                num_micros = len(micro_starts)
+
+                agent.train_mode()
+                dev = agent.device
+                agent_idx = self.agent_index[agent_id]
+
+                for micro_start in micro_starts:
+                    micro_end = min(micro_start + micro_size, K)
 
                     mb_input_ids      = batch.input_ids[micro_start:micro_end].to(dev)
                     mb_attention_mask = batch.attention_mask[micro_start:micro_end].to(dev)
                     mb_token_type     = batch.token_type_mask[micro_start:micro_end].to(dev)
                     mb_agent_id       = batch.agent_id_mask[micro_start:micro_end].to(dev)
 
-                    # Trim to the actual max sequence length within this micro-batch.
-                    # The full batch is padded to the longest trajectory across ALL K
-                    # episodes; individual micro-batches are often much shorter.
-                    # This can shrink the logits tensor from (B, T_global, V) to
-                    # (B, T_local, V), reducing the dominant memory cost significantly.
                     actual_len = int(mb_attention_mask.sum(dim=1).max())
                     if actual_len < mb_input_ids.shape[1]:
                         mb_input_ids      = mb_input_ids[:, :actual_len]
@@ -162,7 +168,6 @@ class Trainer:
 
                     logits, values = agent.evaluate(mb_input_ids, mb_attention_mask)
                     ref_logits = agent.evaluate_ref(mb_input_ids, mb_attention_mask)
-                    agent_idx = self.agent_index[agent_id]
 
                     loss_val, metrics = self.loss.compute_loss(
                         logits=logits,
@@ -175,7 +180,6 @@ class Trainer:
                         ref_logits=ref_logits,
                     )
 
-                    # Scale so the sum across micro-batches equals the full-batch loss.
                     (loss_val / num_micros).backward()
                     total_loss_scalar += loss_val.item() / num_micros
 
@@ -183,10 +187,10 @@ class Trainer:
                         key = f"{agent_id}/{k}"
                         all_metrics[key] = all_metrics.get(key, 0.0) + v / num_micros
 
-            # 4. Gradient update
+            # 3. Gradient update
             self.optimizer.step()
 
-            # 5. Clear on-policy store
+            # 4. Clear on-policy store (kept for API compatibility)
             self.store.clear()
 
             # 6. Log and checkpoint
@@ -264,8 +268,7 @@ class Trainer:
                     info={},
                 )
                 episode_history.append(obs_step)
-                for ctx_id in self.agents:
-                    contexts[ctx_id].extend(obs_ids)
+                contexts[agent_id].extend(obs_ids)
                 token_count += len(obs_ids)
 
             if term or trunc:
@@ -309,26 +312,84 @@ class Trainer:
                 episode_info = self.env.infos[aid]
                 break
 
-        # Prepend the primary agent's prompt as PAD-typed tokens.
-        # This ensures the training forward pass conditions on the same prefix
-        # as the rollout, keeping log-probs consistent across rollout and update.
-        primary = list(self.agents.keys())[0]
-        prompt_ids = prompt_ids_per_agent[primary]
-        if prompt_ids:
-            prompt_step = EpisodeStep(
+        agent_traj_dict = self._build_agent_views(episode_history, prompt_ids_per_agent)
+        return agent_traj_dict, episode_info
+
+    # ------------------------------------------------------------------ #
+    # Trajectory utilities                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _build_agent_views(
+        self,
+        history: list[EpisodeStep],
+        prompt_ids: dict[str, list[int]],
+    ) -> dict[str, "Trajectory"]:
+        """
+        Build one training trajectory per agent from a shared episode history.
+
+        Each agent's view contains ONLY the tokens that agent actually had in
+        its context window during rollout:
+
+          [PROMPT][OBS_1][ACT_1][OBS_2][ACT_2] ...
+
+        where every OBS and ACT step belongs to this agent.  Steps belonging
+        to other agents are excluded entirely — not remapped to PAD — so the
+        transformer never attends to tokens the agent did not observe.  This
+        matches the rollout context exactly: ``contexts[agent_id]`` during
+        collection is built from the same set of steps.
+
+        The PettingZoo AEC contract guarantees that ``env.last()`` delivers
+        each observation only to the currently-selected agent.  Other agents'
+        utterances reach this agent only after being processed by the
+        environment into a new OBS step addressed to this agent.
+
+        The dictionary also contains a ``"_combined"`` key holding a
+        trajectory with all steps in their original types, used only for
+        writing environment-overview traces (not for training).
+        """
+        agent_ids = list(self.agents.keys())
+        result: dict[str, "Trajectory"] = {}
+
+        for aid in agent_ids:
+            steps: list[EpisodeStep] = []
+            pids = prompt_ids.get(aid, [])
+            if pids:
+                steps.append(EpisodeStep(
+                    agent_id=aid,
+                    token_ids=pids,
+                    token_type=TokenType.PAD,
+                    log_probs=[],
+                    info={},
+                ))
+            for step in history:
+                # Include only steps that belong to this agent.
+                # Other agents' OBS and ACT are not in this agent's context.
+                if step.agent_id == aid:
+                    steps.append(step)
+            result[aid] = self.tokeniser.build_trajectory(
+                episode_history=steps,
+                agent_ids_present=agent_ids,
+            )
+
+        # Combined view for traces: all steps with original types.
+        primary = agent_ids[0]
+        combined_steps: list[EpisodeStep] = []
+        pids = prompt_ids.get(primary, [])
+        if pids:
+            combined_steps.append(EpisodeStep(
                 agent_id=primary,
-                token_ids=prompt_ids,
+                token_ids=pids,
                 token_type=TokenType.PAD,
                 log_probs=[],
                 info={},
-            )
-            episode_history = [prompt_step] + episode_history
-
-        traj = self.tokeniser.build_trajectory(
-            episode_history=episode_history,
-            agent_ids_present=list(self.agents.keys()),
+            ))
+        combined_steps.extend(history)
+        result["_combined"] = self.tokeniser.build_trajectory(
+            episode_history=combined_steps,
+            agent_ids_present=agent_ids,
         )
-        return traj, episode_info
+
+        return result
 
     # ------------------------------------------------------------------ #
     # Batched episode collection                                           #
@@ -406,8 +467,7 @@ class Trainer:
                         log_probs=[],
                         info={},
                     ))
-                    for ctx_id in self.agents:
-                        contexts[k][ctx_id].extend(obs_ids)
+                    contexts[k][agent_id].extend(obs_ids)
                     token_counts[k] += len(obs_ids)
 
                 if term or trunc:
@@ -460,24 +520,18 @@ class Trainer:
                     if not envs[k].agents:
                         active[k] = False
 
-        # --- Build trajectories ---
-        primary = list(self.agents.keys())[0]
+        # --- Build per-agent trajectory views ---
+        # Each agent's view contains only the steps it actually observed:
+        # - OBS steps addressed to this agent: kept as OBS (contribute to L_perc)
+        # - ACT steps by this agent: kept as ACT (contribute to L_act)
+        # - All other agents' OBS and ACT steps: remapped to PAD (excluded from
+        #   loss and return computation — this agent never saw them directly)
+        # This correctly reflects the PettingZoo AEC guarantee that env.last()
+        # delivers each observation only to the currently-selected agent.
         results = []
         for k in range(n):
-            pids = prompt_ids[k].get(primary, [])
-            if pids:
-                histories[k] = [EpisodeStep(
-                    agent_id=primary,
-                    token_ids=pids,
-                    token_type=TokenType.PAD,
-                    log_probs=[],
-                    info={},
-                )] + histories[k]
-            traj = self.tokeniser.build_trajectory(
-                episode_history=histories[k],
-                agent_ids_present=list(self.agents.keys()),
-            )
-            results.append((traj, ep_infos[k]))
+            agent_traj_dict = self._build_agent_views(histories[k], prompt_ids[k])
+            results.append((agent_traj_dict, ep_infos[k]))
         return results
 
     # ------------------------------------------------------------------ #

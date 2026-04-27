@@ -7,9 +7,12 @@ Produces two sections per trace:
    whom.  Each agent action that becomes another agent's observation is
    annotated with an arrow so the routing is explicit.
 
-2. PER-AGENT CONTEXT — for each agent, the full token sequence as it appeared
-   in their context window during inference (prompt + all obs broadcast by the
-   trainer + their own actions interspersed).
+2. PER-AGENT CONTEXT — for each agent, the exact token sequence that was in
+   their context window during inference: their character prompt, the
+   observations the environment delivered to them, and their own actions.
+   Other agents' observations and actions do not appear here because the
+   PettingZoo AEC API delivers each observation only to the agent whose turn
+   it is.
 """
 from __future__ import annotations
 
@@ -32,11 +35,10 @@ def _infer_obs_source(steps: list[EpisodeStep], obs_idx: int) -> str | None:
     Return the agent_id that produced the tokens in this OBS step, or None if
     the observation came directly from the environment.
 
-    The deal-or-no-deal env routes an agent's action to the other agent by
-    delivering the action tokens verbatim (possibly prepended with an env
-    context string on the first dialogue turn).  We detect this by checking
-    whether the most recent ACT step from a *different* agent is a suffix of
-    the OBS token_ids.
+    Many environments route an agent's action to the other agent by delivering
+    the action tokens verbatim (possibly prepended with an env context string
+    on the first dialogue turn).  We detect this by checking whether the most
+    recent ACT step from a *different* agent is a suffix of the OBS token_ids.
     """
     obs_step = steps[obs_idx]
     obs_ids = obs_step.token_ids
@@ -59,7 +61,7 @@ def format_trace(
     traj: Trajectory,
     ep_info: dict,
     tokenizer,
-    character_prompts: dict[str, str],
+    character_prompts: dict[str, str | list[str]],
 ) -> str:
     """
     Format a multi-agent episode trace as a human-readable string.
@@ -69,13 +71,16 @@ def format_trace(
     iteration:
         Iteration number (or a descriptive label for offline traces).
     traj:
-        Trajectory produced by the episode collector.
+        Trajectory for the episode.  Should contain the full combined-view
+        step sequence (all agents' steps in chronological order with their
+        original token types) — use the ``"_combined"`` trajectory from
+        ``Trainer._build_agent_views`` or an equivalent full-history view.
     ep_info:
         Episode metadata dict from the environment (result, scores, …).
     tokenizer:
         HuggingFace tokenizer used to decode token IDs.
     character_prompts:
-        Mapping agent_id → character prompt text used during this episode.
+        Mapping agent_id → prompt text (str or list[str]; first variant used).
     """
     steps = traj.steps
     agent_ids = traj.agent_ids_present
@@ -87,7 +92,6 @@ def format_trace(
     lines.append(f"result:         {ep_info.get('result', 'unknown')}")
     lines.append(f"correct_count:  {ep_info.get('correct_count', '?')}")
     lines.append(f"episode_length: {ep_info.get('episode_length', '?')}")
-    # Show any extra ep_info fields (scores etc.)
     for k, v in ep_info.items():
         if k not in {"result", "correct_count", "episode_length"}:
             lines.append(f"{k + ':':16s}{v}")
@@ -99,16 +103,16 @@ def format_trace(
     lines.append(_SEP_THICK)
     lines.append("")
     lines.append(
-        "  Legend:  [ENV→X] = environment sends observation to agent X"
+        "  Legend:  [ENV→X]    = environment sends observation to agent X"
     )
     lines.append(
-        "           [X→ENV] = agent X sends action to environment"
+        "           [X→ENV]    = agent X sends action to environment"
     )
     lines.append(
-        "           [Y+ENV→X] = agent Y's action was appended to env context and delivered to X"
+        "           [Y+ENV→X]  = agent Y's action appended to env context, delivered to X"
     )
     lines.append(
-        "           [Y→X]  = agent Y's action routed directly as observation to X"
+        "           [Y→X]      = agent Y's action routed directly as observation to X"
     )
     lines.append("")
 
@@ -124,7 +128,6 @@ def format_trace(
             lines.append("")
 
         elif step.token_type == TokenType.ACT:
-            # Peek ahead: does this action become the next agent's observation?
             routed_to: str | None = None
             for j in range(i + 1, len(steps)):
                 nxt = steps[j]
@@ -146,7 +149,6 @@ def format_trace(
             source = _infer_obs_source(steps, i)
 
             if source is not None:
-                # Find the source ACT to determine whether there is an env prefix
                 src_act_ids: list[int] = []
                 for j in range(i - 1, -1, -1):
                     if steps[j].token_type == TokenType.ACT and steps[j].agent_id == source:
@@ -178,23 +180,17 @@ def format_trace(
     lines.append("")
 
     # ── Section 2: Per-agent context views ───────────────────────────────
+    # Each agent's context contains only what that agent actually received:
+    # their character prompt, observations delivered to them by the env, and
+    # their own actions.  Other agents' steps are not shown here.
     for aid in agent_ids:
         lines.append(_SEP_THICK)
         lines.append(f"CONTEXT: {aid}  (tokens in this agent's context window)")
         lines.append(_SEP_THICK)
         lines.append("")
-        lines.append(
-            "  Note: the trainer broadcasts all OBS to every agent's context."
-        )
-        lines.append(
-            "  OBS steps marked [BROADCAST] were originally addressed to a"
-        )
-        lines.append(
-            "  different agent but appear in this context due to that design."
-        )
-        lines.append("")
 
-        prompt_text = character_prompts.get(aid, "(none)")
+        prompt_val = character_prompts.get(aid, "(none)")
+        prompt_text = prompt_val[0] if isinstance(prompt_val, list) else prompt_val
         lines.append(f"  [PROMPT]")
         lines.append(f"    {prompt_text!r}")
         lines.append("")
@@ -203,19 +199,15 @@ def format_trace(
             if step.token_type == TokenType.PAD:
                 continue  # shown above as [PROMPT]
 
+            # Only show steps this agent actually received.
+            if step.agent_id != aid:
+                continue
+
             decoded = _decode(tokenizer, step.token_ids)
             ids = _ids_str(step.token_ids)
 
             if step.token_type == TokenType.OBS:
-                # All OBS go to all contexts (trainer broadcast behaviour)
                 source = _infer_obs_source(steps, i)
-                addressed_to = step.agent_id
-
-                if addressed_to != aid:
-                    broadcast_note = f"  [BROADCAST — addressed to {addressed_to}]"
-                else:
-                    broadcast_note = ""
-
                 if source is not None:
                     src_act_ids = []
                     for j in range(i - 1, -1, -1):
@@ -231,13 +223,13 @@ def format_trace(
                 else:
                     origin = "from ENV"
 
-                lines.append(f"  [OBS]{broadcast_note}")
+                lines.append(f"  [OBS]")
                 lines.append(f"    origin: {origin}")
                 lines.append(f"    {decoded!r}")
                 lines.append(f"    ids=[{ids}]")
                 lines.append("")
 
-            elif step.token_type == TokenType.ACT and step.agent_id == aid:
+            elif step.token_type == TokenType.ACT:
                 lines.append(f"  [ACT]")
                 lines.append(f"    {decoded!r}")
                 lines.append(f"    ids=[{ids}]")

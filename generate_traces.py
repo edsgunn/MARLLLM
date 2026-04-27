@@ -338,11 +338,13 @@ def main() -> None:
     print(f"Collecting {args.n_traces} episodes …")
     episodes = trainer._collect_episodes_batched(args.n_traces)
 
-    success = sum(1 for _, info in episodes if info.get("result") == "success")
+    success = sum(1 for _, info in episodes if info.get("result") == "success")  # noqa: _ = agent_traj_dict
     print(f"  {success}/{args.n_traces} successful deals")
 
     character_prompts = {"agent_0": prompt_0, "agent_1": prompt_1}
-    for idx, (traj, ep_info) in enumerate(episodes):
+    for idx, (agent_traj_dict, ep_info) in enumerate(episodes):
+        # Use the combined-view trajectory for traces (all steps in original types).
+        traj = agent_traj_dict.get("_combined") or next(iter(agent_traj_dict.values()))
         label = f"ckpt{checkpoint_iter}_ep{idx:04d}"
         text = format_trace(
             iteration=label,
