@@ -675,22 +675,26 @@ class PopulationTrainer:
         pairing: tuple[str, str],
         env_name: str,
     ) -> None:
+        from marlllm.trace_utils import format_trace_json
+
         tok = list(self.population.values())[0].tokenizer
         traces_dir = Path(self.config.output_dir) / "traces"
         traces_dir.mkdir(exist_ok=True)
-        path = traces_dir / f"iter_{iteration:06d}.txt"
         ep_info_ext = dict(ep_info)
         ep_info_ext["pairing"] = f"{pairing[0]} vs {pairing[1]}"
         ep_info_ext["env"] = env_name
-        text = format_trace(
+
+        kwargs = dict(
             iteration=iteration,
             traj=traj,
             ep_info=ep_info_ext,
             tokenizer=tok,
             character_prompts=self.config.character_prompts,
         )
-        with open(path, "w") as f:
-            f.write(text)
+        with open(traces_dir / f"iter_{iteration:06d}.txt", "w") as f:
+            f.write(format_trace(**kwargs))
+        with open(traces_dir / f"iter_{iteration:06d}.json", "w") as f:
+            json.dump(format_trace_json(**kwargs), f, indent=2)
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:

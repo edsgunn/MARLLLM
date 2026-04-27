@@ -663,32 +663,23 @@ class Trainer:
         self._logger.info(" | ".join(parts))
 
     def _write_trace(self, iteration: int, traj, ep_info: dict) -> None:
-        """
-        Decode and save the first episode of this iteration as a human-readable
-        trace file under <output_dir>/traces/iter_XXXXXX.txt.
-
-        The trace has two sections:
-          1. ENVIRONMENT OVERVIEW — chronological event log showing which agent
-             sent what to whom, including action→observation routing arrows.
-          2. PER-AGENT CONTEXT — each agent's full context window with broadcast
-             observations annotated.
-        """
-        from marlllm.trace_utils import format_trace
+        from marlllm.trace_utils import format_trace, format_trace_json
 
         tok = list(self.agents.values())[0].tokenizer
         traces_dir = Path(self.config.output_dir) / "traces"
         traces_dir.mkdir(exist_ok=True)
-        path = traces_dir / f"iter_{iteration:06d}.txt"
 
-        text = format_trace(
+        kwargs = dict(
             iteration=iteration,
             traj=traj,
             ep_info=ep_info,
             tokenizer=tok,
             character_prompts=self.config.character_prompts,
         )
-        with open(path, "w") as f:
-            f.write(text)
+        with open(traces_dir / f"iter_{iteration:06d}.txt", "w") as f:
+            f.write(format_trace(**kwargs))
+        with open(traces_dir / f"iter_{iteration:06d}.json", "w") as f:
+            json.dump(format_trace_json(**kwargs), f, indent=2)
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:
