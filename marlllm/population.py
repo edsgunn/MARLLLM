@@ -430,16 +430,15 @@ class PopulationTrainer:
         for k in range(n):
             spec = env_specs[k]
             for env_role, pop_name in env_role_to_name[k].items():
+                formatter = self.population[pop_name].context_formatter
                 if pop_name not in prompt_ids[k]:
                     prompt_text = self._sample_prompt(pop_name, spec)
                     pids = self.tokeniser.encode_prompt(prompt_text)
                     prompt_ids[k][pop_name] = pids
-                    # Both env roles share the same prompt_ids dict; each
-                    # character's context is keyed by env role.
-                    contexts[k][env_role] = list(pids)
+                    contexts[k][env_role] = formatter.wrap_prompt(pids)
                 else:
                     # Self-play: both roles map to the same character — reuse.
-                    contexts[k][env_role] = list(prompt_ids[k][pop_name])
+                    contexts[k][env_role] = formatter.wrap_prompt(prompt_ids[k][pop_name])
 
         # Per-episode token budget from the env (may differ across env types).
         n_tokens_per_ep: list[int] = [
@@ -471,10 +470,8 @@ class PopulationTrainer:
                         log_probs=[],
                         info={},
                     ))
-                    # Only add the observation to the receiving agent's context.
-                    # The PettingZoo AEC API guarantees env.last() delivers the
-                    # observation only to the currently-selected agent.
-                    contexts[k][env_role].extend(obs_ids)
+                    formatter = self.population[pop_name].context_formatter
+                    contexts[k][env_role].extend(formatter.wrap_observation(obs_ids))
                     token_counts[k] += len(obs_ids)
 
                 if term or trunc:
@@ -513,6 +510,7 @@ class PopulationTrainer:
                         temperature=self.config.temperature,
                     )
 
+                formatter = self.population[pop_name].context_formatter
                 for j, k in enumerate(env_indices):
                     act_ids = batch_ids[j]
                     act_lps = batch_lps[j]
@@ -531,7 +529,7 @@ class PopulationTrainer:
                         log_probs=act_lps,
                         info={},
                     ))
-                    contexts[k][env_role].extend(act_ids)
+                    contexts[k][env_role].extend(formatter.wrap_action(act_ids))
                     token_counts[k] += len(act_ids)
                     envs[k].step(act_ids)
                     if not envs[k].agents:
@@ -559,6 +557,7 @@ class PopulationTrainer:
         when prompt variants are enabled), ensuring the training forward pass
         is conditioned on the same context the agent saw during rollout.
         """
+        formatter = self.population[pop_name].context_formatter
         trajectories: list[Trajectory] = []
         for history, _ep_info, _pairing, pids, _env_name in agent_episodes:
             steps: list[EpisodeStep] = []
@@ -566,17 +565,20 @@ class PopulationTrainer:
             if prompt:
                 steps.append(EpisodeStep(
                     agent_id=pop_name,
-                    token_ids=prompt,
+                    token_ids=formatter.wrap_prompt(prompt),
                     token_type=TokenType.PAD,
                     log_probs=[],
                     info={},
                 ))
             for step in history:
-                # Include only steps belonging to this population member.
-                # Other agents' steps are excluded entirely so the transformer
-                # never attends to tokens pop_name did not observe during rollout.
                 if step.agent_id == pop_name:
-                    steps.append(step)
+                    if step.token_type == TokenType.OBS:
+                        fids = formatter.wrap_observation(step.token_ids)
+                    elif step.token_type == TokenType.ACT:
+                        fids = formatter.wrap_action(step.token_ids)
+                    else:
+                        fids = step.token_ids
+                    steps.append(EpisodeStep(pop_name, fids, step.token_type, step.log_probs, step.info))
             traj = self.tokeniser.build_trajectory(
                 episode_history=steps,
                 agent_ids_present=list(self.population.keys()),

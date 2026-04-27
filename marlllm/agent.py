@@ -167,6 +167,7 @@ class IndependentAgent(Agent):
         lora_target_modules: list[str] | None = None,
         compile_model: bool = False,
         attn_implementation: str | None = None,
+        context_formatter: str = "auto",
     ) -> None:
         """
         Args:
@@ -266,6 +267,9 @@ class IndependentAgent(Agent):
             self._ref_backbone.eval()
         else:
             self._ref_backbone = None
+
+        from marlllm.context_formatter import make_formatter
+        self.context_formatter = make_formatter(self._tokenizer, context_formatter)
 
     # ------------------------------------------------------------------ #
     # Agent interface                                                       #
@@ -519,6 +523,7 @@ class LoRASharedBaseAgent(Agent):
         tokenizer: PreTrainedTokenizerBase,
         device: torch.device | str,
         keep_ref_model: bool = False,
+        context_formatter: str = "auto",
     ) -> None:
         self._agent_id = agent_id
         self._character_prompt = character_prompt
@@ -531,6 +536,9 @@ class LoRASharedBaseAgent(Agent):
         hidden_size = shared_backbone.config.hidden_size
         model_dtype = next(p for p in shared_backbone.parameters() if p.dtype.is_floating_point).dtype
         self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+
+        from marlllm.context_formatter import make_formatter
+        self.context_formatter = make_formatter(self._tokenizer, context_formatter)
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #

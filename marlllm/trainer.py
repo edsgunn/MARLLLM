@@ -351,27 +351,37 @@ class Trainer:
         result: dict[str, "Trajectory"] = {}
 
         for aid in agent_ids:
+            formatter = self.agents[aid].context_formatter
             steps: list[EpisodeStep] = []
             pids = prompt_ids.get(aid, [])
             if pids:
                 steps.append(EpisodeStep(
                     agent_id=aid,
-                    token_ids=pids,
+                    token_ids=formatter.wrap_prompt(pids),
                     token_type=TokenType.PAD,
                     log_probs=[],
                     info={},
                 ))
             for step in history:
-                # Include only steps that belong to this agent.
-                # Other agents' OBS and ACT are not in this agent's context.
+                # Include only steps that belong to this agent, with role
+                # markers applied so the training forward pass sees the same
+                # formatted context as the rollout act() calls did.
                 if step.agent_id == aid:
-                    steps.append(step)
+                    if step.token_type == TokenType.OBS:
+                        fids = formatter.wrap_observation(step.token_ids)
+                    elif step.token_type == TokenType.ACT:
+                        fids = formatter.wrap_action(step.token_ids)
+                    else:
+                        fids = step.token_ids
+                    steps.append(EpisodeStep(aid, fids, step.token_type, step.log_probs, step.info))
             result[aid] = self.tokeniser.build_trajectory(
                 episode_history=steps,
                 agent_ids_present=agent_ids,
             )
 
-        # Combined view for traces: all steps with original types.
+        # Combined view for traces: raw tokens, no formatting applied.
+        # trace_utils relies on suffix-matching OBS against prior ACT tokens
+        # to detect routing; formatting would break that detection.
         primary = agent_ids[0]
         combined_steps: list[EpisodeStep] = []
         pids = prompt_ids.get(primary, [])
@@ -434,11 +444,11 @@ class Trainer:
         active:        list[bool]                   = [True] * n
 
         for k in range(n):
-            for agent_id in self.agents:
+            for agent_id, agent in self.agents.items():
                 pt = self.config.character_prompts.get(agent_id, "")
                 pids = self.tokeniser.encode_prompt(pt)
                 prompt_ids[k][agent_id] = pids
-                contexts[k][agent_id] = list(pids)
+                contexts[k][agent_id] = agent.context_formatter.wrap_prompt(pids)
 
         # --- Step all envs until every one is done ---
         while any(active):
@@ -457,7 +467,8 @@ class Trainer:
                 agent_id = env.agent_selection
                 obs, _rew, term, trunc, _info = env.last()
 
-                # Append observation to this episode's history
+                # Append observation to this episode's history (raw ids) and
+                # the formatted version to the context buffer for act().
                 obs_ids = self.tokeniser.encode_observation(obs)
                 if obs_ids:
                     histories[k].append(EpisodeStep(
@@ -467,7 +478,8 @@ class Trainer:
                         log_probs=[],
                         info={},
                     ))
-                    contexts[k][agent_id].extend(obs_ids)
+                    formatter = self.agents[agent_id].context_formatter
+                    contexts[k][agent_id].extend(formatter.wrap_observation(obs_ids))
                     token_counts[k] += len(obs_ids)
 
                 if term or trunc:
@@ -504,6 +516,7 @@ class Trainer:
                         temperature=self.config.temperature,
                     )
 
+                formatter = self.agents[agent_id].context_formatter
                 for j, k in enumerate(env_indices):
                     act_ids = batch_ids[j]
                     act_lps = batch_lps[j]
@@ -514,7 +527,7 @@ class Trainer:
                         log_probs=act_lps,
                         info={},
                     ))
-                    contexts[k][agent_id].extend(act_ids)
+                    contexts[k][agent_id].extend(formatter.wrap_action(act_ids))
                     token_counts[k] += len(act_ids)
                     envs[k].step(act_ids)
                     if not envs[k].agents:
