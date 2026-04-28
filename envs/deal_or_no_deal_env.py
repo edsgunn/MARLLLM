@@ -42,6 +42,8 @@ from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 from transformers import PreTrainedTokenizerBase
 
+from marlllm.thinking import strip_thinking
+
 
 ITEM_NAMES: tuple[str, ...] = ("books", "hats", "balls")
 N_ITEMS: int = len(ITEM_NAMES)
@@ -59,7 +61,14 @@ class DealOrNoDealEnv(AECEnv):
         Total dialogue turns across both agents (default 10 = 5 each).
         After this many turns the selection phase begins.
     action_token_budget:
-        Tokens each agent may generate per turn.  Read by the Trainer.
+        Tokens each agent may generate per turn (the *generation* budget,
+        including any internal <think>...</think> reasoning).  Read by the
+        population trainer to set the per-call token limit for act_batch.
+    env_token_budget:
+        Maximum *communication* tokens passed to the environment after
+        thinking tokens have been stripped.  Must be <= action_token_budget.
+        If None (default) no stripping or truncation is applied — the full
+        action is used as-is, which is the backward-compatible behaviour.
     max_item_count:
         Maximum units of any one item type per episode (inclusive).
     seed:
@@ -73,6 +82,7 @@ class DealOrNoDealEnv(AECEnv):
         tokenizer: PreTrainedTokenizerBase,
         max_dialogue_turns: int = 10,
         action_token_budget: int = 64,
+        env_token_budget: int | None = None,
         max_item_count: int = 5,
         seed: int | None = None,
         role_shuffle: bool = False,
@@ -81,7 +91,8 @@ class DealOrNoDealEnv(AECEnv):
 
         self._tok = tokenizer
         self._max_dialogue_turns = max_dialogue_turns
-        self.action_token_budget = action_token_budget  # read by Trainer
+        self.action_token_budget = action_token_budget  # read by Trainer (generation budget)
+        self._env_token_budget = env_token_budget
         self._max_item_count = max_item_count
         self._rng = random.Random(seed)
         self._role_shuffle = role_shuffle
@@ -216,6 +227,26 @@ class DealOrNoDealEnv(AECEnv):
             self._pending_obs[agent] = obs
 
     # ------------------------------------------------------------------ #
+    # Action pre-processing                                                #
+    # ------------------------------------------------------------------ #
+
+    def _preprocess_action(self, token_ids: list[int]) -> list[int]:
+        """
+        Strip thinking tokens and truncate to env_token_budget.
+
+        When env_token_budget is None the action passes through unchanged
+        (backward-compatible default).  When set, <think>...</think> blocks
+        are removed before truncation so the budget applies only to the
+        tokens the agent actually communicates.
+        """
+        if self._env_token_budget is None:
+            return token_ids
+        text = self._tok.decode(token_ids, skip_special_tokens=False)
+        text = strip_thinking(text)
+        stripped_ids = self._tok.encode(text, add_special_tokens=False)
+        return stripped_ids[: self._env_token_budget]
+
+    # ------------------------------------------------------------------ #
     # Allocation parsing                                                   #
     # ------------------------------------------------------------------ #
 
@@ -327,7 +358,7 @@ class DealOrNoDealEnv(AECEnv):
 
         if action is None:
             action = []
-        action = list(action)
+        action = self._preprocess_action(list(action))
 
         other = "agent_1" if agent == "agent_0" else "agent_0"
 

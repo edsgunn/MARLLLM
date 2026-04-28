@@ -1,0 +1,104 @@
+name: terminal_stage35_embodiment
+description: >
+  Stage 3.5 — multi-agent shared scratch. N=2. ~25–45% action tokens.
+
+  THE load-bearing experimental config for the framework's core claim.
+
+  Load weights from Stage 3 with --resume-from.  Both agents start from the
+  same Stage 3 checkpoint (shared-weights=true means they ARE the same object).
+
+  What changes from Stage 3:
+    - scratch_shared=True: both agents' shells see the same $SCRATCH directory
+    - corpus_shared=True: both agents see the same corpus file selection
+    - n_agents=2: agents alternate turns in PettingZoo AEC order
+
+  The embodiment claim under test:
+    Agent 1's `cat $SCRATCH/notes/quantum.txt` delivers Agent 0's previously
+    written text as a plain list[int] observation — σ_t=1 by construction,
+    indistinguishable from reading a corpus file.  No special routing, no
+    provenance tracking, no inter-agent labelling.  If the agents coordinate
+    (Agent 0 writes useful notes; Agent 1 reads them before searching), it
+    emerges purely from the CCSM objective applied to the shared filesystem.
+
+  Coordination signal to measure:
+    Coordination is happening if Agent 1's grep/cat commands within an episode
+    overlap significantly with Agent 0's earlier $SCRATCH writes.  Specifically:
+      - Does Agent 1 issue `cat $SCRATCH/notes/*.txt` more often than in the
+        N=1 ablation?
+      - Does Agent 1's observation surprise drop AFTER reading $SCRATCH
+        (suggesting Agent 0's notes are predictive of the corpus)?
+    Compare against 05_stage35_ablation_n1 running in parallel.
+
+  Shared weights rationale: one world model must condition on two distinct
+  character prompts to produce two distinct roles (archivist and synthesizer).
+  This is a strict test of prompt-conditionality.  The prompts are designed
+  with a latent dependency: the synthesizer's prompt explicitly references
+  $SCRATCH/index.txt, which the archivist's prompt says to write.  This gives
+  the model a specific coordination target to discover without the training
+  loop ever naming it.
+
+  Key tradeoffs:
+    1. shared_weights (true here) vs. independent weights (set shared_weights:
+       false): shared weights forces the coordination strategy to be represented
+       in a single model; independent weights allow specialisation but double
+       the optimizer state and VRAM.
+    2. kl_coef: 0.05 here, same as Stage 3, to prevent the shared filesystem
+       from triggering a new collapse attractor (both agents writing the same
+       file in a loop).
+    3. temperature: 1.0.  Consider increasing to 1.1–1.2 in a follow-up run
+       if agents converge to identical behaviours despite different prompts
+       (sign of a mode collapse in the shared policy).
+
+script: train_terminal
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 1          # shared weights → one model fits on one GH200
+  cpus_per_gpu: 16
+  mem: "80G"                # two shells per episode; headroom for subprocess overhead
+  partition: workq
+
+model: HuggingFaceTB/SmolLM2-135M
+dtype: bfloat16
+stage: "3.5"
+# corpus_path: /path/to/your/corpus
+# --resume-from runs/terminal_experiments/03_stage3_write_access/checkpoints/final.pt
+
+n_agents: 2
+shared_weights: true
+
+token_budget: 32768
+action_token_budget: 128
+files_per_episode: 20
+overlap_fraction: 0.2
+command_timeout: 30
+max_output_chars: 8192
+
+iters: 1000
+rollouts: 8
+lr: 1.0e-5                  # conservative: Stage 3.5 is a delicate landscape
+max_episode_tokens: 65536
+temperature: 1.0
+kl_coef: 0.05
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+
+# Archivist: writes structured notes others can use
+prompt_0: >-
+  You are an archivist cataloging a scientific corpus. After reading each
+  document, write a concise summary to $SCRATCH/notes/{filename}.txt.
+  Start each session by listing what you have already archived: ls $SCRATCH/notes/.
+
+# Synthesizer: reads what the archivist left before searching
+prompt_1: >-
+  You are a research synthesizer. Before reading any corpus files, check
+  what your collaborator has already noted: cat $SCRATCH/notes/*.txt 2>/dev/null.
+  Then search for connections across topics using grep. Write synthesis
+  reports to $SCRATCH/synthesis/.
+
+log_every: 10
+checkpoint_every: 100
+output_dir: runs/terminal_experiments/04_stage35_embodiment
+seed: 42

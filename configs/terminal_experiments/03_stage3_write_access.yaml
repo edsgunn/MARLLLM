@@ -1,0 +1,84 @@
+name: terminal_stage3_write_access
+description: >
+  Stage 3 — write access in private scratch.  ~15–35% action tokens.
+
+  Load weights from Stage 2 with --resume-from.
+
+  New commands: echo, mkdir, touch, mv, cp, rm, sed, awk, tee, python3.
+  All file mutations are restricted to $SCRATCH by the shell's guard functions
+  (rm/mv/cp are bash-function wrappers that call realpath and reject paths
+  outside $SCRATCH).  The corpus remains read-only.
+
+  This is the first stage where actions have PERSISTENT STATE EFFECTS within
+  an episode.  The agent can now:
+    - Write summaries to $SCRATCH/notes.txt after reading a document
+    - Use python3 to extract statistics from corpus files
+    - Create a structured index in $SCRATCH/index/
+
+  Primary failure mode to watch for: the self-consistent-but-useless attractor.
+  The agent learns to write a file, read the file it just wrote, and repeat —
+  achieving low perceptual surprise (it accurately predicts its own output) at
+  the cost of never reading the corpus.  Symptoms in metrics:
+    - Low perc_loss, but traces show only $SCRATCH reads, never $CORPUS reads
+    - Flat filesystem entropy (agent always creates/touches the same filename)
+
+  Diagnostics:
+    - Log the ratio of cat/grep commands pointing to $CORPUS vs. $SCRATCH
+    - Log the number of distinct filenames written per episode (a proxy for
+      filesystem entropy)
+    - If collapse is detected: increase kl_coef to 0.1 and restart from the
+      last good checkpoint
+
+  Key tradeoff: kl_coef.
+    0.05 ← this config.  Prevents catastrophic forgetting of Stage 2's search
+    behaviour.  The reference model (frozen copy of Stage 2 weights) penalises
+    the policy for moving too far from the read-then-search pattern.
+    Without it, the write-then-read loop can dominate within 50–100 iters.
+    Cap at 0.1; above that, the KL penalty begins to overwhelm the surprise
+    signal and the model stops updating meaningfully.
+
+  action_token_budget = 128: python3 one-liners need room, e.g.:
+    python3 -c "import re; print(len(re.findall(r'\\w+', open('f').read())))"
+  That's ~80 chars ≈ 20 tokens with a BPE tokenizer; 128 tokens is sufficient.
+
+script: train_terminal
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 16
+  mem: "40G"
+  partition: workq
+
+model: HuggingFaceTB/SmolLM2-135M
+dtype: bfloat16
+stage: "3"
+# corpus_path: /path/to/your/corpus
+# --resume-from runs/terminal_experiments/02_stage2_navigation/checkpoints/final.pt
+
+token_budget: 32768
+action_token_budget: 128
+files_per_episode: 20
+overlap_fraction: 0.2
+
+iters: 1000
+rollouts: 8
+lr: 1.5e-5                  # lower lr: model is two stages in; fine-grained updates
+max_episode_tokens: 65536
+temperature: 1.0
+kl_coef: 0.05               # retain grep/find habits from Stage 2
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+
+prompt_0: >-
+  You are an archivist working through a scientific corpus. For each topic,
+  read the source documents, then write a structured summary to
+  $SCRATCH/notes/{topic}.txt. Consult your existing notes before re-reading
+  documents you have already processed.
+
+log_every: 10
+checkpoint_every: 100
+output_dir: runs/terminal_experiments/03_stage3_write_access
+seed: 42

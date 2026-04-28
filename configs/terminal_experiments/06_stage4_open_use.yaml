@@ -1,0 +1,87 @@
+name: terminal_stage4_open_use
+description: >
+  Stage 4 — open computer use with network access.  curl and wget added.
+
+  Load weights from Stage 3.5 with --resume-from.
+
+  New capability: the agent can now fetch URLs, download datasets, and query
+  external APIs.  This opens the action space significantly and changes the
+  exploration-collapse risk profile: `curl example.com` always returns the
+  same page, so a model that discovers it gets stuck there indefinitely.
+
+  Mitigations already in the env:
+    - command_timeout: 30s kills hung curl commands
+    - max_output_chars: 8192 truncates runaway HTML/JSON responses
+  Additional mitigation in this config:
+    - overlap_fraction: 0.1 (maximum rotation) forces the agent to search for
+      new corpus content each episode rather than converging on a single URL
+
+  Key tradeoffs at Stage 4:
+    1. N=2 (this config) vs. N=1 ablation: run 07_stage4_ablation_n1 in
+       parallel.  Network access creates a shared external resource (the web)
+       that is NOT controlled by the env.  Does multi-agent coordination
+       extend to coordinating on external resources?
+    2. kl_coef: 0.05 here.  The model should retain Stage 3.5 filesystem
+       coordination patterns while exploring network-augmented workflows.
+       Increase to 0.1 if the agent abandons $SCRATCH entirely in favour of
+       fetching everything fresh from the network each episode.
+    3. action_token_budget: 256.  curl commands with headers and data flags
+       can be long: `curl -s -H "Accept: application/json" https://...` (~50
+       chars ≈ 13 tokens); this leaves 240+ tokens for the URL itself.
+       Most REST API calls fit in 256 tokens; reduce to 128 if traces show
+       the model generating garbage past token 128.
+
+  Note on network safety: curl and wget are gated through CommandGate, so
+  only those two commands can reach the network.  All other network utilities
+  (ssh, nc, telnet, nmap) remain in _ALWAYS_BLOCKED.
+
+script: train_terminal
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 16
+  mem: "80G"
+  partition: workq
+
+model: HuggingFaceTB/SmolLM2-135M
+dtype: bfloat16
+stage: "4"
+# corpus_path: /path/to/your/corpus
+# --resume-from runs/terminal_experiments/04_stage35_embodiment/checkpoints/final.pt
+
+n_agents: 2
+shared_weights: true
+
+token_budget: 32768
+action_token_budget: 256    # room for curl URLs and HTTP flags
+files_per_episode: 20
+overlap_fraction: 0.1       # maximum rotation: don't let it converge on a URL
+command_timeout: 30         # curl is killed if it takes more than 30s
+max_output_chars: 8192      # truncate runaway HTML responses
+
+iters: 1000
+rollouts: 8
+lr: 1.0e-5
+max_episode_tokens: 65536
+temperature: 1.0
+kl_coef: 0.05
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+
+prompt_0: >-
+  You are an archivist cataloging a scientific corpus. Supplement the local
+  documents with authoritative external sources using curl. Write structured
+  summaries (local + external) to $SCRATCH/notes/{topic}.txt.
+
+prompt_1: >-
+  You are a research synthesizer. Check $SCRATCH/notes/ for your collaborator's
+  summaries, then use grep and curl to find additional connections. Write
+  synthesis reports to $SCRATCH/synthesis/.
+
+log_every: 10
+checkpoint_every: 100
+output_dir: runs/terminal_experiments/06_stage4_open_use
+seed: 42

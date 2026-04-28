@@ -59,8 +59,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--iters",          type=int,   default=500,    help="Training iterations")
     p.add_argument("--rollouts",       type=int,   default=8,      help="Episodes per iteration")
     p.add_argument("--lr",             type=float, default=3e-5,   help="AdamW learning rate")
-    p.add_argument("--dialogue-turns", type=int,   default=10,     help="Max dialogue turns per episode")
-    p.add_argument("--token-budget",   type=int,   default=64,     help="Tokens per agent turn")
+    p.add_argument("--dialogue-turns",   type=int,   default=10,   help="Max dialogue turns per episode")
+    p.add_argument("--token-budget",     type=int,   default=64,   help="Generation budget per agent turn (includes thinking tokens)")
+    p.add_argument("--env-token-budget", type=int,   default=None, help="Communication budget: max tokens after thinking stripped. None = no stripping")
     p.add_argument("--max-episode-tokens", type=int, default=1024, help="Token budget for full episode")
     p.add_argument("--log-every",        type=int, default=10,     help="Log every N iterations")
     p.add_argument("--checkpoint-every", type=int, default=100,    help="Checkpoint every N iterations")
@@ -289,11 +290,17 @@ def main() -> None:
             attn_implementation=args.attn_impl,
         )
 
-    print(f"Building DealOrNoDealEnv (dialogue_turns={args.dialogue_turns}, token_budget={args.token_budget}, role_shuffle={args.role_shuffle})")
+    env_token_budget = getattr(args, "env_token_budget", None)
+    print(
+        f"Building DealOrNoDealEnv (dialogue_turns={args.dialogue_turns}, "
+        f"token_budget={args.token_budget}, env_token_budget={env_token_budget}, "
+        f"role_shuffle={args.role_shuffle})"
+    )
     env = DealOrNoDealEnv(
         tokenizer=agent_0.tokenizer,
         max_dialogue_turns=args.dialogue_turns,
         action_token_budget=args.token_budget,
+        env_token_budget=env_token_budget,
         seed=args.seed,
         role_shuffle=args.role_shuffle,
     )

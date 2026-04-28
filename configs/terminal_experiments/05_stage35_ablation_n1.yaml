@@ -1,0 +1,78 @@
+name: terminal_stage35_ablation_n1
+description: >
+  Stage 3.5 ablation — N=1, shared scratch stage, single agent.
+
+  IDENTICAL to 04_stage35_embodiment except n_agents=1.  Run this in
+  parallel with the N=2 run on a separate allocation or sequentially after it.
+
+  Purpose: isolate the contribution of the second agent.  The only difference
+  between this run and 04_stage35_embodiment is the presence of a second agent
+  writing to $SCRATCH.  Everything else — model, corpus, token budget, corpus
+  rotation, character prompt, KL coefficient — is identical.
+
+  Comparison metric: observation surprise.
+    If coordination is happening, the N=2 agent should have LOWER observation
+    surprise when reading $SCRATCH than the N=1 agent — because the second
+    agent's notes are predictive of the corpus text (the archivist summarises
+    documents; the synthesizer reads summaries before searching).
+    Expected pattern in perc_loss:
+      N=2: perc_loss lower at $SCRATCH reads, comparable at $CORPUS reads
+      N=1: perc_loss uniform across all reads (no predictive pre-reading)
+
+  If N=2 perc_loss ≈ N=1 perc_loss everywhere: no coordination is occurring.
+  This could mean:
+    - The shared scratch isn't being used (both agents ignore $SCRATCH)
+    - The notes written are not useful (high surprise when reading them)
+    - The character prompts are too weak (model ignores them)
+  Debug by reading traces: look for whether agent_1 EVER issues a cat command
+  targeting $SCRATCH before the first corpus read.
+
+  Note: n_agents=1 overrides the stage's default_n_agents=2.  The env code
+  path is identical; the only difference is that no second shell is created
+  and no second agent alternates turns.
+
+script: train_terminal
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 16
+  mem: "40G"                # N=1 → half the subprocess overhead vs. 04
+  partition: workq
+
+model: HuggingFaceTB/SmolLM2-135M
+dtype: bfloat16
+stage: "3.5"
+# corpus_path: /path/to/your/corpus
+# --resume-from runs/terminal_experiments/03_stage3_write_access/checkpoints/final.pt
+
+n_agents: 1                 # ← ablation: no second agent
+
+token_budget: 32768
+action_token_budget: 128
+files_per_episode: 20
+overlap_fraction: 0.2
+command_timeout: 30
+max_output_chars: 8192
+
+iters: 1000
+rollouts: 8
+lr: 1.0e-5
+max_episode_tokens: 65536
+temperature: 1.0
+kl_coef: 0.05
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+
+# Same archivist prompt as in the N=2 run — agent_0 is identical
+prompt_0: >-
+  You are an archivist cataloging a scientific corpus. After reading each
+  document, write a concise summary to $SCRATCH/notes/{filename}.txt.
+  Start each session by listing what you have already archived: ls $SCRATCH/notes/.
+
+log_every: 10
+checkpoint_every: 100
+output_dir: runs/terminal_experiments/05_stage35_ablation_n1
+seed: 42

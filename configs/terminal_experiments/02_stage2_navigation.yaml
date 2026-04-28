@@ -1,0 +1,72 @@
+name: terminal_stage2_navigation
+description: >
+  Stage 2 — read-only navigation: ls, cat, head, tail, wc, grep, find,
+  pwd, cd.  ~5–15% action tokens.
+
+  Load weights from Stage 1 with --resume-from.
+
+  This is the FIRST STAGE where character prompt sensitivity is measurable.
+  An agent conditioned on "You are a physicist" should issue different grep
+  queries than one conditioned on "You are a biologist" — even with the same
+  files available.  If the command distributions are statistically identical
+  regardless of prompt, the character-conditioning mechanism is broken.
+
+  Diagnostic: capture traces at iters 100 / 200 / 400 and compute the
+  overlap in grep keywords between two runs started from the same checkpoint
+  but with different --prompt-0 values.  Expect divergence > 40% by iter 200.
+
+  Key tradeoff: overlap_fraction.
+    0.2 ← this config.  Lower than the Stage 0/1 default (0.3).  The rationale:
+    at Stage 2, the agent should be actively searching rather than relying on
+    remembering specific file paths from the previous episode.  A lower overlap
+    fraction means the files rotate more aggressively, punishing the "always cat
+    the same file" collapse attractor and rewarding grep/find usage.
+    Increase to 0.35 if inter-episode loss variance is unacceptably high
+    (sign: loss spikes at the start of each episode and never recovers before
+    the next reset).
+
+  action_token_budget = 64: allows `grep -r quantum mechanics .` (27 chars ≈
+  7 tokens) and `find . -name "*.txt" -newer "$SCRATCH/marker"` (42 chars ≈
+  11 tokens).  128 is not needed here; the primary risk at Stage 2 is the
+  model generating verbose outputs, not long commands.
+
+script: train_terminal
+
+slurm:
+  time: "08:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 16
+  mem: "40G"
+  partition: workq
+
+model: HuggingFaceTB/SmolLM2-135M
+dtype: bfloat16
+stage: "2"
+# corpus_path: /path/to/your/corpus
+# --resume-from runs/terminal_experiments/01_stage1_sparse_actions/checkpoints/final.pt
+
+token_budget: 16384
+action_token_budget: 64
+files_per_episode: 20
+overlap_fraction: 0.2       # ← lower than default; drives active search
+
+iters: 500
+rollouts: 8
+lr: 2.0e-5                  # slightly lower; model is already trained, avoid disruption
+max_episode_tokens: 32768
+temperature: 1.0
+kl_coef: 0.02               # light KL to retain Stage 1 cat/ls behaviour
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+
+prompt_0: >-
+  You are a physicist searching a corpus for primary sources on quantum
+  mechanics, thermodynamics, and relativity. Use grep and find to locate
+  relevant material efficiently; only cat files that match your search terms.
+
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/terminal_experiments/02_stage2_navigation
+seed: 42

@@ -1,0 +1,60 @@
+name: terminal_stage0_baseline
+description: >
+  Stage 0 — pure observation baseline.
+
+  No shell subprocess. Corpus text is streamed directly into the observation
+  channel. All tokens are σ_t=1; action_token_budget is forced to 0 by the
+  env. This stage is a calibration run only.
+
+  Pass/fail criterion: loss should be indistinguishable from a continued
+  pretraining run on the same corpus. If it diverges significantly upward,
+  there is a bug in the σ_t routing, the REINFORCE path, or the loss
+  computation — fix the framework before touching later stages.
+
+  Key tradeoff explored here: overlap_fraction.
+    0.3 (this config) → moderate file rotation; inter-episode loss variance
+    is detectable but not chaotic.  Increase to 0.5 if variance is too high
+    (the world model hasn't had time to absorb a file before it disappears).
+    Decrease to 0.1 at Stage 2+ where exploration pressure matters more.
+
+  No character prompts: there are no action tokens, so prompt-conditional
+  behaviour cannot be measured yet.  The training loop still attaches an
+  empty string as the character prompt so the code path is exercised.
+
+script: train_terminal
+
+slurm:
+  time: "08:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 16          # extra cores for corpus I/O and streaming workers
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+stage: "0"
+corpus_path: /lus/lfs1aip2/scratch/a5l/egunn.a5l/corpus/wikipedia
+work_dir: /lus/lfs1aip2/scratch/a5l/egunn.a5l/ccsm_work/stage0
+
+# Episode parameters
+token_budget: 4096          # ~4 chunks of ~1K tokens per episode (fast resets)
+action_token_budget: 0      # overridden to 0 by the env; listed for clarity
+files_per_episode: 20
+overlap_fraction: 0.3
+
+# Training loop
+iters: 500
+rollouts: 8
+lr: 3.0e-5
+max_episode_tokens: 8192    # well above token_budget; env drives termination
+temperature: 1.0
+kl_coef: 0.0                # no reference model needed at Stage 0
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+
+# Logging / checkpointing
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/terminal_experiments/00_stage0_baseline
+seed: 42

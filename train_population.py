@@ -71,6 +71,7 @@ def _build_deal_env(
     *,
     dialogue_turns: int = 10,
     token_budget: int = 64,
+    env_token_budget: int | None = None,
     max_item_count: int = 5,
     role_shuffle: bool = False,
     seed: int = 42,
@@ -80,6 +81,7 @@ def _build_deal_env(
         tokenizer=tokenizer,
         max_dialogue_turns=dialogue_turns,
         action_token_budget=token_budget,
+        env_token_budget=env_token_budget,
         max_item_count=max_item_count,
         seed=seed,
         role_shuffle=role_shuffle,
@@ -102,6 +104,7 @@ def _build_env_from_spec(spec_dict: dict, tokenizer: Any, default_seed: int) -> 
             tokenizer,
             dialogue_turns=spec_dict.get("dialogue_turns", 10),
             token_budget=spec_dict.get("token_budget", 64),
+            env_token_budget=spec_dict.get("env_token_budget", None),
             max_item_count=spec_dict.get("max_item_count", 5),
             role_shuffle=spec_dict.get("role_shuffle", False),
             seed=spec_dict.get("seed", default_seed),
@@ -150,6 +153,7 @@ def _build_environment_specs(
         tokenizer,
         dialogue_turns=args.dialogue_turns,
         token_budget=args.token_budget,
+        env_token_budget=getattr(args, "env_token_budget", None),
         role_shuffle=args.role_shuffle,
         seed=args.seed,
     )
@@ -218,7 +222,12 @@ def parse_args() -> argparse.Namespace:
 
     # ── Default single-env options (used when 'environments' key is absent) ─
     p.add_argument("--dialogue-turns",     type=int, default=10)
-    p.add_argument("--token-budget",       type=int, default=64)
+    p.add_argument("--token-budget",       type=int, default=64,
+                   help="Generation budget per turn (includes thinking tokens).")
+    p.add_argument("--env-token-budget",   type=int, default=None,
+                   help="Communication budget: max tokens passed to the env after "
+                        "thinking tokens are stripped. None = no stripping (default). "
+                        "Should be <= --token-budget.")
     p.add_argument("--max-episode-tokens", type=int, default=1024)
     p.add_argument("--role-shuffle", action="store_true",
                    help="Randomly assign who goes first (applies to default env).")
