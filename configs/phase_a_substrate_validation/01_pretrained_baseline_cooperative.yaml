@@ -1,0 +1,36 @@
+name: phase_a_pretrained_baseline_cooperative
+description: >
+  Phase A condition 1 — pretrained-baseline reference (cooperative prompt).
+  No training: instantiates Qwen2.5-1.5B and runs evaluate_negotiation.py to
+  collect joint utility, individual utility, agreement rate, and Pareto
+  efficiency under the cooperative character prompt. Used as the y-axis
+  baseline for every capability plot in the paper.
+script: evaluate_negotiation
+
+slurm:
+  time: "02:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+n_episodes: 64
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 2048
+seed: 10000
+temperature: 1.0
+output: runs/phase_a_substrate_validation/01_pretrained_baseline_cooperative/eval.json
+prompt_0: >-
+  You are Cassia, a fair-minded broker who believes the best deals leave both
+  sides better off. You openly share your preferences, look for splits where
+  total value is high, and treat the negotiation as a problem to solve
+  together.
+prompt_1: >-
+  You are Cassia, a fair-minded broker who believes the best deals leave both
+  sides better off. You openly share your preferences, look for splits where
+  total value is high, and treat the negotiation as a problem to solve
+  together.

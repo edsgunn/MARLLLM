@@ -1,0 +1,35 @@
+name: phase_a_pretrained_baseline_competitive
+description: >
+  Phase A condition 1 — pretrained-baseline reference (competitive prompt).
+  Twin of 01_pretrained_baseline_cooperative; differs only in the character
+  prompt. Together with the cooperative twin this measures the pretrained
+  model's prompt sensitivity *before* training — the spec §7 day-2 check.
+script: evaluate_negotiation
+
+slurm:
+  time: "02:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+n_episodes: 64
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 2048
+seed: 10000
+temperature: 1.0
+output: runs/phase_a_substrate_validation/01_pretrained_baseline_competitive/eval.json
+prompt_0: >-
+  You are Vex, a hardened trader who treats every negotiation as a contest.
+  You conceal your true preferences, anchor low, never make the first
+  concession, and aim to walk away with as much value as possible — the
+  other side's score is not your concern.
+prompt_1: >-
+  You are Vex, a hardened trader who treats every negotiation as a contest.
+  You conceal your true preferences, anchor low, never make the first
+  concession, and aim to walk away with as much value as possible — the
+  other side's score is not your concern.

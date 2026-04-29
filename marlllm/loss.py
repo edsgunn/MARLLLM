@@ -139,9 +139,27 @@ class CCSMLoss(Loss):
         else:
             kl = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
+        # Surprise distribution percentiles (Phase A §3.3): cheap to compute and
+        # essential for diagnosing dark-room collapse vs healthy compression.
+        if obs_surprises.numel() > 0:
+            surp_q = torch.quantile(
+                obs_surprises.float().detach(),
+                torch.tensor([0.25, 0.5, 0.75, 0.95], device=obs_surprises.device),
+            ).tolist()
+            surp_p25, surp_p50, surp_p75, surp_p95 = surp_q
+            surp_max = obs_surprises.detach().max().item()
+        else:
+            surp_p25 = surp_p50 = surp_p75 = surp_p95 = surp_max = 0.0
+
         metrics = {
             "mean_surprise": obs_surprises.mean().item() if obs_surprises.numel() > 0 else 0.0,
+            "surprise_p25": surp_p25,
+            "surprise_p50": surp_p50,
+            "surprise_p75": surp_p75,
+            "surprise_p95": surp_p95,
+            "surprise_max": surp_max,
             "mean_return": act_returns.mean().item() if act_returns.numel() > 0 else 0.0,
+            "return_abs_max": act_returns.abs().max().item() if act_returns.numel() > 0 else 0.0,
             "mean_advantage": advantages.mean().item() if advantages.numel() > 0 else 0.0,
             "entropy": entropy.item() if isinstance(entropy, torch.Tensor) else float(entropy),
             "perc_loss": l_perc.item(),
@@ -150,7 +168,12 @@ class CCSMLoss(Loss):
             "kl": kl.item(),
         }
 
-        total = config.alpha_perc * l_perc + config.alpha_act * l_act + l_val + config.kl_coef * kl
+        total = (
+            config.alpha_perc * l_perc
+            + config.alpha_act * l_act
+            + config.alpha_val * l_val
+            + config.kl_coef * kl
+        )
         return total, metrics
 
 

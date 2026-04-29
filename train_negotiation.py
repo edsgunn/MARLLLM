@@ -69,6 +69,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--resume", action="store_true",                help="Resume from latest checkpoint")
     p.add_argument("--kl-coef",  type=float, default=0.0,          help="KL penalty coefficient")
     p.add_argument("--seed",     type=int,   default=42)
+    # --- CCSM ablations (Phase A §2.3) ---
+    p.add_argument("--alpha-perc", type=float, default=1.0,
+                   help="Weight on the L_perc (NTP) loss term. Set to 0 for the "
+                        "action-only ablation (Phase A condition 4).")
+    p.add_argument("--alpha-act",  type=float, default=1.0,
+                   help="Weight on the L_act (REINFORCE policy) loss term. Set to 0 "
+                        "for the perception-only ablation (Phase A condition 3).")
+    p.add_argument("--alpha-val",  type=float, default=1.0,
+                   help="Weight on the L_val (value-head MSE) loss term. Should track "
+                        "alpha_act: set to 0 alongside alpha_act for perception-only.")
+    # --- Asymmetric multi-agent training (Phase A §2.4) ---
+    p.add_argument("--freeze-agent-0", action="store_true",
+                   help="Hold agent_0 fixed (no gradient updates). Pairs with the "
+                        "trained agent_1 as the focal learner.")
+    p.add_argument("--freeze-agent-1", action="store_true",
+                   help="Hold agent_1 fixed (no gradient updates) — recommended for "
+                        "the asymmetric headline experiment: agent_0 trains against "
+                        "a frozen pretrained partner.")
     # --- distribution / memory ---
     p.add_argument("--grad-accum", type=int, default=8,
                    help="Gradient accumulation steps. Split each batch into N micro-batches "
@@ -305,6 +323,17 @@ def main() -> None:
         role_shuffle=args.role_shuffle,
     )
 
+    frozen_agents: list[str] = []
+    if args.freeze_agent_0:
+        frozen_agents.append("agent_0")
+    if args.freeze_agent_1:
+        frozen_agents.append("agent_1")
+    if frozen_agents and args.shared_weights:
+        raise ValueError(
+            "--freeze-agent-* is incompatible with --shared-weights: both agents "
+            "share one parameter set, so freezing one would freeze the other."
+        )
+
     config = TrainingConfig(
         model_name_or_path=model_0,
         character_prompts={"agent_0": args.prompt_0, "agent_1": args.prompt_1},
@@ -318,6 +347,10 @@ def main() -> None:
         device=device_0,
         seed=args.seed,
         kl_coef=args.kl_coef,
+        alpha_perc=args.alpha_perc,
+        alpha_act=args.alpha_act,
+        alpha_val=args.alpha_val,
+        frozen_agents=frozen_agents,
         grad_accum_steps=args.grad_accum,
         gradient_checkpointing=args.gradient_checkpointing,
         lora_r=args.lora_r,

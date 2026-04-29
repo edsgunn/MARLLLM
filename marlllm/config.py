@@ -17,10 +17,17 @@ class TrainingConfig:
     # CCSM hyperparameters (§9.2 of surprise_minimisation_derivation.md)
     gamma: float = 0.99       # discount factor for future obs surprise
     beta: float = 0.01        # entropy regularisation coefficient
-    alpha_perc: float = 1.0   # weight on L_perc
-    alpha_act: float = 1.0    # weight on L_act
+    alpha_perc: float = 1.0   # weight on L_perc (set to 0 for action-only ablation)
+    alpha_act: float = 1.0    # weight on L_act  (set to 0 for perception-only ablation)
+    alpha_val: float = 1.0    # weight on L_val  (set to 0 for perception-only ablation)
     normalise_returns: bool = True  # standardise G_t within batch (§9.3)
     kl_coef: float = 0.0      # KL penalty weight: λ * KL(π_θ || π_ref) at ACT positions
+
+    # Asymmetric multi-agent training (§2.4 of Phase A spec).
+    # IDs in this list participate in rollouts but receive NO gradient updates.
+    # E.g. frozen_agents=["agent_1"] turns agent_1 into a fixed pretrained
+    # partner while agent_0 is trained — the "focal vs fixed partner" setup.
+    frozen_agents: list[str] = field(default_factory=list)
 
     # Training loop
     episodes_per_iter: int = 8

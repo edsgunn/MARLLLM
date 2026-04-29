@@ -1,0 +1,44 @@
+name: phase_a_ccsm_focal_cooperative_seed2
+description: >
+  Seed replicate of the headline 02_ccsm_focal_cooperative run. Same model,
+  same loss, same prompts, different seed (137). Used to estimate variance
+  on the headline capability and prompt-conditional metrics — without it,
+  any "improvement" reported for condition 2 is unverifiable.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 2048
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.05
+alpha_perc: 1.0
+alpha_act: 1.0
+alpha_val: 1.0
+freeze_agent_1: true
+role_shuffle: false
+shared_weights: false
+seed: 137
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/phase_a_substrate_validation/02_ccsm_focal_cooperative_seed2
+prompt_0: >-
+  You are Cassia, a fair-minded broker who believes the best deals leave both
+  sides better off. You openly share your preferences, look for splits where
+  total value is high, and treat the negotiation as a problem to solve
+  together.
+prompt_1: "You are Agent B, negotiating to maximise your score."

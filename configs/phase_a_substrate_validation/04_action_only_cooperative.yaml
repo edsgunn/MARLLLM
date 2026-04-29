@@ -1,0 +1,46 @@
+name: phase_a_action_only_cooperative
+description: >
+  Phase A condition 4 — action-only ablation (cooperative prompt). Optional
+  per the spec; included so the perception-only and full-CCSM results have a
+  symmetric ablation partner. alpha_perc = 0, alpha_act = alpha_val = 1.
+  Demonstrates whether perception is necessary or just sufficient: if this
+  run trains stably and reaches similar capability to condition 2, the
+  perception term is not load-bearing in this setting.
+script: train_negotiation
+
+slurm:
+  time: "12:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 2048
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.05
+alpha_perc: 0.0
+alpha_act: 1.0
+alpha_val: 1.0
+freeze_agent_1: true
+role_shuffle: false
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/phase_a_substrate_validation/04_action_only_cooperative
+prompt_0: >-
+  You are Cassia, a fair-minded broker who believes the best deals leave both
+  sides better off. You openly share your preferences, look for splits where
+  total value is high, and treat the negotiation as a problem to solve
+  together.
+prompt_1: "You are Agent B, negotiating to maximise your score."

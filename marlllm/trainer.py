@@ -63,15 +63,33 @@ class Trainer:
         self.device = torch.device(config.device)
         self.agent_index = {aid: i for i, aid in enumerate(agents)}
 
+        # Frozen agents: participate in rollouts but receive no gradient
+        # updates. Used for asymmetric (focal vs fixed partner) training —
+        # see TrainingConfig.frozen_agents and Phase A §2.4.
+        self.frozen_agents: set[str] = set(config.frozen_agents or [])
+        for aid in self.frozen_agents:
+            if aid not in agents:
+                raise ValueError(
+                    f"frozen_agents references unknown agent_id {aid!r}; "
+                    f"known agents: {list(agents)}"
+                )
+
         # Deduplicate by parameter identity so shared-weight agents (where both
         # dict entries point to the same IndependentAgent) don't double-count.
+        # Frozen agents contribute no parameters to the optimizer.
         seen_ids: set[int] = set()
         all_params: list = []
-        for a in agents.values():
+        for aid, a in agents.items():
+            if aid in self.frozen_agents:
+                continue
             for p in a.parameters():
                 if id(p) not in seen_ids:
                     seen_ids.add(id(p))
                     all_params.append(p)
+        if not all_params:
+            raise ValueError(
+                "No trainable parameters: every agent is in frozen_agents."
+            )
         self.optimizer = AdamW(all_params, lr=config.lr)
 
         self._start_time = time.time()
@@ -133,6 +151,8 @@ class Trainer:
             all_metrics: dict[str, float] = {}
 
             for agent_id, agent in self.agents.items():
+                if agent_id in self.frozen_agents:
+                    continue
                 trajs = per_agent_trajs[agent_id]
                 if not trajs:
                     continue

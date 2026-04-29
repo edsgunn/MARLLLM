@@ -1,0 +1,49 @@
+name: phase_a_symmetric_ccsm_cooperative
+description: >
+  Phase A condition 5 — symmetric CCSM (both agents trained simultaneously).
+  Supporting condition per spec §2.4. Strongest version of the multi-agent
+  claim but also the hardest to interpret cleanly: a positive result here
+  on top of condition 2 supports the co-adaptation framing; an inversion
+  (condition 5 fails where condition 2 succeeds) would say co-training
+  introduces instability the headline result does not have.
+script: train_negotiation
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 2
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-1.5B
+dtype: bfloat16
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 2048
+grad_accum: 4
+gradient_checkpointing: false
+lora_r: 0
+kl_coef: 0.05
+alpha_perc: 1.0
+alpha_act: 1.0
+alpha_val: 1.0
+role_shuffle: true
+shared_weights: false
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/phase_a_substrate_validation/05_symmetric_ccsm_cooperative
+prompt_0: >-
+  You are Cassia, a fair-minded broker who believes the best deals leave both
+  sides better off. You openly share your preferences, look for splits where
+  total value is high, and treat the negotiation as a problem to solve
+  together.
+prompt_1: >-
+  You are Cassia, a fair-minded broker who believes the best deals leave both
+  sides better off. You openly share your preferences, look for splits where
+  total value is high, and treat the negotiation as a problem to solve
+  together.
