@@ -29,6 +29,15 @@ class TrainingConfig:
     # partner while agent_0 is trained — the "focal vs fixed partner" setup.
     frozen_agents: list[str] = field(default_factory=list)
 
+    # Per-agent perception masking (Cells B/C/D/E of the distillation ablation).
+    # When non-empty, L_perc only counts OBS tokens whose *source* agent
+    # (agent_id_mask at that position) is in this list. Default = empty list,
+    # which means "include all agents' OBS tokens" (existing behaviour).
+    # Setting this to e.g. ["agent_1"] focuses perception on the strong
+    # partner's tokens only — a clean way to express "perception-active" in
+    # the spec's per-agent loss-flag matrix.
+    perception_agents: list[str] = field(default_factory=list)
+
     # Training loop
     episodes_per_iter: int = 8
     max_episode_tokens: int = 128  # non-prompt tokens per episode

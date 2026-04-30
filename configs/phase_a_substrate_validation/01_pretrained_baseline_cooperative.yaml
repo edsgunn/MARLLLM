@@ -15,7 +15,7 @@ slurm:
   mem: "80G"
   partition: workq
 
-model: Qwen/Qwen2.5-1.5B
+model: Qwen/Qwen2.5-1.5B-Instruct
 dtype: bfloat16
 n_episodes: 64
 dialogue_turns: 10
@@ -23,6 +23,7 @@ token_budget: 64
 max_episode_tokens: 2048
 seed: 10000
 temperature: 1.0
+save_trajectories: true
 output: runs/phase_a_substrate_validation/01_pretrained_baseline_cooperative/eval.json
 prompt_0: >-
   You are Cassia, a fair-minded broker who believes the best deals leave both

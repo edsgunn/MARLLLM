@@ -92,6 +92,19 @@ class Trainer:
             )
         self.optimizer = AdamW(all_params, lr=config.lr)
 
+        # Translate perception_agents (string IDs) to int indices once.
+        self._perception_source_indices: list[int] | None = None
+        if config.perception_agents:
+            unknown = [a for a in config.perception_agents if a not in self.agent_index]
+            if unknown:
+                raise ValueError(
+                    f"perception_agents references unknown agent_ids {unknown!r}; "
+                    f"known: {list(self.agent_index)}"
+                )
+            self._perception_source_indices = [
+                self.agent_index[a] for a in config.perception_agents
+            ]
+
         self._start_time = time.time()
         self._rng_counter = config.seed  # advances per episode for distinct env scenarios
         self._setup_output_dir()
@@ -198,6 +211,7 @@ class Trainer:
                         target_agent_idx=agent_idx,
                         config=self.config,
                         ref_logits=ref_logits,
+                        perception_source_indices=self._perception_source_indices,
                     )
 
                     (loss_val / num_micros).backward()
@@ -476,6 +490,9 @@ class Trainer:
                 pids = self.tokeniser.encode_prompt(pt)
                 prompt_ids[k][agent_id] = pids
                 contexts[k][agent_id] = agent.context_formatter.wrap_prompt(pids)
+                # Reset API-agent structured histories per slot.
+                if hasattr(agent, "reset_history"):
+                    agent.reset_history(slot=k)
 
         # --- Step all envs until every one is done ---
         while any(active):
@@ -508,6 +525,15 @@ class Trainer:
                     formatter = self.agents[agent_id].context_formatter
                     contexts[k][agent_id].extend(formatter.wrap_observation(obs_ids))
                     token_counts[k] += len(obs_ids)
+                    if hasattr(self.agents[agent_id], "note_observation"):
+                        try:
+                            obs_text = self.tokeniser.decode_action(obs_ids) \
+                                if hasattr(self.tokeniser, "decode_action") \
+                                else self.agents[agent_id].tokenizer.decode(
+                                    obs_ids, skip_special_tokens=True)
+                        except Exception:
+                            obs_text = ""
+                        self.agents[agent_id].note_observation(obs_text, slot=k)
 
                 if term or trunc:
                     # Capture final info before stepping with None
@@ -588,12 +614,15 @@ class Trainer:
           checkpoints/latest.pt                — always the most recent
         """
         ckpt_dir = Path(self.config.output_dir) / "checkpoints"
+        # Skip agents without local model state (e.g. APIAgent) — they have
+        # no parameters to checkpoint.
         agent_states = {
             aid: {
                 "backbone": agent._backbone.state_dict(),
                 "value_head": agent._value_head.state_dict(),
             }
             for aid, agent in self.agents.items()
+            if hasattr(agent, "_backbone") and hasattr(agent, "_value_head")
         }
         payload = {
             "iteration": iteration,
@@ -623,6 +652,8 @@ class Trainer:
         """
         payload = torch.load(path, map_location=self.device)
         for aid, agent in self.agents.items():
+            if aid not in payload["agent_states"]:
+                continue  # APIAgent or otherwise paramless
             states = payload["agent_states"][aid]
             agent._backbone.load_state_dict(states["backbone"])
             agent._value_head.load_state_dict(states["value_head"])

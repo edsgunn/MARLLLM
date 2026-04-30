@@ -130,6 +130,29 @@ def parse_args() -> argparse.Namespace:
              "single optimizer). Gradients from both agents' trajectories "
              "update the same parameters. Requires --model (not --model-0/1).",
     )
+    # --- External-API partner (Cells B/C/D/E of the distillation ablation) ---
+    p.add_argument(
+        "--api-partner", choices=["agent_0", "agent_1"], default=None,
+        help="Replace this agent with an APIAgent backed by --api-provider/--api-model. "
+             "Implies the agent is frozen (no gradient updates). The other agent "
+             "becomes the focal learner.",
+    )
+    p.add_argument("--api-provider", choices=["anthropic", "openai", "mock"], default="anthropic")
+    p.add_argument("--api-model", default="claude-sonnet-4-6")
+    p.add_argument("--api-cache-dir", default=None,
+                   help="Directory for sha256-keyed response cache. Strongly recommended.")
+    p.add_argument("--api-budget-state", default=None,
+                   help="Path to JSON file holding cumulative cost; persists across runs.")
+    p.add_argument("--api-budget-cap-usd", type=float, default=None,
+                   help="Hard USD cap; abort cleanly when exceeded.")
+    p.add_argument("--api-temperature", type=float, default=1.0)
+    p.add_argument("--api-max-tokens", type=int, default=256)
+    p.add_argument(
+        "--perception-agents", default=None,
+        help="Comma-separated agent_ids whose OBS tokens are counted in L_perc. "
+             "Default = all agents. Use this to focus perception on a single "
+             "(strong) partner, e.g. --perception-agents agent_1.",
+    )
     p.add_argument(
         "--lora-shared-base", action="store_true",
         help="Load one base model and attach two independent LoRA adapters — "
@@ -182,6 +205,19 @@ def main() -> None:
     # Write system_info.json and copy the config file before loading models.
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     log_system_info(args.output_dir, config_path=args.config)
+
+    api_agent = None
+    if args.api_partner is not None:
+        from marlllm import APIAgent, SamplingParams, make_api_model
+        if args.shared_weights or args.lora_shared_base:
+            raise ValueError("--api-partner is incompatible with --shared-weights / --lora-shared-base.")
+        api_model = make_api_model(
+            provider=args.api_provider,
+            model=args.api_model,
+            cache_dir=args.api_cache_dir,
+            budget_state_path=args.api_budget_state,
+            budget_cap_usd=args.api_budget_cap_usd,
+        )
 
     if args.lora_shared_base:
         if args.model_0 or args.model_1:
@@ -308,6 +344,27 @@ def main() -> None:
             attn_implementation=args.attn_impl,
         )
 
+    if args.api_partner == "agent_0":
+        from marlllm import APIAgent, SamplingParams
+        agent_0 = APIAgent(
+            agent_id="agent_0",
+            character_prompt=args.prompt_0,
+            api_model=api_model,
+            tokenizer=agent_1.tokenizer,
+            sampling=SamplingParams(temperature=args.api_temperature,
+                                    max_tokens=args.api_max_tokens),
+        )
+    elif args.api_partner == "agent_1":
+        from marlllm import APIAgent, SamplingParams
+        agent_1 = APIAgent(
+            agent_id="agent_1",
+            character_prompt=args.prompt_1,
+            api_model=api_model,
+            tokenizer=agent_0.tokenizer,
+            sampling=SamplingParams(temperature=args.api_temperature,
+                                    max_tokens=args.api_max_tokens),
+        )
+
     env_token_budget = getattr(args, "env_token_budget", None)
     print(
         f"Building DealOrNoDealEnv (dialogue_turns={args.dialogue_turns}, "
@@ -328,6 +385,8 @@ def main() -> None:
         frozen_agents.append("agent_0")
     if args.freeze_agent_1:
         frozen_agents.append("agent_1")
+    if args.api_partner and args.api_partner not in frozen_agents:
+        frozen_agents.append(args.api_partner)
     if frozen_agents and args.shared_weights:
         raise ValueError(
             "--freeze-agent-* is incompatible with --shared-weights: both agents "
@@ -351,6 +410,10 @@ def main() -> None:
         alpha_act=args.alpha_act,
         alpha_val=args.alpha_val,
         frozen_agents=frozen_agents,
+        perception_agents=(
+            [a.strip() for a in args.perception_agents.split(",") if a.strip()]
+            if args.perception_agents else []
+        ),
         grad_accum_steps=args.grad_accum,
         gradient_checkpointing=args.gradient_checkpointing,
         lora_r=args.lora_r,

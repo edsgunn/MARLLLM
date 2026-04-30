@@ -182,24 +182,26 @@ def main() -> None:
         rng_seed += 1
 
         contexts: dict[str, list[int]] = {}
+        events: dict[str, list[dict]] = {aid: [] for aid in agents}
         for aid, agent in agents.items():
             prompt_text = args.prompt_0 if aid == "agent_0" else args.prompt_1
             pids = tokeniser.encode_prompt(prompt_text)
-            contexts[aid] = agent.context_formatter.wrap_prompt(pids)
-
-        episode_record = {"episode": ep, "turns": []}
+            wrapped = agent.context_formatter.wrap_prompt(pids)
+            start = len(contexts.get(aid, []))
+            contexts[aid] = list(wrapped)
+            events[aid].append({"type": "prompt", "span": [start, len(contexts[aid])]})
 
         for agent_id in env.agent_iter():
             obs, _r, term, trunc, info = env.last()
             obs_ids = tokeniser.encode_observation(obs)
             if obs_ids:
                 fmt = agents[agent_id].context_formatter
-                contexts[agent_id].extend(fmt.wrap_observation(obs_ids))
-                if args.save_trajectories:
-                    episode_record["turns"].append(
-                        {"agent": agent_id, "type": "obs",
-                         "text": agent_0.tokenizer.decode(obs_ids, skip_special_tokens=False)}
-                    )
+                wrapped = fmt.wrap_observation(obs_ids)
+                start = len(contexts[agent_id])
+                contexts[agent_id].extend(wrapped)
+                events[agent_id].append(
+                    {"type": "obs", "span": [start, len(contexts[agent_id])]}
+                )
             if term or trunc:
                 env.step(None)
                 continue
@@ -212,12 +214,12 @@ def main() -> None:
                     temperature=args.temperature,
                 )
             fmt = agents[agent_id].context_formatter
-            contexts[agent_id].extend(fmt.wrap_action(act_ids))
-            if args.save_trajectories:
-                episode_record["turns"].append(
-                    {"agent": agent_id, "type": "act",
-                     "text": agent_0.tokenizer.decode(act_ids, skip_special_tokens=False)}
-                )
+            wrapped = fmt.wrap_action(act_ids)
+            start = len(contexts[agent_id])
+            contexts[agent_id].extend(wrapped)
+            events[agent_id].append(
+                {"type": "act", "span": [start, len(contexts[agent_id])]}
+            )
             env.step(act_ids)
 
         # Capture episode outcome
@@ -237,11 +239,23 @@ def main() -> None:
             values_b=values["agent_1"],
         ))
         if args.save_trajectories:
-            episode_record["outcome"] = {
-                "deal": deal, "score_a": score_a, "score_b": score_b,
-                "items": list(items),
-                "values_a": list(values["agent_0"]),
-                "values_b": list(values["agent_1"]),
+            tok = agent_0.tokenizer
+            episode_record = {
+                "episode": ep,
+                "outcome": {
+                    "deal": deal, "score_a": score_a, "score_b": score_b,
+                    "items": list(items),
+                    "values_a": list(values["agent_0"]),
+                    "values_b": list(values["agent_1"]),
+                },
+                "agents": {
+                    aid: {
+                        "context_ids": list(contexts[aid]),
+                        "context_text": tok.decode(contexts[aid], skip_special_tokens=False),
+                        "events": events[aid],
+                    }
+                    for aid in agents
+                },
             }
             trajectories.append(episode_record)
 

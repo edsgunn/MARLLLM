@@ -1,0 +1,40 @@
+experiment_name: distillation_ablation_v1
+
+small_model:
+  base_checkpoint: Qwen/Qwen2.5-0.5B
+  train_config:
+    lr: 1.0e-5
+    grad_accum: 8
+
+strong_partners:
+  provider: anthropic
+  model: claude-sonnet-4-6
+  sampling:
+    temperature: 1.0
+    max_tokens: 256
+  cache_dir: .cache/anthropic
+  budget_state: .cache/budget.json
+  budget_cap_usd: 100
+
+environment:
+  dialogue_turns: 10
+  token_budget: 64
+  episodes_per_iteration: 8
+  iterations: 150
+  log_every: 10
+  checkpoint_every: 50
+
+ccsm:
+  beta_entropy: 0.01
+  kl_coefficient: 0.0
+
+cell_a:
+  episodes: 200
+  epochs: 3
+  batch_size: 4
+
+ablation:
+  cells: [A, B, C, D, E, C0]
+  seeds: [0, 1, 2]
+
+output_dir: runs/distillation_ablation_v1

@@ -48,6 +48,7 @@ class Loss(ABC):
         target_agent_idx: int,
         config: TrainingConfig,
         ref_logits: torch.Tensor | None = None,  # (B, T, V) frozen reference, optional
+        perception_source_indices: list[int] | None = None,  # source-agent gating for L_perc
     ) -> tuple[torch.Tensor, dict]: ...
 
 
@@ -75,11 +76,17 @@ class CCSMLoss(Loss):
         target_agent_idx: int,
         config: TrainingConfig,
         ref_logits: torch.Tensor | None = None,
+        perception_source_indices: list[int] | None = None,
     ) -> tuple[torch.Tensor, dict]:
         surprises = _compute_obs_surprises(logits, input_ids, token_type_mask)
         returns = _compute_returns(surprises, token_type_mask, config.gamma)
 
         obs_mask = token_type_mask == int(TokenType.OBS)
+        if perception_source_indices is not None and len(perception_source_indices) > 0:
+            allowed = torch.zeros_like(agent_id_mask, dtype=torch.bool)
+            for idx in perception_source_indices:
+                allowed = allowed | (agent_id_mask == idx)
+            obs_mask = obs_mask & allowed
         # ACT mask: only this agent's action tokens contribute to L_act and L_val
         act_mask = (token_type_mask == int(TokenType.ACT)) & (agent_id_mask == target_agent_idx)
 
