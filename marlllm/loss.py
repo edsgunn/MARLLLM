@@ -116,9 +116,14 @@ class CCSMLoss(Loss):
             l_act = policy_loss - config.beta * entropy
 
             # ---- Value loss ----
-            act_returns_frozen = returns[act_mask].detach()
+            # Use the same act_returns tensor as the advantage computation — if
+            # normalise_returns is True, act_returns is already normalised here,
+            # which keeps the value-head target on the same scale as the advantages.
+            # Using the raw returns[act_mask] when normalise_returns=True would train
+            # the value head to predict ~250 while advantages are computed in ~[-1,1],
+            # making the baseline actively harmful.
             act_values = values[act_mask]
-            l_val = F.mse_loss(act_values, act_returns_frozen)
+            l_val = F.mse_loss(act_values, act_returns.detach())
         else:
             l_act = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
             l_val = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)

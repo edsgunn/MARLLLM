@@ -90,6 +90,14 @@ class AgentShell:
         if self._proc is not None:
             self.close()
 
+        # Drain any stale EOF/output from a previous reader thread so that
+        # _wait_for doesn't see the old None sentinel from the dead process.
+        while not self._q.empty():
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
+
         # Minimal environment — do not inherit Slurm's env.
         env = {
             "PATH": "/usr/local/bin:/usr/bin:/bin",

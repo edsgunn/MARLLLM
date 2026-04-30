@@ -565,10 +565,15 @@ class LoRASharedBaseAgent(Agent):
         return self._tokenizer
 
     def parameters(self) -> Iterable[nn.Parameter]:
-        # Yield only this adapter's trainable weights plus the private value head.
-        # The shared base weights are frozen (LoRA convention) and never appear here.
+        # Yield only this adapter's weights plus the private value head.
+        # Do NOT filter by requires_grad: PEFT v0.19+ sets the inactive adapter's
+        # params to requires_grad=False after add_adapter(), which would cause the
+        # second agent's adapter to be missing from the optimizer entirely.
+        # The name filter is sufficient — base weights have no adapter name in their path.
+        # evaluate() calls _activate() before each forward pass, which restores
+        # requires_grad=True for the active adapter so gradients flow correctly.
         for name, param in self._backbone.named_parameters():
-            if f".{self._adapter_name}." in name and param.requires_grad:
+            if f".{self._adapter_name}." in name:
                 yield param
         yield from self._value_head.parameters()
 

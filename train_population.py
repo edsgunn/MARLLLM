@@ -216,6 +216,9 @@ def parse_args() -> argparse.Namespace:
                    help="Episodes per iteration (drawn from the env mixture).")
     p.add_argument("--lr",             type=float, default=3e-5)
     p.add_argument("--kl-coef",        type=float, default=0.0)
+    p.add_argument("--beta",           type=float, default=0.01,
+                   help="Entropy regularisation coefficient (default 0.01). "
+                        "Set to 0.0 to disable the entropy bonus entirely.")
     p.add_argument("--seed",           type=int,   default=42)
     p.add_argument("--grad-accum",     type=int,   default=8)
     p.add_argument("--gradient-checkpointing", action="store_true")
@@ -436,6 +439,7 @@ def main() -> None:
         device=device,
         seed=args.seed,
         kl_coef=args.kl_coef,
+        beta=args.beta,
         grad_accum_steps=args.grad_accum,
         gradient_checkpointing=args.gradient_checkpointing,
         lora_r=args.lora_r,

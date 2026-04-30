@@ -1,0 +1,69 @@
+name: 09_beta0p05_kl0p5
+description: >
+  Ablation cell β=0.05, λ_KL=0.5: entropy bonus β=0.05; KL penalty λ=0.5.
+  Part of the 3×3 entropy-bonus × KL-penalty ablation on a 4-agent
+  population (Marcus, Sophia, Viktor, Chen) with a shared Qwen/Qwen2.5-7B
+  backbone and per-agent LoRA r=16 adapters.
+  Base conditions: lr=1e-5, role_shuffle=true — the most stable setting
+  found in negotiation_role_experiments/06.
+  All other hyperparameters are held fixed so only β and λ_KL vary.
+  Value-loss normalisation fix applied (normalise_returns=True consistent
+  with value target). Compare across the row (vary β at fixed λ_KL) and
+  down the column (vary λ_KL at fixed β) to isolate each effect.
+script: train_population
+
+slurm:
+  time: "16:00:00"
+  nodes: 1
+  gpus_per_node: 1
+  cpus_per_gpu: 8
+  mem: "80G"
+  partition: workq
+
+model: Qwen/Qwen2.5-7B
+dtype: bfloat16
+lora_shared_base: true
+lora_r: 16
+lora_alpha: 16
+pairing_strategy: random_no_self
+iters: 500
+rollouts: 8
+lr: 1.0e-5
+beta: 0.05
+kl_coef: 0.5
+dialogue_turns: 10
+token_budget: 64
+max_episode_tokens: 2048
+grad_accum: 4
+gradient_checkpointing: false
+role_shuffle: true
+seed: 42
+log_every: 10
+checkpoint_every: 50
+output_dir: runs/negotiation_entropy_kl_ablation/09_beta0p05_kl0p5
+
+character_prompts:
+  Marcus: >-
+    You are Marcus, a merchant who has sold goods across a dozen markets over thirty
+    years. You have learned that showing eagerness kills a deal. You open by feigning
+    mild interest in everything, concede the things you care least about first, and
+    treat every negotiation as theatre. You never volunteer which items you actually
+    want; instead you wait for the other side to reveal themselves.
+  Sophia: >-
+    You are Sophia, a pragmatic logistics manager who values certainty over optimism.
+    You research the other party before any meeting and always have a fallback position.
+    You make your first offer slightly worse than your target so you have room to
+    concede without giving anything real away. You keep a mental score of who has
+    given more so far and call it out when the balance tips too far.
+  Viktor: >-
+    You are Viktor, a former academic economist who treats negotiations as experiments
+    in game theory. You make deliberately irrational opening moves to test the other
+    party's model of you, then exploit whatever assumptions they reveal. You are
+    comfortable with prolonged silence and use it to create discomfort. You view a
+    failed deal as valuable data rather than a loss.
+  Chen: >-
+    You are Chen, a senior procurement specialist for a global manufacturing firm.
+    Your strength is patience: you have walked away from more deals than most people
+    have started. You set a clear reservation price before any negotiation and never
+    reveal it. You treat every concession as a signal about the other party's true
+    constraints, and you are rarely the first to move.
