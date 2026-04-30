@@ -141,6 +141,7 @@ class APIAgent(Agent):
         context_token_ids: list[int],
         n_tokens: int,
         temperature: float = 1.0,
+        eos_token_ids: list[int] | None = None,  # noqa: ARG002 — providers stop on their own EOS
     ) -> tuple[list[int], list[float]]:
         sampling = SamplingParams(
             temperature=temperature,
@@ -163,6 +164,7 @@ class APIAgent(Agent):
         contexts: list[list[int]],
         n_tokens: int,
         temperature: float = 1.0,
+        eos_token_ids: list[int] | None = None,  # noqa: ARG002 — providers stop on their own EOS
     ) -> tuple[list[list[int]], list[list[float]]]:
         # Sequential calls — providers don't reliably batch, and caching makes
         # repeats free. Each context corresponds to one rollout slot.

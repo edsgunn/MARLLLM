@@ -45,6 +45,7 @@ from torch.optim import AdamW
 
 from marlllm.agent import Agent
 from marlllm.config import TrainingConfig
+from marlllm.dialogue import chat_eos_token_ids, verify_special_tokens
 from marlllm.loss import Loss
 from marlllm.store import TrajectoryStore
 from marlllm.tokeniser import Tokeniser
@@ -182,6 +183,13 @@ class PopulationTrainer:
                     seen_ids.add(id(p))
                     all_params.append(p)
         self.optimizer = AdamW(all_params, lr=config.lr)
+
+        # Chat-template EOS ids: stop generation cleanly on <|im_end|> /
+        # <|endoftext|> (or the equivalent for the active model family) so
+        # actions don't drag garbage past the end-of-turn marker.
+        any_tok = next(iter(population.values())).tokenizer
+        verify_special_tokens(any_tok)
+        self._eos_token_ids = chat_eos_token_ids(any_tok)
 
         self._start_time = time.time()
         self._rng_counter = config.seed
@@ -509,6 +517,7 @@ class PopulationTrainer:
                         contexts=batch_contexts,
                         n_tokens=n_tokens,
                         temperature=self.config.temperature,
+                        eos_token_ids=self._eos_token_ids,
                     )
 
                 formatter = self.population[pop_name].context_formatter

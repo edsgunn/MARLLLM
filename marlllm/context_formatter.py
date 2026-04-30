@@ -94,6 +94,10 @@ class ChatMLFormatter(ContextFormatter):
         self._sys_suffix   = enc("<|im_end|>\n")
         self._user_prefix  = enc("<|im_start|>user\n")
         self._user_suffix  = enc("<|im_end|>\n<|im_start|>assistant\n")
+        # End-of-turn marker for the assistant turn. Single token in vocab.
+        im_end = enc("<|im_end|>")
+        self._im_end_id = im_end[0] if len(im_end) == 1 else None
+        self._action_close = enc("<|im_end|>\n")  # canonical close + separator
 
     def wrap_prompt(self, ids: list[int]) -> list[int]:
         return self._sys_prefix + ids + self._sys_suffix
@@ -102,7 +106,14 @@ class ChatMLFormatter(ContextFormatter):
         return self._user_prefix + ids + self._user_suffix
 
     def wrap_action(self, ids: list[int]) -> list[int]:
-        return ids
+        """Close the assistant turn with ``<|im_end|>\\n`` if it's not already
+        closed, so the chat-template structure stays canonical regardless of
+        whether the model emitted EOS itself."""
+        if ids and self._im_end_id is not None and ids[-1] == self._im_end_id:
+            # Model stopped on <|im_end|>; just append the separator newline.
+            return list(ids) + [tid for tid in self._action_close
+                                if tid != self._im_end_id]
+        return list(ids) + list(self._action_close)
 
 
 class Llama3Formatter(ContextFormatter):
@@ -128,6 +139,8 @@ class Llama3Formatter(ContextFormatter):
         self._sys_suffix  = enc("<|eot_id|>")
         self._user_prefix = enc("<|start_header_id|>user<|end_header_id|>\n\n")
         self._user_suffix = enc("<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n")
+        eot = enc("<|eot_id|>")
+        self._eot_id = eot[0] if len(eot) == 1 else None
 
     def wrap_prompt(self, ids: list[int]) -> list[int]:
         return self._sys_prefix + ids + self._sys_suffix
@@ -136,7 +149,12 @@ class Llama3Formatter(ContextFormatter):
         return self._user_prefix + ids + self._user_suffix
 
     def wrap_action(self, ids: list[int]) -> list[int]:
-        return ids
+        """Close the assistant turn with ``<|eot_id|>`` if not already closed."""
+        if ids and self._eot_id is not None and ids[-1] == self._eot_id:
+            return list(ids)
+        if self._eot_id is None:
+            return list(ids)
+        return list(ids) + [self._eot_id]
 
 
 # ── Registry and factory ──────────────────────────────────────────────────────

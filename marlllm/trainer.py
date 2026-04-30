@@ -30,6 +30,7 @@ from torch.optim import AdamW
 
 from marlllm.agent import Agent
 from marlllm.config import TrainingConfig
+from marlllm.dialogue import chat_eos_token_ids, verify_special_tokens
 from marlllm.loss import Loss
 from marlllm.store import TrajectoryStore
 from marlllm.tokeniser import Tokeniser
@@ -104,6 +105,14 @@ class Trainer:
             self._perception_source_indices = [
                 self.agent_index[a] for a in config.perception_agents
             ]
+
+        # Chat-template EOS ids for this run. Computed once; passed to every
+        # act() / act_batch() call so generation halts cleanly on <|im_end|>
+        # / <|endoftext|> instead of running to budget and dragging garbage
+        # into the next turn's context.
+        any_tok = next(iter(agents.values())).tokenizer
+        verify_special_tokens(any_tok)
+        self._eos_token_ids = chat_eos_token_ids(any_tok)
 
         self._start_time = time.time()
         self._rng_counter = config.seed  # advances per episode for distinct env scenarios
@@ -329,6 +338,7 @@ class Trainer:
                         context_token_ids=contexts[agent_id],
                         n_tokens=n_tokens,
                         temperature=self.config.temperature,
+                        eos_token_ids=self._eos_token_ids,
                     )
 
                 act_step = EpisodeStep(
@@ -568,6 +578,7 @@ class Trainer:
                         contexts=batch_contexts,
                         n_tokens=n_tokens,
                         temperature=self.config.temperature,
+                        eos_token_ids=self._eos_token_ids,
                     )
 
                 formatter = self.agents[agent_id].context_formatter

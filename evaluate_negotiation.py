@@ -76,6 +76,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--env-token-budget", type=int, default=None)
     p.add_argument("--max-episode-tokens", type=int, default=2048)
     p.add_argument("--temperature",    type=float, default=1.0)
+    p.add_argument("--submit-temperature", type=float, default=0.0,
+                   help="Temperature override for SUBMIT-style structured turns "
+                        "where the env signals must_act=True. 0.0 = greedy. "
+                        "Sampling at the dialogue temperature on a format-bound "
+                        "answer is the recipe for tail collapse documented in "
+                        "Phase A traces.")
     p.add_argument("--seed",           type=int,   default=10_000,
                    help="Eval seed — kept disjoint from training seeds (default 10_000) "
                         "so the eval scenarios are not the ones the agent trained on.")
@@ -107,7 +113,10 @@ def main() -> None:
     args = parse_args()
     torch.manual_seed(args.seed)
 
-    from marlllm import IndependentAgent, TextTokeniser, TokenType
+    from marlllm import IndependentAgent
+    from marlllm.dialogue import (
+        DialogueContext, chat_eos_token_ids, verify_special_tokens,
+    )
     from marlllm.eval_utils import NegotiationOutcome, summarise
     from envs.deal_or_no_deal_env import DealOrNoDealEnv
 
@@ -160,6 +169,13 @@ def main() -> None:
     agent_0.eval_mode()
     agent_1.eval_mode()
 
+    # Verify the tokeniser is correctly configured for the chat template
+    # before any rollout; aborts if special tokens aren't single-token in
+    # vocab. No training run can produce meaningful results without this.
+    verify_special_tokens(agent_0.tokenizer)
+    eos_token_ids = chat_eos_token_ids(agent_0.tokenizer)
+    print(f"[INFO] chat-template EOS ids: {eos_token_ids}")
+
     env = DealOrNoDealEnv(
         tokenizer=agent_0.tokenizer,
         max_dialogue_turns=args.dialogue_turns,
@@ -168,8 +184,8 @@ def main() -> None:
         seed=args.seed,
         role_shuffle=args.role_shuffle,
     )
-    tokeniser = TextTokeniser(agent_0.tokenizer)
     agents = {"agent_0": agent_0, "agent_1": agent_1}
+    character_prompts = {"agent_0": args.prompt_0, "agent_1": args.prompt_1}
 
     outcomes: list[NegotiationOutcome] = []
     trajectories: list[dict] = []
@@ -181,45 +197,51 @@ def main() -> None:
         env.reset(seed=rng_seed)
         rng_seed += 1
 
-        contexts: dict[str, list[int]] = {}
-        events: dict[str, list[dict]] = {aid: [] for aid in agents}
-        for aid, agent in agents.items():
-            prompt_text = args.prompt_0 if aid == "agent_0" else args.prompt_1
-            pids = tokeniser.encode_prompt(prompt_text)
-            wrapped = agent.context_formatter.wrap_prompt(pids)
-            start = len(contexts.get(aid, []))
-            contexts[aid] = list(wrapped)
-            events[aid].append({"type": "prompt", "span": [start, len(contexts[aid])]})
+        # One per-agent message-list context per episode. Strictly per-agent:
+        # each context only ever sees its agent's own actions (assistant) and
+        # the observations the env routes to it (user). No cross-agent
+        # plumbing — PettingZoo handles routing.
+        contexts: dict[str, DialogueContext] = {
+            aid: DialogueContext(
+                tokenizer=agents[aid].tokenizer,
+                system_prompt=character_prompts[aid],
+            )
+            for aid in agents
+        }
 
         for agent_id in env.agent_iter():
             obs, _r, term, trunc, info = env.last()
-            obs_ids = tokeniser.encode_observation(obs)
-            if obs_ids:
-                fmt = agents[agent_id].context_formatter
-                wrapped = fmt.wrap_observation(obs_ids)
-                start = len(contexts[agent_id])
-                contexts[agent_id].extend(wrapped)
-                events[agent_id].append(
-                    {"type": "obs", "span": [start, len(contexts[agent_id])]}
-                )
+            obs_text = obs if isinstance(obs, str) else (
+                agent_0.tokenizer.decode(obs, skip_special_tokens=True)
+                if obs else ""
+            )
+            if obs_text:
+                contexts[agent_id].add_observation(obs_text)
             if term or trunc:
                 env.step(None)
                 continue
+
             agent = agents[agent_id]
-            n_tokens = env.action_token_budget
+            # Lower temperature on structured forced-action turns (SUBMIT etc.)
+            # — the answer space is small and format-bound, so high-temp
+            # sampling collapses to garbage.
+            temp = (args.submit_temperature if info.get("must_act", False)
+                    else args.temperature)
+
+            input_ids = contexts[agent_id].get_input_ids()
             with torch.no_grad():
                 act_ids, _lps = agent.act(
-                    context_token_ids=contexts[agent_id],
-                    n_tokens=n_tokens,
-                    temperature=args.temperature,
+                    context_token_ids=input_ids,
+                    n_tokens=env.action_token_budget,
+                    temperature=temp,
+                    eos_token_ids=eos_token_ids,
                 )
-            fmt = agents[agent_id].context_formatter
-            wrapped = fmt.wrap_action(act_ids)
-            start = len(contexts[agent_id])
-            contexts[agent_id].extend(wrapped)
-            events[agent_id].append(
-                {"type": "act", "span": [start, len(contexts[agent_id])]}
-            )
+            # Decode the action with skip_special_tokens=True so any EOS
+            # marker we generated does not leak into the context as raw text
+            # on the next turn (the chat template re-emits it during
+            # rendering).
+            act_text = agent.tokenizer.decode(act_ids, skip_special_tokens=True)
+            contexts[agent_id].add_action(act_text)
             env.step(act_ids)
 
         # Capture episode outcome
@@ -239,7 +261,6 @@ def main() -> None:
             values_b=values["agent_1"],
         ))
         if args.save_trajectories:
-            tok = agent_0.tokenizer
             episode_record = {
                 "episode": ep,
                 "outcome": {
@@ -250,9 +271,14 @@ def main() -> None:
                 },
                 "agents": {
                     aid: {
-                        "context_ids": list(contexts[aid]),
-                        "context_text": tok.decode(contexts[aid], skip_special_tokens=False),
-                        "events": events[aid],
+                        # Primary: the message list the chat template was
+                        # built from (role/content per turn).
+                        "messages": contexts[aid].messages,
+                        # Derived: the rendered chat-template string with
+                        # all special tokens preserved — what the model
+                        # actually saw on the final turn (with assistant
+                        # primer included).
+                        "rendered": contexts[aid].get_input_text(),
                     }
                     for aid in agents
                 },

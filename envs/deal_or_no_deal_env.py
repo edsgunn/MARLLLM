@@ -22,10 +22,10 @@ Observation sequencing
 ----------------------
 agent_0 acts first (selector is initialised to agent_0 at reset).
 
-  Turn 1  agent_0 obs → ctx_0            agent_0 acts → utterance A
-  Turn 2  agent_1 obs → ctx_1 + A        agent_1 acts → utterance B
-  Turn 3  agent_0 obs → B                agent_0 acts → utterance A2
-  Turn 4  agent_1 obs → A2               agent_1 acts → utterance B2
+  Turn 1  agent_0 obs → ctx_0                              agent_0 acts → utterance A
+  Turn 2  agent_1 obs → ctx_1 + "The other agent said:\nA"  agent_1 acts → utterance B
+  Turn 3  agent_0 obs → "The other agent said:\nB"          agent_0 acts → utterance A2
+  Turn 4  agent_1 obs → "The other agent said:\nA2"         agent_1 acts → utterance B2
   …
   Turn N  (selection prompt for both)
   Turn N+1  one agent outputs allocation
@@ -218,6 +218,15 @@ class DealOrNoDealEnv(AECEnv):
     # Observation routing                                                  #
     # ------------------------------------------------------------------ #
 
+    def _label_utterance(self, token_ids: list[int]) -> list[int]:
+        """Wrap the other agent's utterance with a speaker label.
+
+        Decodes with skip_special_tokens=True so that chat-template markers
+        from the acting agent never leak into the receiving agent's context.
+        """
+        text = self._tok.decode(token_ids, skip_special_tokens=True).strip()
+        return self._enc(f"The other agent said:\n{text}")
+
     def _deliver_obs(self, agent: str, obs: list[int]) -> None:
         """Queue obs for agent, prepending private context if not yet delivered."""
         if not self._context_delivered[agent]:
@@ -369,8 +378,10 @@ class DealOrNoDealEnv(AECEnv):
             self._pending_obs[agent] = []  # current agent's obs consumed
 
             # Route this utterance to the other agent as their next obs.
+            # _label_utterance decodes + re-encodes with a speaker prefix so
+            # the receiving agent knows where the tokens came from.
             # _deliver_obs prepends ctx_1 if agent_1 hasn't seen their context yet.
-            self._deliver_obs(other, list(action))
+            self._deliver_obs(other, self._label_utterance(action))
 
             for a in self.agents:
                 self._infos[a]["dialogue_turn"] = self._dialogue_turn
