@@ -139,24 +139,16 @@ class Trainer:
             # tokens it actually observed during rollout.
             episode_results: list[str] = []
             episode_correct_counts: list[int] = []
-            trace_traj = None
-            trace_info: dict = {}
+            trace_episodes: list[tuple] = []  # (ctx_snapshot, ep_info, env_trace) for trace saving
             per_agent_trajs: dict[str, list] = {aid: [] for aid in self.agents}
 
-            for agent_traj_dict, ep_info in self._collect_episodes_batched(
+            for agent_traj_dict, ep_info, ctx_snapshot, env_trace_k in self._collect_episodes_batched(
                 self.config.episodes_per_iter
             ):
                 for aid, traj in agent_traj_dict.items():
-                    if aid == "_combined":
-                        continue
                     per_agent_trajs[aid].append(traj)
-                if trace_traj is None:
-                    # Use the combined-view trajectory (stored under the first
-                    # agent key) for the environment-overview trace only.
-                    trace_traj = agent_traj_dict.get("_combined") or next(
-                        iter(agent_traj_dict.values())
-                    )
-                    trace_info = ep_info
+                if len(trace_episodes) < self.config.num_checkpoint_traces:
+                    trace_episodes.append((ctx_snapshot, ep_info, env_trace_k))
                 if "result" in ep_info:
                     episode_results.append(ep_info["result"])
                 if "correct_count" in ep_info:
@@ -251,15 +243,18 @@ class Trainer:
 
             if iteration % self.config.log_every == 0:
                 self._log_metrics(iteration, all_metrics)
-                if trace_traj is not None:
-                    self._write_trace(iteration, trace_traj, trace_info)
+                if trace_episodes:
+                    ctx_snapshot0, info0, env_trace0 = trace_episodes[0]
+                    self._write_trace(iteration, ctx_snapshot0, info0, env_trace0)
 
             self._write_metrics_jsonl(all_metrics)
 
             if iteration % self.config.checkpoint_every == 0:
                 self.save_checkpoint(iteration)
+                self._write_checkpoint_traces(iteration, trace_episodes)
 
         self.save_checkpoint(self.config.num_iterations, tag="final")
+        self._write_checkpoint_traces(self.config.num_iterations, trace_episodes)
         self._logger.info("Training complete.")
 
     # ------------------------------------------------------------------ #
@@ -394,9 +389,9 @@ class Trainer:
         utterances reach this agent only after being processed by the
         environment into a new OBS step addressed to this agent.
 
-        The dictionary also contains a ``"_combined"`` key holding a
-        trajectory with all steps in their original types, used only for
-        writing environment-overview traces (not for training).
+        Each agent's trajectory contains only that agent's steps; no combined
+        view is needed since traces now use the raw context window token IDs
+        captured during rollout.
         """
         agent_ids = list(self.agents.keys())
         result: dict[str, "Trajectory"] = {}
@@ -420,35 +415,20 @@ class Trainer:
                 if step.agent_id == aid:
                     if step.token_type == TokenType.OBS:
                         fids = formatter.wrap_observation(step.token_ids)
+                        lps = step.log_probs
                     elif step.token_type == TokenType.ACT:
                         fids = formatter.wrap_action(step.token_ids)
+                        # wrap_action may append closure tokens (<|im_end|>\n);
+                        # pad log_probs with 0.0 so lengths stay aligned.
+                        lps = step.log_probs + [0.0] * (len(fids) - len(step.token_ids))
                     else:
                         fids = step.token_ids
-                    steps.append(EpisodeStep(aid, fids, step.token_type, step.log_probs, step.info))
+                        lps = step.log_probs
+                    steps.append(EpisodeStep(aid, fids, step.token_type, lps, step.info))
             result[aid] = self.tokeniser.build_trajectory(
                 episode_history=steps,
                 agent_ids_present=agent_ids,
             )
-
-        # Combined view for traces: raw tokens, no formatting applied.
-        # trace_utils relies on suffix-matching OBS against prior ACT tokens
-        # to detect routing; formatting would break that detection.
-        primary = agent_ids[0]
-        combined_steps: list[EpisodeStep] = []
-        pids = prompt_ids.get(primary, [])
-        if pids:
-            combined_steps.append(EpisodeStep(
-                agent_id=primary,
-                token_ids=pids,
-                token_type=TokenType.PAD,
-                log_probs=[],
-                info={},
-            ))
-        combined_steps.extend(history)
-        result["_combined"] = self.tokeniser.build_trajectory(
-            episode_history=combined_steps,
-            agent_ids_present=agent_ids,
-        )
 
         return result
 
@@ -494,13 +474,18 @@ class Trainer:
         token_counts:  list[int]                    = [0] * n
         active:        list[bool]                   = [True] * n
 
+        _full_ctx = getattr(self.env, 'obs_is_full_context', False)
         for k in range(n):
             for agent_id, agent in self.agents.items():
-                pt = self.config.character_prompts.get(agent_id, "")
-                pids = self.tokeniser.encode_prompt(pt)
-                prompt_ids[k][agent_id] = pids
-                contexts[k][agent_id] = agent.context_formatter.wrap_prompt(pids)
-                # Reset API-agent structured histories per slot.
+                if _full_ctx:
+                    # Context is provided wholesale by each obs; no prompt init needed.
+                    prompt_ids[k][agent_id] = []
+                    contexts[k][agent_id] = []
+                else:
+                    pt = self.config.character_prompts.get(agent_id, "")
+                    pids = self.tokeniser.encode_prompt(pt)
+                    prompt_ids[k][agent_id] = pids
+                    contexts[k][agent_id] = agent.context_formatter.wrap_prompt(pids)
                 if hasattr(agent, "reset_history"):
                     agent.reset_history(slot=k)
 
@@ -532,8 +517,11 @@ class Trainer:
                         log_probs=[],
                         info={},
                     ))
-                    formatter = self.agents[agent_id].context_formatter
-                    contexts[k][agent_id].extend(formatter.wrap_observation(obs_ids))
+                    if _full_ctx:
+                        contexts[k][agent_id] = list(obs_ids)
+                    else:
+                        formatter = self.agents[agent_id].context_formatter
+                        contexts[k][agent_id].extend(formatter.wrap_observation(obs_ids))
                     token_counts[k] += len(obs_ids)
                     if hasattr(self.agents[agent_id], "note_observation"):
                         try:
@@ -606,10 +594,16 @@ class Trainer:
         #   loss and return computation — this agent never saw them directly)
         # This correctly reflects the PettingZoo AEC guarantee that env.last()
         # delivers each observation only to the currently-selected agent.
+        from marlllm.trace_utils import get_env_trace
+        context_snapshots = [
+            {aid: list(contexts[k][aid]) for aid in self.agents}
+            for k in range(n)
+        ]
+        env_traces_list = [get_env_trace(envs[k]) for k in range(n)]
         results = []
         for k in range(n):
             agent_traj_dict = self._build_agent_views(histories[k], prompt_ids[k])
-            results.append((agent_traj_dict, ep_infos[k]))
+            results.append((agent_traj_dict, ep_infos[k], context_snapshots[k], env_traces_list[k]))
         return results
 
     # ------------------------------------------------------------------ #
@@ -732,24 +726,51 @@ class Trainer:
                 parts.append(f"{short} {metrics[key]:.4f}")
         self._logger.info(" | ".join(parts))
 
-    def _write_trace(self, iteration: int, traj, ep_info: dict) -> None:
-        from marlllm.trace_utils import format_trace, format_trace_json
+    def _write_trace(self, iteration: int, ctx_snapshot: dict, ep_info: dict, env_trace) -> None:
+        from marlllm.trace_utils import make_episode_record, write_records_json, write_records_txt
 
         tok = list(self.agents.values())[0].tokenizer
         traces_dir = Path(self.config.output_dir) / "traces"
         traces_dir.mkdir(exist_ok=True)
 
-        kwargs = dict(
-            iteration=iteration,
-            traj=traj,
-            ep_info=ep_info,
+        record = make_episode_record(
+            episode_idx=0,
+            agent_context_tokens=ctx_snapshot,
             tokenizer=tok,
-            character_prompts=self.config.character_prompts,
+            env_trace=env_trace or ep_info or None,
         )
-        with open(traces_dir / f"iter_{iteration:06d}.txt", "w") as f:
-            f.write(format_trace(**kwargs))
-        with open(traces_dir / f"iter_{iteration:06d}.json", "w") as f:
-            json.dump(format_trace_json(**kwargs), f, indent=2)
+        write_records_json([record], traces_dir / f"iter_{iteration:06d}.json")
+        write_records_txt([record], traces_dir / f"iter_{iteration:06d}.txt")
+
+    def _write_checkpoint_traces(
+        self, iteration: int, trace_episodes: list[tuple]
+    ) -> None:
+        """Write multiple episode traces alongside a checkpoint."""
+        if not trace_episodes:
+            return
+        from marlllm.trace_utils import make_episode_record, write_records_json, write_records_txt
+
+        tok = list(self.agents.values())[0].tokenizer
+        ckpt_traces_dir = (
+            Path(self.config.output_dir) / "traces" / f"ckpt_{iteration:06d}"
+        )
+        ckpt_traces_dir.mkdir(parents=True, exist_ok=True)
+
+        records = [
+            make_episode_record(
+                episode_idx=ep_idx,
+                agent_context_tokens=ctx_snapshot,
+                tokenizer=tok,
+                env_trace=env_trace or ep_info or None,
+            )
+            for ep_idx, (ctx_snapshot, ep_info, env_trace) in enumerate(trace_episodes)
+        ]
+        write_records_json(records, ckpt_traces_dir / "traces.json")
+        write_records_txt(records, ckpt_traces_dir / "traces.txt")
+
+        self._logger.info(
+            "Checkpoint traces saved: %s (%d episodes)", ckpt_traces_dir, len(records)
+        )
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:

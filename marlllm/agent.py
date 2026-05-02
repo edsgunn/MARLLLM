@@ -36,6 +36,47 @@ def _fix_cpu_buffers(model: nn.Module) -> None:
                     setattr(module, buf_name, buf.to(dest))
 
 
+def _sample_token(
+    logits: torch.Tensor,
+    temperature: float,
+) -> tuple[int, float]:
+    """Sample one token from a (1, V) logits tensor.
+
+    temperature == 0 → greedy argmax (avoids dividing by zero).
+    """
+    if temperature == 0.0:
+        token_id = int(logits.argmax(dim=-1).item())
+        log_prob = float(F.log_softmax(logits, dim=-1)[0, token_id].item())
+    else:
+        if temperature != 1.0:
+            logits = logits / temperature
+        probs = F.softmax(logits, dim=-1)
+        token_id = int(torch.multinomial(probs, num_samples=1).item())
+        log_prob = float(F.log_softmax(logits, dim=-1)[0, token_id].item())
+    return token_id, log_prob
+
+
+def _sample_batch(
+    logits: torch.Tensor,
+    temperature: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample one token per row from a (B, V) logits tensor.
+
+    Returns next_toks (B, 1) and log_probs (B, 1).
+    temperature == 0 → greedy argmax per row.
+    """
+    if temperature == 0.0:
+        next_toks = logits.argmax(dim=-1, keepdim=True)  # (B, 1)
+        log_probs = F.log_softmax(logits, dim=-1).gather(1, next_toks)
+    else:
+        if temperature != 1.0:
+            logits = logits / temperature
+        probs = F.softmax(logits, dim=-1)
+        next_toks = torch.multinomial(probs, num_samples=1)
+        log_probs = F.log_softmax(logits, dim=-1).gather(1, next_toks)
+    return next_toks, log_probs
+
+
 class Agent(ABC):
     """
     Interface that the Trainer and Loss see.
@@ -205,9 +246,9 @@ class IndependentAgent(Agent):
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
 
-        load_kwargs: dict = {"output_hidden_states": True}
+        load_kwargs: dict = {}
         if torch_dtype is not None:
-            load_kwargs["torch_dtype"] = torch_dtype
+            load_kwargs["dtype"] = torch_dtype
         if device_map is not None:
             load_kwargs["device_map"] = device_map
         if attn_implementation is not None:
@@ -259,7 +300,7 @@ class IndependentAgent(Agent):
         if keep_ref_model:
             ref_kwargs: dict = {}
             if torch_dtype is not None:
-                ref_kwargs["torch_dtype"] = torch_dtype
+                ref_kwargs["dtype"] = torch_dtype
             if device_map is not None:
                 ref_kwargs["device_map"] = device_map
             self._ref_backbone = AutoModelForCausalLM.from_pretrained(
@@ -349,15 +390,9 @@ class IndependentAgent(Agent):
             logits = out.logits[:, -1, :]  # (1, V)
             past_key_values = out.past_key_values
 
-            if temperature != 1.0:
-                logits = logits / temperature
-
-            probs = F.softmax(logits, dim=-1)
-            token_id = torch.multinomial(probs, num_samples=1).item()
-            log_prob = F.log_softmax(logits, dim=-1)[0, token_id].item()
-
-            sampled_ids.append(int(token_id))
-            sampled_lps.append(float(log_prob))
+            token_id, log_prob = _sample_token(logits, temperature)
+            sampled_ids.append(token_id)
+            sampled_lps.append(log_prob)
 
             if token_id in eos_set:
                 break
@@ -432,12 +467,7 @@ class IndependentAgent(Agent):
             logits = out.logits[:, -1, :]  # (B, V)
             past_key_values = out.past_key_values
 
-            if temperature != 1.0:
-                logits = logits / temperature
-
-            probs = F.softmax(logits, dim=-1)
-            next_toks = torch.multinomial(probs, num_samples=1)          # (B, 1)
-            log_probs_t = F.log_softmax(logits, dim=-1).gather(1, next_toks)  # (B, 1)
+            next_toks, log_probs_t = _sample_batch(logits, temperature)  # (B,1) each
 
             for i in range(B):
                 if finished[i]:
@@ -646,13 +676,9 @@ class LoRASharedBaseAgent(Agent):
             )
             logits = out.logits[:, -1, :]
             past_key_values = out.past_key_values
-            if temperature != 1.0:
-                logits = logits / temperature
-            probs = F.softmax(logits, dim=-1)
-            token_id = torch.multinomial(probs, num_samples=1).item()
-            log_prob = F.log_softmax(logits, dim=-1)[0, token_id].item()
-            sampled_ids.append(int(token_id))
-            sampled_lps.append(float(log_prob))
+            token_id, log_prob = _sample_token(logits, temperature)
+            sampled_ids.append(token_id)
+            sampled_lps.append(log_prob)
             if token_id in eos_set:
                 break
             input_ids = torch.tensor([[token_id]], dtype=torch.long, device=self.device)
@@ -700,11 +726,7 @@ class LoRASharedBaseAgent(Agent):
             )
             logits = out.logits[:, -1, :]
             past_key_values = out.past_key_values
-            if temperature != 1.0:
-                logits = logits / temperature
-            probs = F.softmax(logits, dim=-1)
-            next_toks = torch.multinomial(probs, num_samples=1)
-            log_probs_t = F.log_softmax(logits, dim=-1).gather(1, next_toks)
+            next_toks, log_probs_t = _sample_batch(logits, temperature)
             for i in range(B):
                 if finished[i]:
                     continue

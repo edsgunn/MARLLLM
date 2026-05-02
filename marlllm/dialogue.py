@@ -154,6 +154,25 @@ class DialogueContext:
         text = self.get_input_text()
         return self.tokenizer.encode(text, add_special_tokens=False)
 
+    def get_context_text(self) -> str:
+        """Full message history rendered without a generation prompt.
+
+        This is what was in the agent's context at end of episode (after the
+        final action was appended).  Unlike get_input_text(), no assistant
+        primer is appended.
+        """
+        return self.tokenizer.apply_chat_template(
+            self._messages,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+
+    def get_context_ids(self) -> list[int]:
+        """Token IDs for the complete message history (no generation prompt)."""
+        return self.tokenizer.encode(
+            self.get_context_text(), add_special_tokens=False
+        )
+
     # ---------------------------------------------------------------- #
     # Inspection / serialisation                                        #
     # ---------------------------------------------------------------- #

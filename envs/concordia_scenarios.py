@@ -1,9 +1,9 @@
 """
 Factory helpers for Concordia simulation environments.
 
-Each factory is a callable ``(stubs, seed) -> sim`` where:
-  - ``stubs``  is ``dict[str, StubAgent]`` keyed by the agent names passed to
-               ``ConcordiaEnv``.
+Each factory is a callable ``(models, seed) -> sim`` where:
+  - ``models`` is ``dict[str, MARLLLMLanguageModel]`` keyed by the agent names
+               passed to ``ConcordiaEnv``.
   - ``seed``   is ``int | None`` for reproducibility.
   - Return value has a ``.play()`` method (typically a Concordia engine or
     a ``simulation.Simulation`` wrapper).
@@ -20,7 +20,7 @@ All contest scenarios are implemented using the concordia.prefabs API
 
 Minimal usage
 -------------
-    from envs.concordia_env import ConcordiaEnv
+    from envs.concordia_env import ConcordiaEnv, MARLLLMLanguageModel, make_player_entity
     from envs.concordia_scenarios import HagglingScenario
 
     scenario = HagglingScenario(gm_model=my_language_model, embedder=my_embedder)
@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from envs.concordia_env import ConcordiaEnv, StubAgent
+from envs.concordia_env import ConcordiaEnv, MARLLLMLanguageModel, make_player_entity
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ from envs.concordia_env import ConcordiaEnv, StubAgent
 
 
 def make_concordia_env(
-    simulation_factory: Callable[[dict[str, StubAgent], int | None], Any],
+    simulation_factory: Callable[[dict[str, MARLLLMLanguageModel], int | None], Any],
     agent_names: list[str],
     tokenizer: Any,
     action_token_budget: int = 128,
@@ -73,14 +73,14 @@ class _BaseScenario:
 
     def __call__(
         self,
-        stubs: dict[str, StubAgent],
+        models: dict[str, MARLLLMLanguageModel],
         seed: int | None,
     ) -> Any:
-        return self._build_simulation(stubs, seed)
+        return self._build_simulation(models, seed)
 
     def _build_simulation(
         self,
-        stubs: dict[str, StubAgent],
+        models: dict[str, MARLLLMLanguageModel],
         seed: int | None,
     ) -> Any:
         raise NotImplementedError
@@ -101,7 +101,7 @@ class _EngineSimulation:
     def __init__(
         self,
         gm: Any,
-        entities: list[StubAgent],
+        entities: list[Any],
         engine: Any,
         premise: str,
         max_steps: int,
@@ -126,7 +126,7 @@ class _EngineSimulation:
 def _build_dialogic_sim(
     gm_model: Any,
     embedder: Any,
-    stubs: dict[str, StubAgent],
+    player_models: dict[str, MARLLLMLanguageModel],
     premise: str,
     max_steps: int,
     gm_name: str = "conversation rules",
@@ -142,6 +142,8 @@ def _build_dialogic_sim(
         allow_duplicates=True,
     )
 
+    entities = {name: make_player_entity(name, model) for name, model in player_models.items()}
+
     gm_prefab = dialogic.GameMaster()
     gm_prefab.params = {
         "name": gm_name,
@@ -149,13 +151,13 @@ def _build_dialogic_sim(
         "can_terminate_simulation": True,
         "next_game_master_name": "default rules",
     }
-    gm_prefab.entities = list(stubs.values())
+    gm_prefab.entities = list(entities.values())
     gm = gm_prefab.build(model=gm_model, memory_bank=memory_bank)
 
     engine = sequential.Sequential()
     return _EngineSimulation(
         gm=gm,
-        entities=list(stubs.values()),
+        entities=list(entities.values()),
         engine=engine,
         premise=premise,
         max_steps=max_steps,
@@ -165,7 +167,7 @@ def _build_dialogic_sim(
 def _build_game_theoretic_sim(
     gm_model: Any,
     embedder: Any,
-    stubs: dict[str, StubAgent],
+    player_models: dict[str, MARLLLMLanguageModel],
     scenes: Any,
     action_to_scores: Callable,
     scores_to_observation: Callable,
@@ -181,6 +183,8 @@ def _build_game_theoretic_sim(
         allow_duplicates=True,
     )
 
+    entities = {name: make_player_entity(name, model) for name, model in player_models.items()}
+
     gm_prefab = gt.GameMaster()
     gm_prefab.params = {
         "name": gm_name,
@@ -189,13 +193,13 @@ def _build_game_theoretic_sim(
         "scores_to_observation": scores_to_observation,
         "external_queue": None,
     }
-    gm_prefab.entities = list(stubs.values())
+    gm_prefab.entities = list(entities.values())
     gm = gm_prefab.build(model=gm_model, memory_bank=memory_bank)
 
     engine = sequential.Sequential()
     return _EngineSimulation(
         gm=gm,
-        entities=list(stubs.values()),
+        entities=list(entities.values()),
         engine=engine,
         premise="",
         max_steps=len(scenes) * 10,
@@ -237,9 +241,9 @@ class HagglingScenario(_BaseScenario):
         self._num_rounds = num_rounds
 
     def _build_simulation(
-        self, stubs: dict[str, StubAgent], seed: int | None
+        self, models: dict[str, MARLLLMLanguageModel], seed: int | None
     ) -> Any:
-        names = list(stubs.keys())
+        names = list(models.keys())
         premise = _HAGGLING_PREMISE.format(
             player_0=names[0],
             player_1=names[1] if len(names) > 1 else "Buyer",
@@ -248,7 +252,7 @@ class HagglingScenario(_BaseScenario):
         return _build_dialogic_sim(
             gm_model=self._gm_model,
             embedder=self._embedder,
-            stubs=stubs,
+            player_models=models,
             premise=premise,
             max_steps=self._num_rounds * 4,
             gm_name="haggling rules",
@@ -288,16 +292,16 @@ class PubCoordinationScenario(_BaseScenario):
         self._num_players = num_players
 
     def _build_simulation(
-        self, stubs: dict[str, StubAgent], seed: int | None
+        self, models: dict[str, MARLLLMLanguageModel], seed: int | None
     ) -> Any:
-        names = list(stubs.keys())
+        names = list(models.keys())
         premise = _PUB_COORDINATION_PREMISE.format(
             player_list=", ".join(names),
         )
         return _build_dialogic_sim(
             gm_model=self._gm_model,
             embedder=self._embedder,
-            stubs=stubs,
+            player_models=models,
             premise=premise,
             max_steps=len(names) * 8,
             gm_name="pub coordination rules",
@@ -374,12 +378,12 @@ class LaborCollectiveActionScenario(_BaseScenario):
         self._num_days = num_days
 
     def _build_simulation(
-        self, stubs: dict[str, StubAgent], seed: int | None
+        self, models: dict[str, MARLLLMLanguageModel], seed: int | None
     ) -> Any:
         from concordia.typing import entity as entity_lib
         from concordia.typing import scene as scene_lib
 
-        names = list(stubs.keys())
+        names = list(models.keys())
         premise = _LABOR_PREMISE_TEMPLATE.format(
             player_list=", ".join(names),
             num_days=self._num_days,
@@ -420,7 +424,7 @@ class LaborCollectiveActionScenario(_BaseScenario):
         return _build_game_theoretic_sim(
             gm_model=self._gm_model,
             embedder=self._embedder,
-            stubs=stubs,
+            player_models=models,
             scenes=scenes,
             action_to_scores=_labor_action_to_scores,
             scores_to_observation=_labor_scores_to_observation,
@@ -531,14 +535,14 @@ class RealityShowScenario(_BaseScenario):
         self._num_rounds = num_rounds
 
     def _build_simulation(
-        self, stubs: dict[str, StubAgent], seed: int | None
+        self, models: dict[str, MARLLLMLanguageModel], seed: int | None
     ) -> Any:
         import random
         from concordia.typing import entity as entity_lib
         from concordia.typing import scene as scene_lib
 
         rng = random.Random(seed)
-        names = list(stubs.keys())
+        names = list(models.keys())
         game_sequence = [
             rng.choice(_GAME_TYPES) for _ in range(self._num_rounds)
         ]
@@ -578,7 +582,7 @@ class RealityShowScenario(_BaseScenario):
         return _build_game_theoretic_sim(
             gm_model=self._gm_model,
             embedder=self._embedder,
-            stubs=stubs,
+            player_models=models,
             scenes=scenes,
             action_to_scores=action_to_scores,
             scores_to_observation=scores_to_observation,
@@ -619,16 +623,16 @@ class StateFormationScenario(_BaseScenario):
         self._num_rounds = num_rounds
 
     def _build_simulation(
-        self, stubs: dict[str, StubAgent], seed: int | None
+        self, models: dict[str, MARLLLMLanguageModel], seed: int | None
     ) -> Any:
-        names = list(stubs.keys())
+        names = list(models.keys())
         premise = _STATE_FORMATION_PREMISE.format(
             player_list=", ".join(names),
         )
         return _build_dialogic_sim(
             gm_model=self._gm_model,
             embedder=self._embedder,
-            stubs=stubs,
+            player_models=models,
             premise=premise,
             max_steps=self._num_rounds * 4,
             gm_name="alliance rules",
@@ -678,12 +682,12 @@ class FreeDialogueScenario(_BaseScenario):
         self._num_turns = num_turns
 
     def _build_simulation(
-        self, stubs: dict[str, StubAgent], seed: int | None
+        self, models: dict[str, MARLLLMLanguageModel], seed: int | None
     ) -> Any:
         return _build_dialogic_sim(
             gm_model=self._gm_model,
             embedder=self._embedder,
-            stubs=stubs,
+            player_models=models,
             premise=self._context,
             max_steps=self._num_turns * 2,
             gm_name="conversation rules",
@@ -721,11 +725,12 @@ class RoundRobinScenario(_BaseScenario):
 
     def _build_simulation(
         self,
-        stubs: dict[str, StubAgent],
+        models: dict[str, MARLLLMLanguageModel],
         seed: int | None,
     ) -> Any:
+        entities = {name: make_player_entity(name, model) for name, model in models.items()}
         return _RoundRobinSim(
-            agents=list(stubs.values()),
+            agents=list(entities.values()),
             num_turns=self._num_turns,
             context=self._context,
         )
@@ -736,7 +741,7 @@ class _RoundRobinSim:
 
     def __init__(
         self,
-        agents: list[StubAgent],
+        agents: list[Any],
         num_turns: int,
         context: str,
     ) -> None:

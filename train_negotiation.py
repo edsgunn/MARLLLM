@@ -63,8 +63,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--token-budget",     type=int,   default=64,   help="Generation budget per agent turn (includes thinking tokens)")
     p.add_argument("--env-token-budget", type=int,   default=None, help="Communication budget: max tokens after thinking stripped. None = no stripping")
     p.add_argument("--max-episode-tokens", type=int, default=1024, help="Token budget for full episode")
-    p.add_argument("--log-every",        type=int, default=10,     help="Log every N iterations")
-    p.add_argument("--checkpoint-every", type=int, default=100,    help="Checkpoint every N iterations")
+    p.add_argument("--log-every",              type=int, default=10,  help="Log every N iterations")
+    p.add_argument("--checkpoint-every",       type=int, default=100, help="Checkpoint every N iterations")
+    p.add_argument("--num-checkpoint-traces",  type=int, default=4,   help="Episode traces saved alongside each checkpoint")
     p.add_argument("--output-dir", default="runs/negotiation",     help="Log and checkpoint directory")
     p.add_argument("--resume", action="store_true",                help="Resume from latest checkpoint")
     p.add_argument("--kl-coef",  type=float, default=0.0,          help="KL penalty coefficient")
@@ -237,7 +238,7 @@ def main() -> None:
         print(f"Loading shared base model: {model_0}  →  {device_0}")
         load_kwargs: dict = {}
         if torch_dtype is not None:
-            load_kwargs["torch_dtype"] = torch_dtype
+            load_kwargs["dtype"] = torch_dtype
         if args.device_map is not None:
             load_kwargs["device_map"] = args.device_map
         if args.attn_impl is not None:
@@ -402,6 +403,7 @@ def main() -> None:
         lr=args.lr,
         log_every=args.log_every,
         checkpoint_every=args.checkpoint_every,
+        num_checkpoint_traces=args.num_checkpoint_traces,
         output_dir=args.output_dir,
         device=device_0,
         seed=args.seed,

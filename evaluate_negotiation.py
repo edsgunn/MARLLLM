@@ -76,12 +76,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--env-token-budget", type=int, default=None)
     p.add_argument("--max-episode-tokens", type=int, default=2048)
     p.add_argument("--temperature",    type=float, default=1.0)
-    p.add_argument("--submit-temperature", type=float, default=0.0,
-                   help="Temperature override for SUBMIT-style structured turns "
-                        "where the env signals must_act=True. 0.0 = greedy. "
-                        "Sampling at the dialogue temperature on a format-bound "
-                        "answer is the recipe for tail collapse documented in "
-                        "Phase A traces.")
     p.add_argument("--seed",           type=int,   default=10_000,
                    help="Eval seed — kept disjoint from training seeds (default 10_000) "
                         "so the eval scenarios are not the ones the agent trained on.")
@@ -222,18 +216,12 @@ def main() -> None:
                 continue
 
             agent = agents[agent_id]
-            # Lower temperature on structured forced-action turns (SUBMIT etc.)
-            # — the answer space is small and format-bound, so high-temp
-            # sampling collapses to garbage.
-            temp = (args.submit_temperature if info.get("must_act", False)
-                    else args.temperature)
-
             input_ids = contexts[agent_id].get_input_ids()
             with torch.no_grad():
                 act_ids, _lps = agent.act(
                     context_token_ids=input_ids,
                     n_tokens=env.action_token_budget,
-                    temperature=temp,
+                    temperature=args.temperature,
                     eos_token_ids=eos_token_ids,
                 )
             # Decode the action with skip_special_tokens=True so any EOS
@@ -261,29 +249,25 @@ def main() -> None:
             values_b=values["agent_1"],
         ))
         if args.save_trajectories:
-            episode_record = {
-                "episode": ep,
-                "outcome": {
-                    "deal": deal, "score_a": score_a, "score_b": score_b,
-                    "items": list(items),
-                    "values_a": list(values["agent_0"]),
-                    "values_b": list(values["agent_1"]),
-                },
-                "agents": {
-                    aid: {
-                        # Primary: the message list the chat template was
-                        # built from (role/content per turn).
-                        "messages": contexts[aid].messages,
-                        # Derived: the rendered chat-template string with
-                        # all special tokens preserved — what the model
-                        # actually saw on the final turn (with assistant
-                        # primer included).
-                        "rendered": contexts[aid].get_input_text(),
-                    }
-                    for aid in agents
-                },
+            from marlllm.trace_utils import make_episode_record
+            agent_context_tokens = {
+                aid: contexts[aid].get_context_ids()
+                for aid in agents
             }
-            trajectories.append(episode_record)
+            ep_trace = {
+                "deal": deal,
+                "score_a": score_a,
+                "score_b": score_b,
+                "items": list(items),
+                "values_a": list(values["agent_0"]),
+                "values_b": list(values["agent_1"]),
+            }
+            trajectories.append(make_episode_record(
+                episode_idx=ep,
+                agent_context_tokens=agent_context_tokens,
+                tokenizer=agent_0.tokenizer,
+                env_trace=ep_trace,
+            ))
 
         if (ep + 1) % max(1, args.n_episodes // 10) == 0:
             elapsed = time.time() - t0
@@ -309,10 +293,11 @@ def main() -> None:
         json.dump(summary, f, indent=2)
 
     if args.save_trajectories:
-        traj_path = Path(out_path).with_suffix(".trajectories.json")
-        with open(traj_path, "w") as f:
-            json.dump(trajectories, f, indent=2)
-        print(f"Trajectories: {traj_path}")
+        from marlllm.trace_utils import write_records_json, write_records_txt
+        base = Path(out_path).with_suffix("")
+        write_records_json(trajectories, str(base) + ".trajectories.json")
+        write_records_txt(trajectories, str(base) + ".trajectories.txt")
+        print(f"Trajectories: {base}.trajectories.json / .txt")
 
     print()
     print("Results:")

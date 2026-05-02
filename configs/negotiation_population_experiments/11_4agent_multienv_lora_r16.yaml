@@ -19,7 +19,7 @@ slurm:
   mem: "80G"
   partition: workq
 
-model: Qwen/Qwen2.5-1.5B
+model: Qwen/Qwen2.5-1.5B-Instruct
 dtype: bfloat16
 lora_shared_base: true
 lora_r: 16

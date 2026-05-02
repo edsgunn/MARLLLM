@@ -333,29 +333,26 @@ def main() -> None:
     )
 
     # ── Collect episodes and write traces ─────────────────────────────────
-    from marlllm.trace_utils import format_trace
+    from marlllm.trace_utils import make_episode_record, write_records_json, write_records_txt
 
     print(f"Collecting {args.n_traces} episodes …")
     episodes = trainer._collect_episodes_batched(args.n_traces)
 
-    success = sum(1 for _, info in episodes if info.get("result") == "success")  # noqa: _ = agent_traj_dict
+    success = sum(1 for _traj, info, _ctx, _env in episodes if info.get("result") == "success")
     print(f"  {success}/{args.n_traces} successful deals")
 
-    character_prompts = {"agent_0": prompt_0, "agent_1": prompt_1}
-    for idx, (agent_traj_dict, ep_info) in enumerate(episodes):
-        # Use the combined-view trajectory for traces (all steps in original types).
-        traj = agent_traj_dict.get("_combined") or next(iter(agent_traj_dict.values()))
-        label = f"ckpt{checkpoint_iter}_ep{idx:04d}"
-        text = format_trace(
-            iteration=label,
-            traj=traj,
-            ep_info=ep_info,
+    records = [
+        make_episode_record(
+            episode_idx=idx,
+            agent_context_tokens=ctx_snapshot,
             tokenizer=agent_0.tokenizer,
-            character_prompts=character_prompts,
+            env_trace=env_trace or ep_info or None,
         )
-        path = output_dir / f"{label}.txt"
-        with open(path, "w") as f:
-            f.write(text)
+        for idx, (_traj, ep_info, ctx_snapshot, env_trace) in enumerate(episodes)
+    ]
+    label = f"ckpt{checkpoint_iter}"
+    write_records_json(records, output_dir / f"{label}.json")
+    write_records_txt(records, output_dir / f"{label}.txt")
 
     print(f"Wrote {args.n_traces} traces to {output_dir}/")
 

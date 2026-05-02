@@ -49,7 +49,7 @@ from marlllm.dialogue import chat_eos_token_ids, verify_special_tokens
 from marlllm.loss import Loss
 from marlllm.store import TrajectoryStore
 from marlllm.tokeniser import Tokeniser
-from marlllm.trace_utils import format_trace
+from marlllm.trace_utils import get_env_trace
 from marlllm.types import EpisodeStep, RolloutBatch, TokenType, Trajectory
 
 
@@ -91,13 +91,16 @@ class EnvironmentSpec:
 
 
 # ── Raw episode record returned by _collect_episodes_batched ─────────────────
-# (history, ep_info, pairing, prompt_ids_per_name, env_name)
+# (history, ep_info, pairing, prompt_ids_per_name, env_name,
+#  context_snapshot, env_trace)
 _RawEpisode = tuple[
     list[EpisodeStep],    # steps tagged with population-member names
     dict,                 # ep_info from env
     tuple[str, str],      # (name_for_agent_0_role, name_for_agent_1_role)
     dict[str, list[int]], # prompt token IDs keyed by population-member name
     str,                  # env_name (for logging / traces)
+    dict[str, list[int]], # context snapshot: env_role -> flat token IDs
+    dict | None,          # env_trace from env.episode_trace() or None
 ]
 
 
@@ -326,10 +329,9 @@ class PopulationTrainer:
             if iteration % self.config.log_every == 0:
                 self._log_metrics(iteration, all_metrics)
                 for raw_ep in raw_episodes:
-                    hist, ep_info, pairing, pids, env_name = raw_ep
+                    hist, ep_info, pairing, pids, env_name, ctx_snapshot, env_trace_k = raw_ep
                     if hist:
-                        traj = self._make_trace_trajectory(hist, pairing, pids)
-                        self._write_trace(iteration, traj, ep_info, pairing, env_name)
+                        self._write_trace(iteration, ctx_snapshot, ep_info, pairing, env_name, env_trace_k)
                         break
 
             self._write_metrics_jsonl(all_metrics)
@@ -435,18 +437,27 @@ class PopulationTrainer:
         # The sampled prompt (possibly env-specific and/or one of many variants)
         # is stored in prompt_ids so _build_agent_trajectories can prepend the
         # exact context the agent actually saw during rollout.
+        _full_ctx = False
+        if self.environments:
+            _full_ctx = getattr(self.environments[0].env, 'obs_is_full_context', False)
+
         for k in range(n):
             spec = env_specs[k]
             for env_role, pop_name in env_role_to_name[k].items():
-                formatter = self.population[pop_name].context_formatter
-                if pop_name not in prompt_ids[k]:
-                    prompt_text = self._sample_prompt(pop_name, spec)
-                    pids = self.tokeniser.encode_prompt(prompt_text)
-                    prompt_ids[k][pop_name] = pids
-                    contexts[k][env_role] = formatter.wrap_prompt(pids)
+                if _full_ctx:
+                    if pop_name not in prompt_ids[k]:
+                        prompt_ids[k][pop_name] = []
+                    contexts[k][env_role] = []
                 else:
-                    # Self-play: both roles map to the same character — reuse.
-                    contexts[k][env_role] = formatter.wrap_prompt(prompt_ids[k][pop_name])
+                    formatter = self.population[pop_name].context_formatter
+                    if pop_name not in prompt_ids[k]:
+                        prompt_text = self._sample_prompt(pop_name, spec)
+                        pids = self.tokeniser.encode_prompt(prompt_text)
+                        prompt_ids[k][pop_name] = pids
+                        contexts[k][env_role] = formatter.wrap_prompt(pids)
+                    else:
+                        # Self-play: both roles map to the same character — reuse.
+                        contexts[k][env_role] = formatter.wrap_prompt(prompt_ids[k][pop_name])
 
         # Per-episode token budget from the env (may differ across env types).
         n_tokens_per_ep: list[int] = [
@@ -478,8 +489,11 @@ class PopulationTrainer:
                         log_probs=[],
                         info={},
                     ))
-                    formatter = self.population[pop_name].context_formatter
-                    contexts[k][env_role].extend(formatter.wrap_observation(obs_ids))
+                    if _full_ctx:
+                        contexts[k][env_role] = list(obs_ids)
+                    else:
+                        formatter = self.population[pop_name].context_formatter
+                        contexts[k][env_role].extend(formatter.wrap_observation(obs_ids))
                     token_counts[k] += len(obs_ids)
 
                 if term or trunc:
@@ -545,8 +559,14 @@ class PopulationTrainer:
                     if not envs[k].agents:
                         active[k] = False
 
+        context_snapshots = [
+            {env_role: list(contexts[k][env_role]) for env_role in contexts[k]}
+            for k in range(n)
+        ]
+        env_traces_list = [get_env_trace(envs[k]) for k in range(n)]
         return [
-            (histories[k], ep_infos[k], pairings[k], prompt_ids[k], env_specs[k].name)
+            (histories[k], ep_infos[k], pairings[k], prompt_ids[k], env_specs[k].name,
+             context_snapshots[k], env_traces_list[k])
             for k in range(n)
         ]
 
@@ -569,7 +589,7 @@ class PopulationTrainer:
         """
         formatter = self.population[pop_name].context_formatter
         trajectories: list[Trajectory] = []
-        for history, _ep_info, _pairing, pids, _env_name in agent_episodes:
+        for history, _ep_info, _pairing, pids, _env_name, _ctx_snapshot, _env_trace in agent_episodes:
             steps: list[EpisodeStep] = []
             prompt = pids.get(pop_name, [])
             if prompt:
@@ -584,40 +604,20 @@ class PopulationTrainer:
                 if step.agent_id == pop_name:
                     if step.token_type == TokenType.OBS:
                         fids = formatter.wrap_observation(step.token_ids)
+                        lps = step.log_probs
                     elif step.token_type == TokenType.ACT:
                         fids = formatter.wrap_action(step.token_ids)
+                        lps = step.log_probs + [0.0] * (len(fids) - len(step.token_ids))
                     else:
                         fids = step.token_ids
-                    steps.append(EpisodeStep(pop_name, fids, step.token_type, step.log_probs, step.info))
+                        lps = step.log_probs
+                    steps.append(EpisodeStep(pop_name, fids, step.token_type, lps, step.info))
             traj = self.tokeniser.build_trajectory(
                 episode_history=steps,
                 agent_ids_present=list(self.population.keys()),
             )
             trajectories.append(traj)
         return trajectories
-
-    def _make_trace_trajectory(
-        self,
-        history: list[EpisodeStep],
-        pairing: tuple[str, str],
-        pids: dict[str, list[int]],
-    ) -> Trajectory:
-        name_0 = pairing[0]
-        padded = []
-        prompt = pids.get(name_0, [])
-        if prompt:
-            padded.append(EpisodeStep(
-                agent_id=name_0,
-                token_ids=prompt,
-                token_type=TokenType.PAD,
-                log_probs=[],
-                info={},
-            ))
-        padded.extend(history)
-        return self.tokeniser.build_trajectory(
-            episode_history=padded,
-            agent_ids_present=list(self.population.keys()),
-        )
 
     # ------------------------------------------------------------------ #
     # Checkpointing                                                        #
@@ -680,31 +680,32 @@ class PopulationTrainer:
     def _write_trace(
         self,
         iteration: int,
-        traj: Trajectory,
+        ctx_snapshot: dict,
         ep_info: dict,
         pairing: tuple[str, str],
         env_name: str,
+        env_trace=None,
     ) -> None:
-        from marlllm.trace_utils import format_trace_json
+        from marlllm.trace_utils import make_episode_record, write_records_json, write_records_txt
 
         tok = list(self.population.values())[0].tokenizer
         traces_dir = Path(self.config.output_dir) / "traces"
         traces_dir.mkdir(exist_ok=True)
-        ep_info_ext = dict(ep_info)
-        ep_info_ext["pairing"] = f"{pairing[0]} vs {pairing[1]}"
-        ep_info_ext["env"] = env_name
 
-        kwargs = dict(
-            iteration=iteration,
-            traj=traj,
-            ep_info=ep_info_ext,
+        combined_env_trace = dict(ep_info) if ep_info else {}
+        combined_env_trace["pairing"] = f"{pairing[0]} vs {pairing[1]}"
+        combined_env_trace["env"] = env_name
+        if env_trace:
+            combined_env_trace.update(env_trace)
+
+        record = make_episode_record(
+            episode_idx=0,
+            agent_context_tokens=ctx_snapshot,
             tokenizer=tok,
-            character_prompts=self.config.character_prompts,
+            env_trace=combined_env_trace,
         )
-        with open(traces_dir / f"iter_{iteration:06d}.txt", "w") as f:
-            f.write(format_trace(**kwargs))
-        with open(traces_dir / f"iter_{iteration:06d}.json", "w") as f:
-            json.dump(format_trace_json(**kwargs), f, indent=2)
+        write_records_json([record], traces_dir / f"iter_{iteration:06d}.json")
+        write_records_txt([record], traces_dir / f"iter_{iteration:06d}.txt")
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:

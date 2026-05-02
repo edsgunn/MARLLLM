@@ -55,6 +55,7 @@ class TrainingConfig:
     # Output / checkpointing
     output_dir: str = "runs/default"
     checkpoint_every: int = 100  # save a checkpoint every N iterations
+    num_checkpoint_traces: int = 4  # traces saved alongside each checkpoint
 
     # Distribution / memory
     grad_accum_steps: int = 1          # split each batch into N micro-batches, accumulate grads
