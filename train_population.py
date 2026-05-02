@@ -296,17 +296,18 @@ def _build_forum_env(
         agent_names = get_character_set(cset)
         personas = get_personas(cset)
 
-    forum_preamble = spec_dict.get("forum_preamble") or (
-        f"{FORUM_DESCRIPTION}\n\n"
-        "A new thread has just opened on the Alchemical Theory section.\n"
-        "Anyone may start. Compose your post."
+    forum_description = spec_dict.get("forum_description") or FORUM_DESCRIPTION
+    initial_invitation = spec_dict.get("initial_invitation") or (
+        "A new thread has just opened on the Alchemical Theory section. "
+        "The forum is active and members are posting throughout the day."
     )
 
     return ForumEnv(
         agent_names=agent_names,
         agent_personas=personas,
         tokenizer=tokenizer,
-        forum_preamble=forum_preamble,
+        forum_description=forum_description,
+        initial_invitation=initial_invitation,
         action_token_budget=spec_dict.get("token_budget", 128),
         max_posts=int(spec_dict.get("max_posts", 12)),
         post_order=spec_dict.get("post_order", "round_robin"),
@@ -345,7 +346,11 @@ def _build_environment_specs(
                 shared_backbone_device=shared_backbone_device,
             )
             # character_prompts in the spec dict (str or list[str] values)
-            char_prompts = entry.get("character_prompts", {})
+            char_prompts = dict(entry.get("character_prompts", {}) or {})
+            # Merge in env defaults (e.g. ForumEnv personas) — YAML wins on conflict.
+            env_defaults = getattr(env, "default_character_prompts", None) or {}
+            for name, persona in env_defaults.items():
+                char_prompts.setdefault(name, persona)
             specs.append(EnvironmentSpec(
                 env=env,
                 name=entry.get("name", f"env_{len(specs)}"),
@@ -415,6 +420,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lora-alpha", type=int, default=16)
     p.add_argument("--lora-modules", default=None,
                    help="Comma-separated module names for LoRA. None = auto-detect.")
+
+    # ── vLLM rollout (optional) ───────────────────────────────────────────
+    p.add_argument("--use-vllm", action="store_true",
+                   help="Use vLLM for rollout sampling. Requires --lora-shared-base. "
+                        "After each optimizer.step() the LoRA adapters are saved to "
+                        "disk and re-registered with vLLM so the next rollout sees "
+                        "the latest weights.")
+    p.add_argument("--vllm-gpu-mem-util", type=float, default=0.45,
+                   help="vLLM gpu_memory_utilization. Must leave room for the "
+                        "training model on the same GPU. Lower this if you OOM.")
+    p.add_argument("--vllm-max-model-len", type=int, default=None,
+                   help="Override vLLM max_model_len. None = use the model default.")
+    p.add_argument("--vllm-max-num-seqs", type=int, default=None,
+                   help="Override vLLM max_num_seqs (concurrent sequences in a batch).")
+    p.add_argument("--vllm-enforce-eager", action="store_true",
+                   help="Disable CUDA graph capture in vLLM. Slower but simpler "
+                        "to debug; useful if you hit graph-capture issues.")
+    p.add_argument("--vllm-dtype", default="bfloat16",
+                   help="Dtype for the vLLM engine (bfloat16 / float16 / auto).")
 
     # ── Training ──────────────────────────────────────────────────────────
     p.add_argument("--iters",          type=int,   default=500)
@@ -684,6 +708,36 @@ def main() -> None:
     loss      = CCSMLoss()
     store     = OnPolicyStore()
 
+    sampling_engine = None
+    sampling_engine_peft_model = None
+    if args.use_vllm:
+        if not args.lora_shared_base:
+            raise ValueError(
+                "--use-vllm currently only supports the --lora-shared-base path. "
+                "Full fine-tuning would need a different weight-sync mechanism."
+            )
+        from marlllm.vllm_engine import VLLMSamplingEngine
+        # All LoRA-shared-base agents reference the same peft_model on first_agent.
+        sampling_engine_peft_model = first_agent._backbone
+        adapter_names = list(population.keys())
+        print(
+            f"Initialising vLLM sampling engine: model={args.model} "
+            f"adapters={adapter_names} max_lora_rank={args.lora_r} "
+            f"gpu_memory_utilization={args.vllm_gpu_mem_util}"
+        )
+        sampling_engine = VLLMSamplingEngine(
+            model_name=args.model,
+            peft_model=sampling_engine_peft_model,
+            adapter_names=adapter_names,
+            max_lora_rank=args.lora_r,
+            gpu_memory_utilization=args.vllm_gpu_mem_util,
+            max_model_len=args.vllm_max_model_len,
+            max_num_seqs=args.vllm_max_num_seqs,
+            enforce_eager=args.vllm_enforce_eager,
+            dtype=args.vllm_dtype,
+        )
+        print("vLLM sampling engine ready.")
+
     trainer = PopulationTrainer(
         population=population,
         environments=env_specs,
@@ -692,6 +746,8 @@ def main() -> None:
         store=store,
         config=config,
         pairing_strategy=args.pairing_strategy,
+        sampling_engine=sampling_engine,
+        sampling_engine_peft_model=sampling_engine_peft_model,
     )
 
     start_iteration = 1

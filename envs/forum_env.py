@@ -1,42 +1,52 @@
 """
 Append-only forum environment for CCSM training.
 
-Honours the embedded/embodied-agent invariant
----------------------------------------------
-Each agent's context is a strictly monotonic chat-message log:
+Designed to mirror DealOrNoDealEnv's observation shape so an instruct-tuned
+model handles it as conversational chat (which it does naturally) rather
+than as an open-ended posting task (which it doesn't).
 
-    [system: <persona>]
-    [user:   <forum preamble + initial topic>]
-    [assistant: <my post>]                        ← own posts as assistant
-    [user:   <other speakers' posts so far>]      ← others' posts as user
-    [assistant: <my next post>]
-    [user:   ...]
+Observation sequencing
+----------------------
+Each agent's chat log grows naturally one user/assistant pair at a time:
+
+    Turn 1   first agent obs → ctx_initial                   acts → post A
+    Turn 2   second agent obs → ctx_initial + "A wrote: …"   acts → post B
+    Turn 3   first agent obs → "B wrote: …"                  acts → post A2
+    Turn 4   second agent obs → "A2 wrote: …"                acts → post B2
     ...
 
-Two invariants:
-  1. Each turn appends exactly one new message somewhere in some agent's
-     log.  Nothing is ever rewritten or removed.
-  2. Speaker-role correctness — own posts stay tagged ``assistant``,
-     others' posts stay tagged ``user``.  CCSM's perception/action loss
+Three properties enforced by this design:
+
+  1. **Strict monotonicity at the per-agent context level.**  The trainer
+     uses ``obs_is_full_context = False`` (the default).  Each ``observe``
+     call returns ONLY the new content since this agent last acted.  The
+     trainer wraps each delivery as a fresh ``<|im_start|>user…<|im_end|>``
+     turn and appends it; nothing is ever rewritten.
+
+  2. **Conversational framing.**  Each delivery is rendered as direct
+     speech (``"<Speaker> wrote:\\n<text>"``) — no meta-instructions like
+     "Compose your next post".  This matches the chat structure the
+     instruct model was RLHF'd on, so it keeps responding instead of
+     interpreting one round as task-completion.
+
+  3. **Speaker-role correctness.**  Own posts stay tagged ``assistant``,
+     others' posts stay tagged ``user``.  CCSM perception/action loss
      tagging works unchanged.
 
-No retrieval, no windowing, no GM-LLM, no summarisation.  The forum
-"thread" lives implicitly inside each agent's monotonic message log.
+Persona handling
+----------------
+Personas are exposed via the ``default_character_prompts`` property and
+the trainer plumbs them in as the system message at episode start
+(via ``EnvironmentSpec.character_prompts`` → ``formatter.wrap_prompt``).
+The persona text is NEVER repeated in observations.
 
-Memory tool use (NOT implemented here)
----------------------------------------
-A future ``recall`` tool would be a learned action: the agent emits a
-structured tool-call within its generated tokens, the env intercepts
-it, executes a retrieval, and **appends** the retrieved text as a new
-``user`` message in the agent's log.  Retrieval becomes an action
-within the stream, never a preprocessor over the stream.
-
-PettingZoo AEC contract
------------------------
-Standard AEC.  ``observe(agent)`` returns the agent's full chat-template-
-tokenised message log + generation prompt as a list of token ids.  Sets
-``obs_is_full_context = True`` so the trainer treats the observation as
-the entire context window.
+Memory tool use (NOT implemented)
+---------------------------------
+A future ``recall`` tool would be a learned action emitted in the
+agent's generated tokens.  The env intercepts the tool call, executes a
+retrieval, and **appends** the result as a new ``user`` delivery in the
+agent's chat log.  Retrieval becomes an action within the stream, never
+a preprocessor over it.
 """
 from __future__ import annotations
 
@@ -47,58 +57,52 @@ from pettingzoo import AECEnv
 from transformers import PreTrainedTokenizerBase
 
 
-# ---------------------------------------------------------------------------
-# ForumEnv
-# ---------------------------------------------------------------------------
-
-
 class ForumEnv(AECEnv):
-    """Append-only multi-agent forum environment.
+    """Append-only multi-agent forum environment with conversational obs.
 
     Parameters
     ----------
     agent_names:
-        Ordered list of agent slot names.  These appear as posters in the
-        thread and key the per-agent message logs.
+        Ordered list of agent slot names.  Used as ``possible_agents``.
     agent_personas:
-        Map ``name → persona text``.  Inserted as the ``system`` message
-        in each agent's log at reset.  Unmentioned agents fall back to a
-        minimal placeholder persona.
+        Map ``name → persona text``.  Exposed via
+        ``default_character_prompts`` for the trainer to install as each
+        agent's system prompt.  The env itself does NOT render personas
+        into observations.
     tokenizer:
-        HuggingFace tokenizer used for chat-template assembly + decoding
-        actions.
-    forum_preamble:
-        Initial ``user`` message inserted at reset, framing the thread
-        topic.  This is identical for every agent.
+        HuggingFace tokenizer for encoding observations.
+    forum_description:
+        Brief description of the forum (used in the initial ctx).
+    initial_invitation:
+        Single-sentence call-to-action for the first observation each
+        agent receives.  Default invites them to post on a new thread.
     action_token_budget:
-        Tokens per turn.  Read by the Trainer — does not constrain the
-        env directly.
+        Tokens per turn; read by the trainer.
     max_posts:
-        Total number of posts in the episode (across all agents).
-        Episode terminates when this is reached.
+        Total posts in the episode (across all agents).
     post_order:
-        ``"round_robin"`` (cycle agents in given order) or ``"random"``
-        (uniform sample without immediate self-repeat).
+        ``"round_robin"`` or ``"random"``.
     seed:
         RNG seed for ``random`` post ordering.
     reward_fn:
-        ``(final_state, agent_name) → float``.  Defaults to zero (CCSM
-        relies on the perception loss, not environment reward).
+        ``(final_state, agent_name) → float``.  Defaults to zero.
     """
 
     metadata = {"render_modes": [], "name": "forum_v1"}
 
-    obs_is_full_context: bool = True
+    # Trainer uses the standard incremental-append path; obs is delta-only.
+    obs_is_full_context: bool = False
 
     def __init__(
         self,
         agent_names: list[str],
         agent_personas: dict[str, str],
         tokenizer: PreTrainedTokenizerBase,
-        forum_preamble: str = (
-            "A new thread has just opened on the forum.\n"
-            "Topic: General discussion. Anyone may start.\n"
-            "Compose your next post."
+        forum_description: str = (
+            "An online forum where members post and reply to threads."
+        ),
+        initial_invitation: str = (
+            "A new thread has just opened on the forum. The discussion is active."
         ),
         action_token_budget: int = 128,
         max_posts: int = 12,
@@ -111,41 +115,55 @@ class ForumEnv(AECEnv):
         self.possible_agents = list(agent_names)
         self._personas = dict(agent_personas)
         self._tok = tokenizer
-        self._forum_preamble = forum_preamble
+        self._forum_description = forum_description
+        self._initial_invitation = initial_invitation
         self.action_token_budget = action_token_budget
         self._max_posts = int(max_posts)
         if post_order not in ("round_robin", "random"):
-            raise ValueError(f"post_order must be 'round_robin' or 'random', got {post_order!r}")
+            raise ValueError(
+                f"post_order must be 'round_robin' or 'random', got {post_order!r}"
+            )
         self._post_order = post_order
         self._seed = seed
         self._rng = random.Random(seed)
         self._reward_fn = reward_fn if reward_fn is not None else (lambda _s, _a: 0.0)
 
-        # PettingZoo AEC state (populated in reset)
+        # PettingZoo AEC state — populated in reset()
         self.agents: list[str] = []
         self.agent_selection: str = ""
-        self._messages: dict[str, list[dict]] = {}
-        # Buffer of "speaker: text" strings to flush into the next observer's log.
-        self._pending_obs: dict[str, list[str]] = {}
+        # Buffer of (speaker, text) tuples accumulated since this agent last acted.
+        self._pending_posts: dict[str, list[tuple[str, str]]] = {}
+        # Whether each agent has already received its initial ctx.
+        self._initial_delivered: dict[str, bool] = {}
         self._post_count: int = 0
-        self._thread: list[dict] = []   # canonical thread record for env_trace
+        self._thread: list[dict] = []
         self._cumulative_rewards: dict[str, float] = {}
         self._terminations: dict[str, bool] = {}
         self._truncations: dict[str, bool] = {}
         self._infos: dict[str, dict] = {}
         self._final_state: Any = None
+        self._next_idx: int = 0
+
+    # ------------------------------------------------------------------ #
+    # Trainer plumbing                                                    #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def default_character_prompts(self) -> dict[str, str]:
+        """Personas the trainer should install as each agent's system prompt."""
+        return dict(self._personas)
 
     # ------------------------------------------------------------------ #
     # Deep-copy support                                                   #
     # ------------------------------------------------------------------ #
 
     def __deepcopy__(self, memo: dict) -> "ForumEnv":
-        """Config-only copy; runtime state is rebuilt in reset()."""
         new = ForumEnv(
             agent_names=list(self.possible_agents),
             agent_personas=dict(self._personas),
             tokenizer=self._tok,
-            forum_preamble=self._forum_preamble,
+            forum_description=self._forum_description,
+            initial_invitation=self._initial_invitation,
             action_token_budget=self.action_token_budget,
             max_posts=self._max_posts,
             post_order=self._post_order,
@@ -164,18 +182,8 @@ class ForumEnv(AECEnv):
             self._rng = random.Random(seed)
 
         self.agents = list(self.possible_agents)
-        self._messages = {
-            name: [
-                {"role": "system", "content": self._personas.get(
-                    name,
-                    f"You are {name}, a member of an online forum. "
-                    "Write your next post.",
-                )},
-                {"role": "user", "content": self._forum_preamble},
-            ]
-            for name in self.agents
-        }
-        self._pending_obs = {a: [] for a in self.agents}
+        self._pending_posts = {a: [] for a in self.agents}
+        self._initial_delivered = {a: False for a in self.agents}
         self._post_count = 0
         self._thread = []
         self._cumulative_rewards = {a: 0.0 for a in self.agents}
@@ -184,57 +192,48 @@ class ForumEnv(AECEnv):
         self._infos = {a: {} for a in self.agents}
         self._final_state = None
 
-        # First poster
         if self._post_order == "round_robin":
             self._next_idx = 0
             self.agent_selection = self.agents[self._next_idx]
-        else:  # random
+        else:
             self.agent_selection = self._rng.choice(self.agents)
 
     def observe(self, agent: str) -> list[int]:
-        """Tokenised chat-template render of *agent*'s full monotonic log.
+        """Return token ids for the new content this agent has not yet seen.
 
-        Renders to a string via ``apply_chat_template(tokenize=False)`` and
-        then encodes — bypasses transformers-version inconsistencies where
-        ``tokenize=True`` may return a ``BatchEncoding`` (dict) rather than
-        a flat ``list[int]``.
+        First-time observers receive the initial ctx (forum description +
+        invitation + any posts that landed before their first turn).
+        Subsequent observers receive only the partner posts that have
+        accumulated since their last act.
         """
-        msgs = self._messages.get(agent)
-        if not msgs:
+        if agent not in self._pending_posts:
             return []
-        try:
-            text = self._tok.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=True,
-            )
-        except Exception:
-            # Fallback: flat string concat for tokenizers without a chat template.
-            text = "\n".join(f"[{m['role']}] {m['content']}" for m in msgs)
-        # Chat template already includes special tokens — don't double-add them.
+
+        body_parts: list[str] = []
+        if not self._initial_delivered[agent]:
+            body_parts.append(self._render_initial_ctx())
+            self._initial_delivered[agent] = True
+
+        posts = self._pending_posts[agent]
+        self._pending_posts[agent] = []
+        if posts:
+            body_parts.append(self._frame_posts(posts))
+
+        if not body_parts:
+            return []
+        text = "\n\n".join(body_parts)
         ids = self._tok.encode(text, add_special_tokens=False)
         return [int(t) for t in ids]
 
     def step(self, action: Any) -> None:
         speaker = self.agent_selection
-
         if self._terminations.get(speaker) or self._truncations.get(speaker):
             self._was_dead_step(action)
             return
 
-        # Decode the speaker's post
-        if action is None or len(action) == 0:
-            text = ""
-        else:
-            text = self._tok.decode(list(action), skip_special_tokens=True)
+        text = self._decode_action(action)
 
-        # 1. Append the post as 'assistant' in the speaker's own log.
-        self._messages[speaker].append({"role": "assistant", "content": text})
-
-        # 2. Buffer the post as a 'user' observation for every other agent.
-        for other in self.agents:
-            if other != speaker:
-                self._pending_obs[other].append(f"{speaker}: {text}")
-
-        # 3. Record on the canonical thread (for env_trace).
+        # Record on canonical thread.
         self._thread.append({
             "post_index": self._post_count,
             "speaker": speaker,
@@ -242,7 +241,12 @@ class ForumEnv(AECEnv):
         })
         self._post_count += 1
 
-        # 4. Termination check.
+        # Deliver this post to every OTHER agent's pending buffer.
+        for other in self.agents:
+            if other != speaker:
+                self._pending_posts[other].append((speaker, text))
+
+        # Termination check.
         if self._post_count >= self._max_posts:
             self._final_state = {"thread": list(self._thread)}
             for a in self.possible_agents:
@@ -250,37 +254,53 @@ class ForumEnv(AECEnv):
                 self._cumulative_rewards[a] = self._reward_fn(self._final_state, a)
             return
 
-        # 5. Advance to next speaker; flush their pending observations.
-        next_agent = self._select_next_speaker(prev=speaker)
-        self._flush_pending(next_agent)
-        self.agent_selection = next_agent
+        # Advance.
+        self.agent_selection = self._select_next_speaker(prev=speaker)
 
     # ------------------------------------------------------------------ #
     # Internals                                                           #
     # ------------------------------------------------------------------ #
 
+    def _decode_action(self, action: Any) -> str:
+        if action is None:
+            return ""
+        try:
+            ids = list(action)
+        except TypeError:
+            return str(action)
+        if not ids:
+            return ""
+        return self._tok.decode(ids, skip_special_tokens=True)
+
+    def _render_initial_ctx(self) -> str:
+        """First-observation framing each agent sees once."""
+        return f"{self._forum_description}\n\n{self._initial_invitation}"
+
+    def _frame_posts(self, posts: list[tuple[str, str]]) -> str:
+        """Render new partner posts as direct-speech narrative.
+
+        - Single post:   ``"<Speaker> wrote:\\n<text>"``
+        - Multiple:      ``"Several people posted:\\n\\n<framed1>\\n\\n<framed2>"``
+
+        Always direct-speech form — never wrapped in meta-instructions like
+        "Compose your next post".  The chat-template wrapping (added by the
+        trainer's formatter) provides all the structural framing the model
+        needs to know it should respond.
+        """
+        if len(posts) == 1:
+            sp, txt = posts[0]
+            return f"{sp} wrote:\n{txt}" if txt else f"{sp} wrote nothing."
+        framed = []
+        for sp, txt in posts:
+            framed.append(f"{sp} wrote:\n{txt}" if txt else f"{sp} wrote nothing.")
+        return "Several people posted on the forum:\n\n" + "\n\n".join(framed)
+
     def _select_next_speaker(self, prev: str) -> str:
         if self._post_order == "round_robin":
             self._next_idx = (self._next_idx + 1) % len(self.agents)
             return self.agents[self._next_idx]
-        # random, no immediate repeat
         choices = [a for a in self.agents if a != prev] or list(self.agents)
         return self._rng.choice(choices)
-
-    def _flush_pending(self, agent: str) -> None:
-        """Bundle all pending observations into one user message in agent's log."""
-        pending = self._pending_obs.get(agent, [])
-        if not pending:
-            return
-        bundled = "\n\n".join(pending)
-        # Frame the bundle as a forum-thread update.
-        body = (
-            "New posts on the thread:\n\n"
-            f"{bundled}\n\n"
-            "Compose your next post."
-        )
-        self._messages[agent].append({"role": "user", "content": body})
-        self._pending_obs[agent] = []
 
     def _was_dead_step(self, action: Any) -> None:
         if action is not None:
@@ -297,7 +317,6 @@ class ForumEnv(AECEnv):
     # ------------------------------------------------------------------ #
 
     def episode_trace(self) -> dict:
-        """Return a structured trace of the canonical thread + agent metadata."""
         return {
             "thread": list(self._thread),
             "agents": list(self.possible_agents),
@@ -340,7 +359,7 @@ class ForumEnv(AECEnv):
 
 
 # ---------------------------------------------------------------------------
-# Convenience constructor for the Robotic Athanor scenario
+# Convenience constructor
 # ---------------------------------------------------------------------------
 
 
@@ -352,26 +371,16 @@ def make_robotic_athanor_forum(
     post_order: str = "round_robin",
     action_token_budget: int = 128,
     seed: int | None = None,
-    forum_preamble: str | None = None,
 ) -> ForumEnv:
     """Build a ForumEnv configured with the Robotic Athanor character roster."""
     from envs.robotic_athanor_personas import (
         FORUM_DESCRIPTION, get_character_set, get_personas,
     )
-
-    agent_names = get_character_set(character_set)
-    personas = get_personas(character_set)
-    if forum_preamble is None:
-        forum_preamble = (
-            f"{FORUM_DESCRIPTION}\n\n"
-            "A new thread has just opened on the Alchemical Theory section.\n"
-            "Anyone may start. Compose your post."
-        )
     return ForumEnv(
-        agent_names=agent_names,
-        agent_personas=personas,
+        agent_names=get_character_set(character_set),
+        agent_personas=get_personas(character_set),
         tokenizer=tokenizer,
-        forum_preamble=forum_preamble,
+        forum_description=FORUM_DESCRIPTION,
         action_token_budget=action_token_budget,
         max_posts=max_posts,
         post_order=post_order,

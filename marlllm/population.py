@@ -177,6 +177,8 @@ class PopulationTrainer:
         store: TrajectoryStore,
         config: TrainingConfig,
         pairing_strategy: str = "random_no_self",
+        sampling_engine: Any = None,
+        sampling_engine_peft_model: Any = None,
     ) -> None:
         if len(population) < 1:
             raise ValueError("population must have at least one member")
@@ -215,6 +217,11 @@ class PopulationTrainer:
         self.tokeniser = tokeniser
         self.config = config
         self.pairing_strategy = pairing_strategy
+        # Optional vLLM sampling engine (rollout-only). When set, _collect_episodes_batched
+        # routes generation through it instead of agent.act_batch, and the trainer
+        # calls sync_all_adapters() after each optimizer.step().
+        self.sampling_engine = sampling_engine
+        self._sampling_engine_peft_model = sampling_engine_peft_model
 
         self.device = torch.device(config.device)
         self.agent_index: dict[str, int] = {
@@ -379,6 +386,10 @@ class PopulationTrainer:
             # ── 3. Optimizer step ─────────────────────────────────────────
             _t_phase = time.perf_counter()
             self.optimizer.step()
+            if self.sampling_engine is not None and self._sampling_engine_peft_model is not None:
+                # Push fresh LoRA weights into vLLM so the next rollout
+                # samples from the just-updated policy.
+                self.sampling_engine.sync_all_adapters(self._sampling_engine_peft_model)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             optim_s = time.perf_counter() - _t_phase
@@ -656,13 +667,22 @@ class PopulationTrainer:
                 # which is safe since outputs are trimmed to actual length.
                 n_tokens = max(n_tokens_per_ep[k] for k in env_indices)
                 _t_gen = time.perf_counter()
-                with torch.no_grad():
-                    batch_ids, batch_lps = agent.act_batch(
+                if self.sampling_engine is not None:
+                    batch_ids, batch_lps = self.sampling_engine.generate(
                         contexts=batch_contexts,
                         n_tokens=n_tokens,
                         temperature=self.config.temperature,
                         eos_token_ids=self._eos_token_ids,
+                        adapter_name=pop_name,
                     )
+                else:
+                    with torch.no_grad():
+                        batch_ids, batch_lps = agent.act_batch(
+                            contexts=batch_contexts,
+                            n_tokens=n_tokens,
+                            temperature=self.config.temperature,
+                            eos_token_ids=self._eos_token_ids,
+                        )
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 self._rollout_stats["gen_time_s"] += time.perf_counter() - _t_gen

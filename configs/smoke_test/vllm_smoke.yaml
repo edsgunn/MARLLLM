@@ -1,0 +1,42 @@
+# Smoke test for the vLLM rollout integration. Mirrors run1_2agent_robotic_athanor
+# but with iters=2, log_every=1 and a much shorter env so the whole run fits in
+# a few minutes. Designed to exercise:
+#   * vLLM engine init with multi-LoRA
+#   * one rollout through vLLM
+#   * optimizer.step() + sync_all_adapters
+#   * second rollout reading the new weights
+# Combine with --use-vllm on the CLI.
+model: Qwen/Qwen2.5-1.5B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+characters:
+- Silas Varnham
+- Thaddeus 'Aurelius' Thorne
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 2
+rollouts: 4
+lr: 1e-5
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 4
+seed: 1
+log_every: 1
+checkpoint_every: 999
+num_checkpoint_traces: 1
+snapshot_eval_path: eval_contexts/robotic_athanor.json
+snapshot_samples_per_context: 2
+snapshot_max_new_tokens: 64
+max_episode_tokens: 1024
+environments:
+- name: robotic_athanor
+  type: forum
+  token_budget: 128
+  character_set: canonical_2
+  max_posts: 4
+  post_order: round_robin
+output_dir: runs/smoke_test/vllm_smoke
+gradient_checkpointing: true
