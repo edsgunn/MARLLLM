@@ -43,6 +43,49 @@ from typing import Any
 import torch
 from torch.optim import AdamW
 
+try:
+    import psutil  # type: ignore
+    _PSUTIL_PROC = psutil.Process()
+except Exception:  # pragma: no cover - optional dep
+    psutil = None
+    _PSUTIL_PROC = None
+
+
+def _resource_metrics() -> dict[str, float]:
+    """Snapshot of GPU/CPU memory and related counters for the current process."""
+    out: dict[str, float] = {}
+    GB = 1024 ** 3
+
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            prefix = f"mem/gpu{i}"
+            out[f"{prefix}/alloc_gb"]      = torch.cuda.memory_allocated(i) / GB
+            out[f"{prefix}/reserved_gb"]   = torch.cuda.memory_reserved(i) / GB
+            out[f"{prefix}/peak_alloc_gb"] = torch.cuda.max_memory_allocated(i) / GB
+            out[f"{prefix}/peak_reserved_gb"] = torch.cuda.max_memory_reserved(i) / GB
+            try:
+                free_b, total_b = torch.cuda.mem_get_info(i)
+                out[f"{prefix}/free_gb"]  = free_b / GB
+                out[f"{prefix}/total_gb"] = total_b / GB
+                out[f"{prefix}/used_frac"] = 1.0 - free_b / total_b
+            except Exception:
+                pass
+
+    if _PSUTIL_PROC is not None:
+        try:
+            mi = _PSUTIL_PROC.memory_info()
+            out["mem/cpu_rss_gb"] = mi.rss / GB
+            out["mem/cpu_vms_gb"] = mi.vms / GB
+        except Exception:
+            pass
+        try:
+            out["cpu/percent"] = _PSUTIL_PROC.cpu_percent(interval=None)
+            out["cpu/num_threads"] = float(_PSUTIL_PROC.num_threads())
+        except Exception:
+            pass
+
+    return out
+
 from marlllm.agent import Agent
 from marlllm.config import TrainingConfig
 from marlllm.dialogue import chat_eos_token_ids, verify_special_tokens
@@ -208,6 +251,11 @@ class PopulationTrainer:
         self._eos_token_ids = chat_eos_token_ids(any_tok)
 
         self._start_time = time.time()
+        if _PSUTIL_PROC is not None:
+            try:
+                _PSUTIL_PROC.cpu_percent(interval=None)  # prime the meter
+            except Exception:
+                pass
         self._rollout_stats: dict[str, float] = {}
         self._rng_counter = config.seed
         self._rng = random.Random(config.seed)
@@ -239,6 +287,10 @@ class PopulationTrainer:
         self._logger.info("Output directory: %s", self.config.output_dir)
 
         for iteration in range(start_iteration, self.config.num_iterations + 1):
+
+            if torch.cuda.is_available():
+                for i in range(torch.cuda.device_count()):
+                    torch.cuda.reset_peak_memory_stats(i)
 
             # ── 1. Collect episodes ───────────────────────────────────────
             _t_phase = time.perf_counter()
@@ -346,9 +398,15 @@ class PopulationTrainer:
             all_metrics["time/gen_s"]       = gen_time
             all_metrics["time/env_step_s"]  = self._rollout_stats.get("env_step_time_s", 0.0)
             all_metrics["rollout/gen_tokens"] = gen_tokens
-            all_metrics["rollout/gen_calls"]  = self._rollout_stats.get("gen_calls", 0)
+            gen_calls = self._rollout_stats.get("gen_calls", 0)
+            all_metrics["rollout/gen_calls"]  = gen_calls
             all_metrics["rollout/tokens_per_s"] = (gen_tokens / gen_time) if gen_time > 0 else 0.0
             all_metrics["rollout/gen_frac"]     = (gen_time / rollout_s) if rollout_s > 0 else 0.0
+            gen_batch_sum = self._rollout_stats.get("gen_batch_sum", 0)
+            all_metrics["rollout/mean_batch"] = (gen_batch_sum / gen_calls) if gen_calls > 0 else 0.0
+            all_metrics["rollout/max_batch"]  = self._rollout_stats.get("gen_batch_max", 0)
+
+            all_metrics.update(_resource_metrics())
             all_metrics["n_episodes"]  = n_eps
             if n_eps:
                 all_metrics["success_rate"] = episode_results.count("success") / n_eps
@@ -454,6 +512,8 @@ class PopulationTrainer:
             "gen_time_s": 0.0,
             "gen_tokens": 0,
             "gen_calls": 0,
+            "gen_batch_sum": 0,
+            "gen_batch_max": 0,
             "env_step_time_s": 0.0,
         }
 
@@ -608,6 +668,10 @@ class PopulationTrainer:
                 self._rollout_stats["gen_time_s"] += time.perf_counter() - _t_gen
                 self._rollout_stats["gen_tokens"] += sum(len(ids) for ids in batch_ids)
                 self._rollout_stats["gen_calls"] += 1
+                _b = len(batch_contexts)
+                self._rollout_stats["gen_batch_sum"] += _b
+                if _b > self._rollout_stats["gen_batch_max"]:
+                    self._rollout_stats["gen_batch_max"] = _b
 
                 formatter = self.population[pop_name].context_formatter
                 for j, k in enumerate(env_indices):

@@ -21,12 +21,12 @@ checkpoint_every: 25
 num_checkpoint_traces: 8
 snapshot_eval_path: eval_contexts/robotic_athanor.json
 snapshot_samples_per_context: 8
-snapshot_max_new_tokens: 128
-max_episode_tokens: 2048
+snapshot_max_new_tokens: 384
+max_episode_tokens: 4096
 environments:
 - name: robotic_athanor
   type: forum
-  token_budget: 128
+  token_budget: 384
   character_set: canonical_2
   max_posts: 12
   post_order: round_robin
