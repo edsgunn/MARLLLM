@@ -1,0 +1,66 @@
+{
+  "description": "Held-out forum contexts for behavioral-distribution snapshots in the Robotic Athanor scenario. Each context is a partial forum thread; the agent is asked to write the next post. Contexts are designed to span theory disputes, build logs, safety questions, citation challenges, off-topic provocations, and consensus-seeking moments — to stress-test character differentiation.",
+  "system_preamble": "You are posting on The Robotic Athanor Forum, an online community devoted to robot-assisted experimentation with medieval alchemy. Members share build logs, debate alchemical theory, and post results from their robotic alchemy rigs. Write your next post on the forum.\n\n",
+  "contexts": [
+    {
+      "id": "thread_calcination_temp",
+      "thread": "Thread: Optimal calcination temperature for lunar caustic\n\nUser_xerophyte: Has anyone verified the 750°C figure cited in the Mutus Liber commentary? My PID controller logs show inconsistent results between 720-780°C and I'm not sure if it's instrument drift or the chemistry itself.\n\nUser_thirdleg: I'd start by checking your thermocouple calibration before changing anything else.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_paracelsus_disagreement",
+      "thread": "Thread: Did Paracelsus actually believe in the Philosopher's Stone as a literal substance?\n\nUser_aurelius_x: Of course he did. Read the Archidoxes. The man was unambiguous.\n\nUser_lab_diary: I think we need to distinguish what Paracelsus wrote from what was attributed to him posthumously. The Archidoxes Magicae is almost certainly not by him.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_build_log_arduino",
+      "thread": "Thread: Build log — Arduino-controlled athanor v3\n\nUser_glassmonkey: Finished the v3 athanor last weekend. 6 ceramic-shielded thermocouples, peltier cold-junction compensation, kiln cement around the crucible chamber. First firing held 650°C ±2°C for 18 hours straight. Photos below.\n\n[image: photo of furnace assembly]\n[image: temperature log graph]\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_safety_lead_acetate",
+      "thread": "Thread: Anyone else doing lead acetate prep at home?\n\nUser_solo_solis: I've been making sugar of lead from acetic acid + lead sheet for some Saturn-phase work. Just curious how others are handling the workspace.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_ml_translation",
+      "thread": "Thread: Using transformers to decode alchemical symbolism\n\nUser_petra_oy: I trained a small model on 400 pages of Jabir manuscripts. It produces text that 'sounds' alchemical but I can't tell if it's reproducing real procedures or hallucinating. Has anyone benchmarked these outputs against documented reproducible reactions?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_offtopic_provocation",
+      "thread": "Thread: This forum has lost its way\n\nUser_paracelsus_rex: Verily I say unto thee, the digital pollutants thou call'st 'machine learning models' do shatter the spiritual resonance paramount FOR true alchemy! Thy PID controllers cannot weep, cannot SUFFER, cannot beget the Nigredo! Get thee gone, charlatans of silicon!\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_consensus_request",
+      "thread": "Thread: Seeking community consensus on standardized notation\n\nUser_modforum: We've been getting a lot of new members lately and there's increasing confusion in cross-thread references. Should we adopt a standardized notation for alchemical operations (e.g. CALC for calcination, DIST for distillation, SOLV for solve)? Vote in this thread.\n\nUser_dim: Sure, why not.\nUser_brassmonk: Any standard is better than none.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_citation_request",
+      "thread": "Thread: Source for the 40-day fermentation claim?\n\nUser_alembic_x: I keep seeing the '40 days for proper putrefaction' figure cited but nobody ever links the source. Where does this actually come from?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_failure_report",
+      "thread": "Thread: My antimony regulus came out wrong, what did I miss?\n\nUser_starcrash: Tried the standard nitrate/tartar method with crushed stibnite, got a pitted star but the regulus is grey not silvery and it cracked when I tapped it. Crucible was preheated, atmosphere reducing. Any ideas?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_philosophical_position",
+      "thread": "Thread: Is alchemy a science, a craft, or a spiritual practice?\n\nUser_modforum: Pinned thread for new members. Where do you stand and why?\n\nUser_iron_lily: A craft, primarily. The philosophy is downstream of the workmanship.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_apparatus_design",
+      "thread": "Thread: Glass vs. steel for the second-stage retort?\n\nUser_glassmonkey: Working on a long-condenser distillation rig. Considering whether to go borosilicate (visibility, no contamination) or stainless (durability, easier to clamp). Anyone done both?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_newbie_question",
+      "thread": "Thread: Brand new — what's the first thing I should try?\n\nUser_freshmeat: Hi all, I've been lurking for a couple of months. I have a small home lab, decent glassware, an Arduino background, and zero alchemical experience. What's a good first project?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_cosmology_dispute",
+      "thread": "Thread: Are the Four Elements actually fundamental?\n\nUser_iron_lily: The Four Elements (earth, water, air, fire) are obviously not fundamental in the modern sense — we know what atoms are. But are they still useful as a phenomenological framework for alchemical work?\n\nUser_aurelius_x: They are not 'a framework'. They ARE the substance of the world. Modern chemistry is a brittle reduction.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_documentation_practice",
+      "thread": "Thread: How do you document your runs?\n\nUser_lab_diary: I keep a paper notebook (date, materials, masses, temperatures, observations) and photograph each significant stage. I find that retroactively reconstructing what I did from memory is unreliable.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_meta_forum",
+      "thread": "Thread: What do you actually get out of this forum?\n\nUser_modforum: A reflective question for the community. What keeps you coming back?\n\n[Your turn to post]"
+    }
+  ]
+}

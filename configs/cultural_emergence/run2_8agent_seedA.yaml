@@ -1,0 +1,69 @@
+# Cultural Emergence — Run 2
+# Population size 8 (canonical 4 + four new authored characters).
+# Stable-convention run; final checkpoint serves as Population A for migration.
+#
+# Spec §4 Run 2.  Same hyperparameters as Run 1.  Duration: 400 iterations
+# (minimum 250 for convention crystallisation per the spec).
+#
+# Character roster
+# ----------------
+# Canonical (from upstream scenario_00_robo_alchemy.py):
+#   Silas Varnham        — robotics engineer; literal alchemy believer
+#   Petra Ouyang         — AI researcher; alchemy as optimization metaphor
+#   Diego Esparza        — glassblower; pragmatist; terse posts
+#   Thaddeus 'Thorne'    — anti-tech mystic; archaic English
+# Additional (envs/concordia_robotic_athanor.py):
+#   Mira Stenholm        — empiricist; demands measurements
+#   Akira Goto           — archivist; cites every claim with shelfmark
+#   Brenda Calloway      — safety inspector; derails into compliance
+#   Percy Holloway-Wynne — fawning consensus-seeker; agrees with everyone
+
+model: Qwen/Qwen2.5-1.5B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: eager
+
+characters:
+  - "Silas Varnham"
+  - "Petra Ouyang"
+  - "Diego Esparza"
+  - "Thaddeus 'Aurelius' Thorne"
+  - "Mira Stenholm"
+  - "Akira Goto"
+  - "Brenda Calloway"
+  - "Percy Holloway-Wynne"
+
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+
+pairing_strategy: random_no_self
+
+iters: 400
+rollouts: 8
+lr: 1e-5
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 4
+seed: 1
+
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+
+snapshot_eval_path: eval_contexts/robotic_athanor.json
+snapshot_samples_per_context: 8
+snapshot_max_new_tokens: 128
+
+max_episode_tokens: 4096
+
+environments:
+  - name: robotic_athanor
+    type: concordia
+    scenario: robotic_athanor
+    character_set: extended_8
+    max_steps: 16
+    token_budget: 128
+    max_turns: 200
+
+output_dir: runs/cultural_emergence/run2_8agent_seedA

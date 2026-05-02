@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +89,104 @@ def _build_deal_env(
     )
 
 
-def _build_env_from_spec(spec_dict: dict, tokenizer: Any, default_seed: int) -> Any:
+def _build_concordia_env(
+    spec_dict: dict,
+    tokenizer: Any,
+    *,
+    base_model_name: str,
+    base_dtype: Any,
+    default_seed: int,
+) -> Any:
+    """Build a Concordia-backed env from a YAML env-spec dict.
+
+    Required keys:
+      ``scenario``  : name of the scenario factory (e.g. ``robotic_athanor``).
+    Optional keys:
+      ``gm_model``      : HuggingFace model ID for the Concordia GameMaster.
+                          Defaults to ``base_model_name`` (loads a frozen
+                          copy of the agent's base model).
+      ``embedder``      : sentence-transformers model ID.  Defaults to
+                          ``sentence-transformers/all-MiniLM-L6-v2``.
+      ``character_set`` : passed to scenarios that take it (canonical_2,
+                          canonical_4, extended_8 for robotic_athanor).
+      ``max_steps``     : per-episode step cap.
+      ``token_budget``  : action token budget per turn.
+      ``max_turns``     : ConcordiaEnv max_turns hard cap.
+    """
+    from envs.concordia_env import ConcordiaEnv
+
+    scenario_name = spec_dict.get("scenario") or spec_dict.get("scenario_name")
+    if not scenario_name:
+        raise ValueError("Concordia env spec missing 'scenario' field.")
+
+    gm_model_id = spec_dict.get("gm_model") or base_model_name
+    embedder_id = spec_dict.get("embedder") or "sentence-transformers/all-MiniLM-L6-v2"
+
+    print(f"Concordia: loading GM model {gm_model_id}")
+    from concordia.contrib.language_models.huggingface import huggingface_model
+    gm_model = huggingface_model.HuggingFaceLanguageModel(
+        model_name=gm_model_id,
+        api_key=os.environ.get("HF_TOKEN") or None,
+        dtype=base_dtype if base_dtype != "auto" else torch.bfloat16,
+    )
+
+    print(f"Concordia: loading embedder {embedder_id}")
+    from sentence_transformers import SentenceTransformer  # type: ignore
+    _st = SentenceTransformer(embedder_id)
+    embedder = lambda text: _st.encode(text, convert_to_numpy=True)  # noqa: E731
+
+    scenario_kwargs: dict = {}
+    for key in ("character_set", "max_steps", "num_rounds", "num_days", "num_turns"):
+        if key in spec_dict:
+            scenario_kwargs[key] = spec_dict[key]
+
+    if scenario_name == "robotic_athanor":
+        from envs.concordia_robotic_athanor import RoboticAthanorScenario
+        scenario = RoboticAthanorScenario(
+            gm_model=gm_model,
+            embedder=embedder,
+            **scenario_kwargs,
+        )
+        agent_names = list(scenario.agent_names)
+        reward_fn = scenario.reward_fn
+    else:
+        from envs.concordia_scenarios import _SCENARIO_REGISTRY
+        if scenario_name not in _SCENARIO_REGISTRY:
+            raise ValueError(
+                f"Unknown concordia scenario '{scenario_name}'. "
+                f"Available: {sorted(_SCENARIO_REGISTRY.keys())}"
+            )
+        entry = _SCENARIO_REGISTRY[scenario_name]
+        cls = entry["cls_factory"]() if "cls_factory" in entry else entry["cls"]
+        scenario = cls(gm_model=gm_model, embedder=embedder, **scenario_kwargs)
+        agent_names = (
+            entry["agent_names"]
+            if entry.get("agent_names") is not None
+            else list(scenario.agent_names)
+        )
+        reward_fn = scenario.reward_fn
+
+    env = ConcordiaEnv(
+        simulation_factory=scenario,
+        agent_names=agent_names,
+        tokenizer=tokenizer,
+        action_token_budget=spec_dict.get("token_budget", 128),
+        max_turns=spec_dict.get("max_turns", 200),
+        reward_fn=reward_fn,
+    )
+    # Stash for downstream: caller may need agent_names from the scenario
+    env._scenario_agent_names = agent_names  # type: ignore[attr-defined]
+    return env
+
+
+def _build_env_from_spec(
+    spec_dict: dict,
+    tokenizer: Any,
+    default_seed: int,
+    *,
+    base_model_name: str = "",
+    base_dtype: Any = "auto",
+) -> Any:
     """
     Build a single environment from a YAML env-spec dict.
 
@@ -96,6 +194,9 @@ def _build_env_from_spec(spec_dict: dict, tokenizer: Any, default_seed: int) -> 
     ---------------
     ``deal_or_no_deal``
         Keys: dialogue_turns, token_budget, max_item_count, role_shuffle.
+    ``concordia``
+        Keys: scenario (required), gm_model, embedder, character_set,
+        token_budget, max_turns, plus scenario-specific kwargs.
     """
     env_type = spec_dict.get("type", "deal_or_no_deal")
 
@@ -110,9 +211,18 @@ def _build_env_from_spec(spec_dict: dict, tokenizer: Any, default_seed: int) -> 
             seed=spec_dict.get("seed", default_seed),
         )
 
+    if env_type == "concordia":
+        return _build_concordia_env(
+            spec_dict,
+            tokenizer,
+            base_model_name=base_model_name,
+            base_dtype=base_dtype,
+            default_seed=default_seed,
+        )
+
     raise ValueError(
         f"Unknown env type {env_type!r} in environments spec. "
-        f"Supported: 'deal_or_no_deal'."
+        f"Supported: 'deal_or_no_deal', 'concordia'."
     )
 
 
@@ -137,7 +247,10 @@ def _build_environment_specs(
                 raise ValueError(
                     f"Each entry in 'environments' must be a dict, got {type(entry)}"
                 )
-            env = _build_env_from_spec(entry, tokenizer, default_seed=args.seed)
+            env = _build_env_from_spec(
+                entry, tokenizer, default_seed=args.seed,
+                base_model_name=args.model, base_dtype=args.dtype,
+            )
             # character_prompts in the spec dict (str or list[str] values)
             char_prompts = entry.get("character_prompts", {})
             specs.append(EnvironmentSpec(
@@ -238,9 +351,19 @@ def parse_args() -> argparse.Namespace:
     # ── Output / checkpointing ────────────────────────────────────────────
     p.add_argument("--log-every",        type=int, default=10)
     p.add_argument("--checkpoint-every", type=int, default=100)
+    p.add_argument("--num-checkpoint-traces", type=int, default=4,
+                   help="Number of episode traces to dump per checkpoint.")
+    p.add_argument("--snapshot-eval-path", default=None,
+                   help="JSON file with held-out forum contexts for "
+                        "behavioural-distribution snapshots at each checkpoint.")
+    p.add_argument("--snapshot-samples-per-context", type=int, default=8)
+    p.add_argument("--snapshot-max-new-tokens", type=int, default=128)
     p.add_argument("--output-dir", default="runs/population")
     p.add_argument("--resume", action="store_true",
                    help="Resume from latest checkpoint.")
+    p.add_argument("--resume-from", default=None,
+                   help="Resume from a specific checkpoint dir or .pt file. "
+                        "Overrides --resume's auto-discovery.")
 
     if pre_args.config:
         from marlllm.config_loader import apply_config_defaults
@@ -435,6 +558,10 @@ def main() -> None:
         lr=args.lr,
         log_every=args.log_every,
         checkpoint_every=args.checkpoint_every,
+        num_checkpoint_traces=args.num_checkpoint_traces,
+        snapshot_eval_path=args.snapshot_eval_path,
+        snapshot_samples_per_context=args.snapshot_samples_per_context,
+        snapshot_max_new_tokens=args.snapshot_max_new_tokens,
         output_dir=args.output_dir,
         device=device,
         seed=args.seed,
@@ -462,13 +589,25 @@ def main() -> None:
     )
 
     start_iteration = 1
-    if args.resume:
-        latest = Path(args.output_dir) / "checkpoints" / "latest.pt"
-        if latest.exists():
-            start_iteration = trainer.load_checkpoint(str(latest)) + 1
-            print(f"Resuming from iteration {start_iteration}")
+    resume_path = None
+    if args.resume_from:
+        resume_path = Path(args.resume_from)
+    elif args.resume:
+        ckpt_root = Path(args.output_dir) / "checkpoints"
+        latest_dir = ckpt_root / "latest"
+        latest_pt = ckpt_root / "latest.pt"
+        if latest_dir.exists():
+            resume_path = latest_dir
+        elif latest_pt.exists():
+            resume_path = latest_pt
         else:
             print("No checkpoint found, starting from scratch.")
+
+    if resume_path is not None:
+        if not resume_path.exists():
+            sys.exit(f"--resume-from path does not exist: {resume_path}")
+        start_iteration = trainer.load_checkpoint(str(resume_path)) + 1
+        print(f"Resuming from {resume_path} (iteration {start_iteration})")
 
     print(f"Output directory: {args.output_dir}")
     print()

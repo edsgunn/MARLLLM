@@ -611,61 +611,61 @@ class Trainer:
     # ------------------------------------------------------------------ #
 
     def save_checkpoint(self, iteration: int, tag: str | None = None) -> None:
-        """
-        Save model weights, value head weights, optimizer state, and RNG state.
+        """Save per-agent checkpoint directory.
 
-        Writes two files:
-          checkpoints/iter_{iteration:06d}.pt  — named checkpoint
-          checkpoints/latest.pt                — always the most recent
+        Layout::
+            checkpoints/iter_NNNNNN/
+                meta.pt
+                <agent_id>.pt   (one per unique agent object)
+            checkpoints/latest -> iter_NNNNNN
         """
-        ckpt_dir = Path(self.config.output_dir) / "checkpoints"
-        # Skip agents without local model state (e.g. APIAgent) — they have
-        # no parameters to checkpoint.
-        agent_states = {
-            aid: {
-                "backbone": agent._backbone.state_dict(),
-                "value_head": agent._value_head.state_dict(),
-            }
-            for aid, agent in self.agents.items()
+        from marlllm.checkpoint_utils import save_population_checkpoint
+
+        params_agents = {
+            aid: agent for aid, agent in self.agents.items()
             if hasattr(agent, "_backbone") and hasattr(agent, "_value_head")
         }
-        payload = {
-            "iteration": iteration,
-            "agent_states": agent_states,
-            "optimizer_state": self.optimizer.state_dict(),
-            "rng_state": torch.get_rng_state(),
-            "config": dataclasses.asdict(self.config),
-        }
-        fname = f"iter_{iteration:06d}.pt" if tag is None else f"{tag}.pt"
-        path = ckpt_dir / fname
-        torch.save(payload, path)
-        # Overwrite latest symlink (use copy on platforms without symlinks)
-        latest = ckpt_dir / "latest.pt"
-        if latest.exists() or latest.is_symlink():
-            latest.unlink()
-        try:
-            latest.symlink_to(fname)
-        except (OSError, NotImplementedError):
-            torch.save(payload, latest)
-
-        self._logger.info("Checkpoint saved: %s", path)
+        ckpt_dir = save_population_checkpoint(
+            population=params_agents,
+            iteration=iteration,
+            optimizer=self.optimizer,
+            config_dict=dataclasses.asdict(self.config),
+            output_dir=Path(self.config.output_dir),
+            tag=tag,
+        )
+        self._logger.info("Checkpoint saved: %s", ckpt_dir)
 
     def load_checkpoint(self, path: str) -> int:
-        """
-        Restore model, optimizer, and RNG state from a checkpoint.
-        Returns the iteration number stored in the checkpoint.
-        """
-        payload = torch.load(path, map_location=self.device)
+        """Restore from a per-agent checkpoint dir or legacy .pt file."""
+        from marlllm.checkpoint_utils import load_population_checkpoint
+
+        p = Path(path)
+        if p.is_dir():
+            params_agents = {
+                aid: agent for aid, agent in self.agents.items()
+                if hasattr(agent, "_backbone") and hasattr(agent, "_value_head")
+            }
+            iteration = load_population_checkpoint(
+                population=params_agents,
+                optimizer=self.optimizer,
+                ckpt_dir=p,
+                device=self.device,
+            )
+            self._logger.info("Checkpoint loaded from %s (iteration %d)", p, iteration)
+            return iteration
+
+        # Legacy single-file format
+        payload = torch.load(p, map_location=self.device)
         for aid, agent in self.agents.items():
             if aid not in payload["agent_states"]:
-                continue  # APIAgent or otherwise paramless
+                continue
             states = payload["agent_states"][aid]
             agent._backbone.load_state_dict(states["backbone"])
             agent._value_head.load_state_dict(states["value_head"])
         self.optimizer.load_state_dict(payload["optimizer_state"])
         torch.set_rng_state(payload["rng_state"].cpu())
         iteration = payload["iteration"]
-        self._logger.info("Checkpoint loaded from %s (iteration %d)", path, iteration)
+        self._logger.info("Checkpoint loaded from %s (iteration %d)", p, iteration)
         return iteration
 
     # ------------------------------------------------------------------ #

@@ -1,0 +1,55 @@
+# Cultural Emergence — Run 1
+# Population size 2 (Silas + Thaddeus, most-differentiated canonical pair).
+# Negative-case run: demonstrates asymmetric collapse at small N.
+#
+# Spec §4 Run 1.  Hyperparameters mirror the existing 4-agent Lewis run
+# (CCSM α_perc = α_act = α_val = 1.0, KL=0.05, lr=1e-5, grad_accum=4).
+# Duration: 400 iterations.
+
+model: Qwen/Qwen2.5-1.5B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: eager
+
+characters:
+  - "Silas Varnham"
+  - "Thaddeus 'Aurelius' Thorne"
+
+# Per-agent LoRA r64 on a shared backbone (per the spec)
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+
+# Pairing: with only two agents and pairing=random_no_self there is exactly
+# one ordering, so this is effectively round-robin.
+pairing_strategy: random_no_self
+
+# Training (mirroring the existing well-tested negotiation config)
+iters: 400
+rollouts: 4
+lr: 1e-5
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 4
+seed: 1
+
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+
+snapshot_eval_path: eval_contexts/robotic_athanor.json
+snapshot_samples_per_context: 8
+snapshot_max_new_tokens: 128
+
+max_episode_tokens: 2048
+
+environments:
+  - name: robotic_athanor
+    type: concordia
+    scenario: robotic_athanor
+    character_set: canonical_2
+    max_steps: 12
+    token_budget: 128
+    max_turns: 200
+
+output_dir: runs/cultural_emergence/run1_2agent_seed1

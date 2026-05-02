@@ -766,7 +766,16 @@ class _RoundRobinSim:
 # Scenario registry (string -> scenario class + defaults)
 # ---------------------------------------------------------------------------
 
+def _robotic_athanor_factory():
+    from envs.concordia_robotic_athanor import RoboticAthanorScenario
+    return RoboticAthanorScenario
+
+
 _SCENARIO_REGISTRY = {
+    "robotic_athanor": {
+        "cls_factory": _robotic_athanor_factory,
+        "agent_names": None,  # populated from scenario.agent_names
+    },
     "haggling": {
         "cls": HagglingScenario,
         "agent_names": ["merchant_0", "merchant_1"],
@@ -838,7 +847,7 @@ def make_env_from_scenario_name(
         )
 
     entry = _SCENARIO_REGISTRY[scenario_name]
-    scenario_cls = entry["cls"]
+    scenario_cls = entry["cls_factory"]() if "cls_factory" in entry else entry["cls"]
     agent_names = entry["agent_names"]
 
     scenario_kwargs = scenario_kwargs or {}
@@ -848,6 +857,9 @@ def make_env_from_scenario_name(
         embedder=embedder,
         **scenario_kwargs,
     )
+
+    if agent_names is None:
+        agent_names = list(scenario.agent_names)
 
     env = make_concordia_env(
         simulation_factory=scenario,

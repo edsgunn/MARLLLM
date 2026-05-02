@@ -338,8 +338,12 @@ class PopulationTrainer:
 
             if iteration % self.config.checkpoint_every == 0:
                 self.save_checkpoint(iteration)
+                self._write_checkpoint_traces(iteration, raw_episodes)
+                self._write_behavioral_snapshot(iteration)
 
         self.save_checkpoint(self.config.num_iterations, tag="final")
+        self._write_checkpoint_traces(self.config.num_iterations, raw_episodes)
+        self._write_behavioral_snapshot(self.config.num_iterations)
         self._logger.info("Training complete.")
 
     # ------------------------------------------------------------------ #
@@ -624,37 +628,38 @@ class PopulationTrainer:
     # ------------------------------------------------------------------ #
 
     def save_checkpoint(self, iteration: int, tag: str | None = None) -> None:
-        ckpt_dir = Path(self.config.output_dir) / "checkpoints"
-        agent_states = {
-            name: {
-                "backbone": agent._backbone.state_dict(),
-                "value_head": agent._value_head.state_dict(),
-            }
-            for name, agent in self.population.items()
-        }
-        payload = {
-            "iteration": iteration,
-            "agent_states": agent_states,
-            "optimizer_state": self.optimizer.state_dict(),
-            "rng_state": torch.get_rng_state(),
-            "config": dataclasses.asdict(self.config),
-            "population_names": list(self.population.keys()),
-            "env_names": [s.name for s in self.environments],
-        }
-        fname = f"iter_{iteration:06d}.pt" if tag is None else f"{tag}.pt"
-        path = ckpt_dir / fname
-        torch.save(payload, path)
-        latest = ckpt_dir / "latest.pt"
-        if latest.exists() or latest.is_symlink():
-            latest.unlink()
-        try:
-            latest.symlink_to(fname)
-        except (OSError, NotImplementedError):
-            torch.save(payload, latest)
-        self._logger.info("Checkpoint saved: %s", path)
+        from marlllm.checkpoint_utils import save_population_checkpoint
+
+        ckpt_dir = save_population_checkpoint(
+            population=self.population,
+            iteration=iteration,
+            optimizer=self.optimizer,
+            config_dict=dataclasses.asdict(self.config),
+            output_dir=Path(self.config.output_dir),
+            extra_meta={"env_names": [s.name for s in self.environments]},
+            tag=tag,
+        )
+        self._logger.info("Checkpoint saved: %s", ckpt_dir)
 
     def load_checkpoint(self, path: str) -> int:
-        payload = torch.load(path, map_location=self.device)
+        """Load a checkpoint from a directory (new format) or .pt (legacy)."""
+        from marlllm.checkpoint_utils import load_population_checkpoint
+
+        p = Path(path)
+        if p.is_dir():
+            iteration = load_population_checkpoint(
+                population=self.population,
+                optimizer=self.optimizer,
+                ckpt_dir=p,
+                device=self.device,
+            )
+            self._logger.info(
+                "Checkpoint loaded from %s (iteration %d)", p, iteration
+            )
+            return iteration
+
+        # Legacy single-file .pt format
+        payload = torch.load(p, map_location=self.device)
         agent_states = payload.get("agent_states", {})
         loaded_ids: set[int] = set()
         for name, agent in self.population.items():
@@ -669,7 +674,7 @@ class PopulationTrainer:
         torch.set_rng_state(payload["rng_state"].cpu())
         iteration = payload["iteration"]
         self._logger.info(
-            "Checkpoint loaded from %s (iteration %d)", path, iteration
+            "Checkpoint loaded from %s (iteration %d)", p, iteration
         )
         return iteration
 
@@ -706,6 +711,101 @@ class PopulationTrainer:
         )
         write_records_json([record], traces_dir / f"iter_{iteration:06d}.json")
         write_records_txt([record], traces_dir / f"iter_{iteration:06d}.txt")
+
+    def _write_checkpoint_traces(
+        self,
+        iteration: int,
+        raw_episodes: list,
+    ) -> None:
+        """Write up to ``num_checkpoint_traces`` episode records alongside checkpoints."""
+        from marlllm.trace_utils import make_episode_record, write_records_json, write_records_txt
+
+        n_target = getattr(self.config, "num_checkpoint_traces", 0) or 0
+        if n_target <= 0 or not raw_episodes:
+            return
+
+        # Pick the first n_target non-empty episodes
+        chosen: list = []
+        for raw_ep in raw_episodes:
+            hist, ep_info, pairing, _pids, env_name, ctx_snapshot, env_trace_k = raw_ep
+            if hist:
+                chosen.append(raw_ep)
+            if len(chosen) >= n_target:
+                break
+        if not chosen:
+            return
+
+        tok = list(self.population.values())[0].tokenizer
+        ckpt_traces_dir = (
+            Path(self.config.output_dir) / "traces" / f"ckpt_{iteration:06d}"
+        )
+        ckpt_traces_dir.mkdir(parents=True, exist_ok=True)
+
+        records = []
+        for idx, raw_ep in enumerate(chosen):
+            _hist, ep_info, pairing, _pids, env_name, ctx_snapshot, env_trace_k = raw_ep
+            combined_env_trace = dict(ep_info) if ep_info else {}
+            combined_env_trace["pairing"] = f"{pairing[0]} vs {pairing[1]}"
+            combined_env_trace["env"] = env_name
+            if env_trace_k:
+                combined_env_trace.update(env_trace_k)
+            records.append(make_episode_record(
+                episode_idx=idx,
+                agent_context_tokens=ctx_snapshot,
+                tokenizer=tok,
+                env_trace=combined_env_trace,
+            ))
+
+        write_records_json(records, ckpt_traces_dir / "traces.json")
+        write_records_txt(records, ckpt_traces_dir / "traces.txt")
+        self._logger.info(
+            "Checkpoint traces saved: %s (%d episodes)",
+            ckpt_traces_dir, len(records),
+        )
+
+    def _write_behavioral_snapshot(self, iteration: int) -> None:
+        """Sample each agent on the held-out eval set and write to disk."""
+        path = getattr(self.config, "snapshot_eval_path", None)
+        if not path:
+            return
+        try:
+            from marlllm.snapshot_eval import (
+                load_eval_contexts, collect_snapshot, write_snapshot,
+            )
+        except ImportError as e:
+            self._logger.warning("snapshot_eval import failed: %s", e)
+            return
+        try:
+            eval_data = load_eval_contexts(path)
+        except Exception as e:
+            self._logger.warning("Failed to load snapshot_eval_path %s: %s", path, e)
+            return
+
+        tok = list(self.population.values())[0].tokenizer
+        try:
+            from marlllm.dialogue import chat_eos_token_ids
+            eos_ids = chat_eos_token_ids(tok)
+        except Exception:
+            eos_ids = None
+
+        snap = collect_snapshot(
+            population=self.population,
+            eval_data=eval_data,
+            tokenizer=tok,
+            samples_per_context=self.config.snapshot_samples_per_context,
+            max_new_tokens=self.config.snapshot_max_new_tokens,
+            temperature=self.config.temperature,
+            eos_token_ids=eos_ids,
+        )
+        out = write_snapshot(
+            output_dir=Path(self.config.output_dir),
+            iteration=iteration,
+            snapshot=snap,
+            eval_set_name=Path(path).name,
+            temperature=self.config.temperature,
+            samples_per_context=self.config.snapshot_samples_per_context,
+        )
+        self._logger.info("Behavioural snapshot saved: %s", out)
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:

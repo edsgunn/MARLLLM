@@ -65,3 +65,11 @@ class TrainingConfig:
     lora_r: int = 0                    # LoRA rank; 0 = full fine-tuning
     lora_alpha: int = 16               # LoRA scaling factor
     lora_target_modules: list[str] | None = None  # None = PEFT auto-detect
+
+    # Held-out behavioural-distribution snapshots
+    # When ``snapshot_eval_path`` is set, at every checkpoint the population
+    # samples ``snapshot_samples_per_context`` continuations per held-out
+    # context and writes results to ``{output_dir}/snapshots/iter_NNNNNN.json``.
+    snapshot_eval_path: str | None = None
+    snapshot_samples_per_context: int = 8
+    snapshot_max_new_tokens: int = 128
