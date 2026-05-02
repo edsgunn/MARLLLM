@@ -96,6 +96,8 @@ def _build_concordia_env(
     base_model_name: str,
     base_dtype: Any,
     default_seed: int,
+    shared_backbone: Any = None,
+    shared_backbone_device: Any = None,
 ) -> Any:
     """Build a Concordia-backed env from a YAML env-spec dict.
 
@@ -103,8 +105,9 @@ def _build_concordia_env(
       ``scenario``  : name of the scenario factory (e.g. ``robotic_athanor``).
     Optional keys:
       ``gm_model``      : HuggingFace model ID for the Concordia GameMaster.
-                          Defaults to ``base_model_name`` (loads a frozen
-                          copy of the agent's base model).
+                          Defaults to reusing ``shared_backbone`` (frozen,
+                          adapters disabled) when available, else loads a
+                          fresh copy of ``base_model_name``.
       ``embedder``      : sentence-transformers model ID.  Defaults to
                           ``sentence-transformers/all-MiniLM-L6-v2``.
       ``character_set`` : passed to scenarios that take it (canonical_2,
@@ -112,6 +115,15 @@ def _build_concordia_env(
       ``max_steps``     : per-episode step cap.
       ``token_budget``  : action token budget per turn.
       ``max_turns``     : ConcordiaEnv max_turns hard cap.
+
+    GM model strategy
+    -----------------
+    When ``shared_backbone`` is provided (LoRA-shared-base path), the GM
+    runs on that backbone with all adapters disabled — no second copy of
+    the base weights is loaded.  This is the recommended path; for it
+    to be a *frozen* GM, the backbone must be a PEFT model (so
+    ``disable_adapter()`` exists).  An explicit ``gm_model:`` key in the
+    YAML spec overrides this and forces a fresh HuggingFace load.
     """
     from envs.concordia_env import ConcordiaEnv
 
@@ -119,16 +131,30 @@ def _build_concordia_env(
     if not scenario_name:
         raise ValueError("Concordia env spec missing 'scenario' field.")
 
-    gm_model_id = spec_dict.get("gm_model") or base_model_name
+    explicit_gm_id = spec_dict.get("gm_model")
     embedder_id = spec_dict.get("embedder") or "sentence-transformers/all-MiniLM-L6-v2"
 
-    print(f"Concordia: loading GM model {gm_model_id}")
-    from concordia.contrib.language_models.huggingface import huggingface_model
-    gm_model = huggingface_model.HuggingFaceLanguageModel(
-        model_name=gm_model_id,
-        api_key=os.environ.get("HF_TOKEN") or None,
-        dtype=base_dtype if base_dtype != "auto" else torch.bfloat16,
-    )
+    if shared_backbone is not None and not explicit_gm_id:
+        from marlllm.concordia_lm_adapter import SharedBackboneLanguageModel
+        if not hasattr(shared_backbone, "disable_adapter"):
+            print("Warning: shared_backbone has no disable_adapter() — GM will use the "
+                  "(possibly trained) backbone as-is. Pass an explicit gm_model: in the "
+                  "YAML spec to load a separate frozen copy if this matters.")
+        print("Concordia: GM uses shared backbone (adapters disabled, no extra weights loaded).")
+        gm_model = SharedBackboneLanguageModel(
+            backbone=shared_backbone,
+            tokenizer=tokenizer,
+            device=shared_backbone_device or "cuda:0",
+        )
+    else:
+        gm_model_id = explicit_gm_id or base_model_name
+        print(f"Concordia: loading separate GM model {gm_model_id}")
+        from concordia.contrib.language_models.huggingface import huggingface_model
+        gm_model = huggingface_model.HuggingFaceLanguageModel(
+            model_name=gm_model_id,
+            api_key=os.environ.get("HF_TOKEN") or None,
+            dtype=base_dtype if base_dtype != "auto" else torch.bfloat16,
+        )
 
     print(f"Concordia: loading embedder {embedder_id}")
     from sentence_transformers import SentenceTransformer  # type: ignore
@@ -186,6 +212,8 @@ def _build_env_from_spec(
     *,
     base_model_name: str = "",
     base_dtype: Any = "auto",
+    shared_backbone: Any = None,
+    shared_backbone_device: Any = None,
 ) -> Any:
     """
     Build a single environment from a YAML env-spec dict.
@@ -218,17 +246,80 @@ def _build_env_from_spec(
             base_model_name=base_model_name,
             base_dtype=base_dtype,
             default_seed=default_seed,
+            shared_backbone=shared_backbone,
+            shared_backbone_device=shared_backbone_device,
         )
+
+    if env_type == "forum":
+        return _build_forum_env(spec_dict, tokenizer, default_seed=default_seed)
 
     raise ValueError(
         f"Unknown env type {env_type!r} in environments spec. "
-        f"Supported: 'deal_or_no_deal', 'concordia'."
+        f"Supported: 'deal_or_no_deal', 'concordia', 'forum'."
+    )
+
+
+def _build_forum_env(
+    spec_dict: dict,
+    tokenizer: Any,
+    *,
+    default_seed: int,
+) -> Any:
+    """Build a ForumEnv from a YAML env-spec dict.
+
+    Required keys (one of):
+      ``character_set``  : ``canonical_2`` | ``canonical_4`` | ``extended_8``
+                           — uses the Robotic Athanor persona set.
+      ``personas``       : explicit dict of ``name → persona text`` (overrides
+                           character_set if both are present).
+
+    Optional keys:
+      ``max_posts``        : total posts in the episode (default 12).
+      ``post_order``       : ``round_robin`` (default) or ``random``.
+      ``token_budget``     : tokens per agent turn (default 128).
+      ``max_turns``        : ignored — ``max_posts`` is the hard cap.
+      ``forum_preamble``   : custom initial topic prompt.
+      ``seed``             : per-env RNG seed (default ``args.seed``).
+    """
+    from envs.forum_env import ForumEnv
+    from envs.robotic_athanor_personas import (
+        FORUM_DESCRIPTION, get_character_set, get_personas,
+    )
+
+    seed = int(spec_dict.get("seed", default_seed))
+
+    if "personas" in spec_dict:
+        personas = dict(spec_dict["personas"])
+        agent_names = list(personas.keys())
+    else:
+        cset = spec_dict.get("character_set", "canonical_4")
+        agent_names = get_character_set(cset)
+        personas = get_personas(cset)
+
+    forum_preamble = spec_dict.get("forum_preamble") or (
+        f"{FORUM_DESCRIPTION}\n\n"
+        "A new thread has just opened on the Alchemical Theory section.\n"
+        "Anyone may start. Compose your post."
+    )
+
+    return ForumEnv(
+        agent_names=agent_names,
+        agent_personas=personas,
+        tokenizer=tokenizer,
+        forum_preamble=forum_preamble,
+        action_token_budget=spec_dict.get("token_budget", 128),
+        max_posts=int(spec_dict.get("max_posts", 12)),
+        post_order=spec_dict.get("post_order", "round_robin"),
+        seed=seed,
     )
 
 
 def _build_environment_specs(
     args: argparse.Namespace,
     tokenizer: Any,
+    *,
+    shared_backbone: Any = None,
+    shared_backbone_device: Any = None,
 ) -> list:
     """
     Build a list of EnvironmentSpec objects.
@@ -250,6 +341,8 @@ def _build_environment_specs(
             env = _build_env_from_spec(
                 entry, tokenizer, default_seed=args.seed,
                 base_model_name=args.model, base_dtype=args.dtype,
+                shared_backbone=shared_backbone,
+                shared_backbone_device=shared_backbone_device,
             )
             # character_prompts in the spec dict (str or list[str] values)
             char_prompts = entry.get("character_prompts", {})
@@ -529,8 +622,21 @@ def main() -> None:
 
     first_agent = list(population.values())[0]
 
+    # Identify a shared backbone (if any) so the GM can run on it with
+    # adapters disabled — avoids loading a duplicate copy of the base model.
+    shared_backbone = None
+    shared_backbone_device = None
+    if args.lora_shared_base:
+        # All LoRA-shared-base agents point at the same peft_model.
+        shared_backbone = first_agent._backbone
+        shared_backbone_device = first_agent.device
+
     # ── Build environment specs ───────────────────────────────────────────
-    env_specs = _build_environment_specs(args, first_agent.tokenizer)
+    env_specs = _build_environment_specs(
+        args, first_agent.tokenizer,
+        shared_backbone=shared_backbone,
+        shared_backbone_device=shared_backbone_device,
+    )
 
     if len(env_specs) == 1:
         print(f"Environment: {env_specs[0].name}")

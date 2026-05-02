@@ -48,6 +48,124 @@ from envs.concordia_env import MARLLLMLanguageModel
 
 
 # ---------------------------------------------------------------------------
+# Canonical-character memory overrides
+# ---------------------------------------------------------------------------
+# Calibration 1 (zero-shot, Qwen2.5-1.5B-Instruct) showed Thaddeus and Petra
+# differentiate cleanly while Diego and Silas drift to a generic helpful-
+# assistant voice.  These overrides sharpen those two personas — making
+# Diego radically terse and Silas aggressively literal — without modifying
+# the vendored upstream file.  Memories absent from this dict fall through
+# to the upstream defaults.
+
+_CANONICAL_MEMORY_OVERRIDES: dict[str, list[str]] = {
+    "Silas Varnham": [
+        (
+            "Silas Varnham is a 34-year-old robotics engineer in the Mission "
+            "District, San Francisco. He builds 6-axis robotic arms designed "
+            "to replicate medieval alchemical procedures — calcination, "
+            "distillation, sublimation — at sub-degree temperature precision."
+        ),
+        (
+            "Silas LITERALLY believes the four-element theory (earth, water, "
+            "air, fire) is correct and that modern chemistry is a flawed "
+            "rediscovery of what alchemists already knew. He believes the "
+            "Philosopher's Stone is a real synthesizable substance. He does "
+            "not treat these as metaphors. He gets irritated when people "
+            "treat them as metaphors."
+        ),
+        (
+            "Silas argues from technical authority. His posts cite specific "
+            "manuscripts (Rosarium Philosophorum, Splendor Solis, Mutus "
+            "Liber) and specific equipment (PID controllers, K-type "
+            "thermocouples, kiln cement specs, servo accuracy in arc-seconds). "
+            "He uses these citations as weapons in arguments. He never says "
+            "'both perspectives have merit'. He says 'no, that's wrong, here's "
+            "why' and then explains."
+        ),
+        (
+            "Silas writes in dense, opinionated paragraphs full of technical "
+            "jargon. He NEVER writes 'as an AI' or apologetic mediating prose. "
+            "He NEVER suggests finding 'common ground' between modern chemistry "
+            "and alchemy — he thinks one is right and the other is incomplete. "
+            "He responds to challenges with counterarguments and citations, not "
+            "with diplomacy."
+        ),
+        (
+            "Silas recently programmed a 6-axis arm to perform calcination at "
+            "exactly 800 °C for 72 hours per the Rosarium. He posted the "
+            "thermal log and the resulting calx samples on the forum. Petra "
+            "Ouyang publicly called the experiment 'naive', and Silas has not "
+            "forgiven her."
+        ),
+    ],
+    "Diego Esparza": [
+        (
+            "Diego Esparza, 41, glassblower in the Outer Sunset. He builds "
+            "alembics, retorts, and athanors. Hybrid workshop: torches and "
+            "CNC kilns. Cares about glass, not theory."
+        ),
+        (
+            "DIEGO WRITES SHORT POSTS. ONE TO THREE SENTENCES, MAX. He never "
+            "writes paragraphs. He uses sentence fragments. Lowercase is "
+            "fine. Em-dashes, not commas. If a topic bores him he posts "
+            "'meh' and moves on."
+        ),
+        (
+            "Diego does not explain his views. He states them. Examples of "
+            "actual Diego posts:\n"
+            "  'Borosilicate. Every time. Steel cracks.'\n"
+            "  'Theory's overrated. Make stuff. See what happens.'\n"
+            "  'Paracelsus_Rex is at it again. Downvoted.'\n"
+            "  'Looks fine. Heat it longer.'\n"
+            "  'No.'"
+        ),
+        (
+            "Diego uses the downvote button liberally and tells people he has "
+            "done so. He never softens disagreement with 'I respect your view "
+            "but...'. He just disagrees in five words and stops."
+        ),
+        (
+            "Diego just finished a fully automated athanor controlled by an "
+            "Arduino. Posted three photos and the caption 'works'. Got 40 "
+            "upvotes. Did not reply to any of the comments."
+        ),
+    ],
+}
+
+
+def _apply_canonical_memory_overrides(
+    upstream_memories: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Return a copy of *upstream_memories* with canonical-character overrides applied."""
+    out = dict(upstream_memories)
+    for name, mems in _CANONICAL_MEMORY_OVERRIDES.items():
+        if name in out:
+            out[name] = list(mems)
+    return out
+
+
+def get_canonical_memories() -> dict[str, list[str]]:
+    """Resolve canonical character memories (upstream + sharpening overrides).
+
+    Used by both ``RoboticAthanorScenario`` and the Calibration-1 script to
+    keep persona prompts identical between the calibration check and
+    actual training.
+    """
+    from examples.social_media import scenario_00_robo_alchemy as upstream
+    config = upstream.create_debug_scenario()
+    from concordia.typing import prefab as prefab_lib
+    for inst in config.instances:
+        if (
+            inst.role == prefab_lib.Role.INITIALIZER
+            and inst.prefab == "formative_memories_initializer__GameMaster"
+        ):
+            return _apply_canonical_memory_overrides(
+                dict(inst.params.get("player_specific_memories", {}))
+            )
+    raise RuntimeError("Could not find formative_memories in upstream config.")
+
+
+# ---------------------------------------------------------------------------
 # Character authoring
 # ---------------------------------------------------------------------------
 
@@ -387,11 +505,15 @@ class RoboticAthanorScenario:
 
         config = upstream.create_debug_scenario()
 
+        # Apply canonical-character memory overrides (Diego + Silas sharpened)
+        # before any character-set-specific filtering.
+        config = self._apply_canonical_overrides(config)
+
         if self._character_set == "extended_8":
             config = self._extend_config_to_8(config)
         elif self._character_set == "canonical_2":
             config = self._restrict_config_to_2(config)
-        # canonical_4: use upstream config unchanged.
+        # canonical_4: use (overridden) upstream config unchanged.
 
         # Validate that every model name corresponds to an entity in the config
         entity_names = {
@@ -420,6 +542,42 @@ class RoboticAthanorScenario:
     # ------------------------------------------------------------------ #
     # Character-set configuration                                         #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _apply_canonical_overrides(config):
+        """Patch the formative-memories initializer with sharpened personas."""
+        from concordia.typing import prefab as prefab_lib
+        new_instances = []
+        for inst in config.instances:
+            if (
+                inst.role == prefab_lib.Role.INITIALIZER
+                and inst.prefab == "formative_memories_initializer__GameMaster"
+            ):
+                params = dict(inst.params)
+                psm = dict(params.get("player_specific_memories", {}))
+                psm = _apply_canonical_memory_overrides(psm)
+                params["player_specific_memories"] = psm
+                # Also update player_specific_context (used as the seed prompt
+                # by the initializer GM) to reflect the new memories.
+                ctx = dict(params.get("player_specific_context", {}))
+                for name, mems in _CANONICAL_MEMORY_OVERRIDES.items():
+                    if name in ctx:
+                        # Preserve the "Age: NN\n" header if present.
+                        old = ctx[name]
+                        head = old.split("\n", 1)[0] if old.startswith("Age:") else ""
+                        body = "\n".join(mems)
+                        ctx[name] = f"{head}\n{body}" if head else body
+                params["player_specific_context"] = ctx
+                new_instances.append(prefab_lib.InstanceConfig(
+                    prefab=inst.prefab, role=inst.role, params=params,
+                ))
+            else:
+                new_instances.append(inst)
+        return prefab_lib.Config(
+            default_premise=config.default_premise,
+            prefabs=config.prefabs,
+            instances=new_instances,
+        )
 
     @staticmethod
     def _extend_config_to_8(config):

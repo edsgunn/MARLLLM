@@ -96,7 +96,7 @@ class EnvironmentSpec:
 _RawEpisode = tuple[
     list[EpisodeStep],    # steps tagged with population-member names
     dict,                 # ep_info from env
-    tuple[str, str],      # (name_for_agent_0_role, name_for_agent_1_role)
+    tuple[str, ...],      # population names participating in this episode
     dict[str, list[int]], # prompt token IDs keyed by population-member name
     str,                  # env_name (for logging / traces)
     dict[str, list[int]], # context snapshot: env_role -> flat token IDs
@@ -145,12 +145,25 @@ class PopulationTrainer:
             if not isinstance(spec, EnvironmentSpec):
                 environments[i] = EnvironmentSpec(env=spec, name=f"env_{i}")
 
+        # Two role-mapping modes are supported:
+        #  - "pair": env exposes generic roles {"agent_0", "agent_1"} and we
+        #    sample a 2-tuple of population members to bind each episode.
+        #  - "named": env's possible_agents are population character names
+        #    (Concordia case); each role is bound 1:1 to its same-named member.
         for spec in environments:
-            env_agents = getattr(spec.env, "possible_agents", [])
-            if len(env_agents) != 2:
+            env_agents = list(getattr(spec.env, "possible_agents", []))
+            if len(env_agents) < 2:
                 raise ValueError(
-                    f"EnvironmentSpec '{spec.name}': requires an env with exactly "
+                    f"EnvironmentSpec '{spec.name}': requires an env with at least "
                     f"2 possible_agents, got {env_agents}"
+                )
+            if len(env_agents) == 2 and set(env_agents) == {"agent_0", "agent_1"}:
+                continue  # pair-mode env
+            missing = [a for a in env_agents if a not in population]
+            if missing:
+                raise ValueError(
+                    f"EnvironmentSpec '{spec.name}': env roles {missing} are not "
+                    f"present in population {list(population)}"
                 )
 
         self.population = population
@@ -195,6 +208,7 @@ class PopulationTrainer:
         self._eos_token_ids = chat_eos_token_ids(any_tok)
 
         self._start_time = time.time()
+        self._rollout_stats: dict[str, float] = {}
         self._rng_counter = config.seed
         self._rng = random.Random(config.seed)
 
@@ -227,11 +241,16 @@ class PopulationTrainer:
         for iteration in range(start_iteration, self.config.num_iterations + 1):
 
             # ── 1. Collect episodes ───────────────────────────────────────
+            _t_phase = time.perf_counter()
             raw_episodes: list[_RawEpisode] = self._collect_episodes_batched(
                 self.config.episodes_per_iter
             )
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            rollout_s = time.perf_counter() - _t_phase
 
             # ── 2. Per-agent update ───────────────────────────────────────
+            _t_phase = time.perf_counter()
             self.optimizer.zero_grad()
             total_loss_scalar = 0.0
             all_metrics: dict[str, float] = {}
@@ -301,8 +320,16 @@ class PopulationTrainer:
                         key = f"{pop_name}/{k}"
                         all_metrics[key] = all_metrics.get(key, 0.0) + v / num_micros
 
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            loss_s = time.perf_counter() - _t_phase
+
             # ── 3. Optimizer step ─────────────────────────────────────────
+            _t_phase = time.perf_counter()
             self.optimizer.step()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            optim_s = time.perf_counter() - _t_phase
 
             # ── 4. Metrics ────────────────────────────────────────────────
             episode_results = [ep[1].get("result", "") for ep in raw_episodes]
@@ -310,6 +337,18 @@ class PopulationTrainer:
             all_metrics["total_loss"]  = total_loss_scalar
             all_metrics["iteration"]   = iteration
             all_metrics["wall_time"]   = time.time() - self._start_time
+            all_metrics["time/rollout_s"] = rollout_s
+            all_metrics["time/loss_s"]    = loss_s
+            all_metrics["time/optim_s"]   = optim_s
+            all_metrics["time/iter_s"]    = rollout_s + loss_s + optim_s
+            gen_time = self._rollout_stats.get("gen_time_s", 0.0)
+            gen_tokens = self._rollout_stats.get("gen_tokens", 0)
+            all_metrics["time/gen_s"]       = gen_time
+            all_metrics["time/env_step_s"]  = self._rollout_stats.get("env_step_time_s", 0.0)
+            all_metrics["rollout/gen_tokens"] = gen_tokens
+            all_metrics["rollout/gen_calls"]  = self._rollout_stats.get("gen_calls", 0)
+            all_metrics["rollout/tokens_per_s"] = (gen_tokens / gen_time) if gen_time > 0 else 0.0
+            all_metrics["rollout/gen_frac"]     = (gen_time / rollout_s) if rollout_s > 0 else 0.0
             all_metrics["n_episodes"]  = n_eps
             if n_eps:
                 all_metrics["success_rate"] = episode_results.count("success") / n_eps
@@ -411,12 +450,36 @@ class PopulationTrainer:
         Steps are tagged with population-member names as agent_id (not env roles).
         Observations are broadcast to both population members' context windows.
         """
-        pairings   = self._sample_pairs(n)
+        self._rollout_stats = {
+            "gen_time_s": 0.0,
+            "gen_tokens": 0,
+            "gen_calls": 0,
+            "env_step_time_s": 0.0,
+        }
+
         env_specs  = self._sample_env_specs(n)
 
-        env_role_to_name: list[dict[str, str]] = [
-            {"agent_0": p[0], "agent_1": p[1]} for p in pairings
-        ]
+        # Build per-episode role→name mapping based on each env's possible_agents.
+        # Pair-mode envs ({"agent_0","agent_1"}) sample a 2-tuple of pop members;
+        # named-role envs (e.g. Concordia) bind each role to its same-named member.
+        pair_count = sum(
+            1 for spec in env_specs
+            if set(getattr(spec.env, "possible_agents", [])) == {"agent_0", "agent_1"}
+        )
+        sampled_pairs = self._sample_pairs(pair_count) if pair_count else []
+        pair_iter = iter(sampled_pairs)
+
+        pairings: list[tuple[str, ...]] = []
+        env_role_to_name: list[dict[str, str]] = []
+        for spec in env_specs:
+            roles = list(spec.env.possible_agents)
+            if set(roles) == {"agent_0", "agent_1"}:
+                p = next(pair_iter)
+                env_role_to_name.append({"agent_0": p[0], "agent_1": p[1]})
+                pairings.append(p)
+            else:
+                env_role_to_name.append({r: r for r in roles})
+                pairings.append(tuple(roles))
 
         # Deep-copy one env per episode from the appropriate spec template.
         envs: list = []
@@ -514,10 +577,12 @@ class PopulationTrainer:
                 else:
                     null_indices.append(k)
 
+            _t_env = time.perf_counter()
             for k in null_indices:
                 envs[k].step(None)
                 if not envs[k].agents:
                     active[k] = False
+            self._rollout_stats["env_step_time_s"] += time.perf_counter() - _t_env
 
             for pop_name, env_indices in act_groups.items():
                 agent = self.population[pop_name]
@@ -530,6 +595,7 @@ class PopulationTrainer:
                 # Token budget may differ per episode — use the max for batching,
                 # which is safe since outputs are trimmed to actual length.
                 n_tokens = max(n_tokens_per_ep[k] for k in env_indices)
+                _t_gen = time.perf_counter()
                 with torch.no_grad():
                     batch_ids, batch_lps = agent.act_batch(
                         contexts=batch_contexts,
@@ -537,6 +603,11 @@ class PopulationTrainer:
                         temperature=self.config.temperature,
                         eos_token_ids=self._eos_token_ids,
                     )
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                self._rollout_stats["gen_time_s"] += time.perf_counter() - _t_gen
+                self._rollout_stats["gen_tokens"] += sum(len(ids) for ids in batch_ids)
+                self._rollout_stats["gen_calls"] += 1
 
                 formatter = self.population[pop_name].context_formatter
                 for j, k in enumerate(env_indices):
@@ -559,7 +630,9 @@ class PopulationTrainer:
                     ))
                     contexts[k][env_role].extend(formatter.wrap_action(act_ids))
                     token_counts[k] += len(act_ids)
+                    _t_env = time.perf_counter()
                     envs[k].step(act_ids)
+                    self._rollout_stats["env_step_time_s"] += time.perf_counter() - _t_env
                     if not envs[k].agents:
                         active[k] = False
 

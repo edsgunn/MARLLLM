@@ -60,18 +60,15 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _build_character_persona() -> dict[str, str]:
-    """Pull the four canonical characters' formative memories from upstream."""
-    from examples.social_media import scenario_00_robo_alchemy as upstream
-    config = upstream.create_debug_scenario()
-    from concordia.typing import prefab as prefab_lib
-    for inst in config.instances:
-        if (
-            inst.role == prefab_lib.Role.INITIALIZER
-            and inst.prefab == "formative_memories_initializer__GameMaster"
-        ):
-            return dict(inst.params.get("player_specific_memories", {}))
-    raise RuntimeError("Could not find formative_memories in upstream config.")
+def _build_character_persona() -> dict[str, list[str]]:
+    """Resolve canonical character memories from the shared persona source.
+
+    Uses ``envs.robotic_athanor_personas`` so the calibration check sees
+    the exact memory bullets used by ForumEnv during training.  No
+    Concordia import is required.
+    """
+    from envs.robotic_athanor_personas import CANONICAL_4, get_memories
+    return {name: get_memories(name) for name in CANONICAL_4}
 
 
 def main() -> None:
@@ -106,9 +103,10 @@ def main() -> None:
             {"role": "system", "content": persona_text},
             {"role": "user", "content": _DEFAULT_CONTEXT},
         ]
-        prompt_ids = tok.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=True, return_tensors="pt",
-        ).to(device)
+        prompt_text = tok.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+        prompt_ids = tok(prompt_text, return_tensors="pt").input_ids.to(device)
 
         samples = []
         for k in range(args.samples_per_char):

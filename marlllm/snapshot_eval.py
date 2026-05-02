@@ -73,14 +73,15 @@ def _build_prompt_ids(
         messages.append({"role": "system", "content": preamble.rstrip("\n ")})
     messages.append({"role": "user", "content": thread})
     try:
-        ids = tokenizer.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=True,
+        text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
         )
+        ids = tokenizer.encode(text, add_special_tokens=False)
     except Exception:
         # Tokenizer doesn't support chat_template — fall back to raw concat.
         text = (preamble + "\n" + thread).strip()
         ids = tokenizer.encode(text, add_special_tokens=True)
-    return list(ids)
+    return [int(t) for t in ids]
 
 
 @torch.no_grad()

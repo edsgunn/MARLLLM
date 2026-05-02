@@ -1,71 +1,40 @@
-# Cultural Emergence — Run 3 Phase B
-# Migration: replace Population B's Silas adapter with Population A's
-# trained Silas adapter, then continue training for 150 iterations.
-#
-# Setup (run before launching training):
-#   uv run python migrate_adapter.py \
-#       --source-checkpoint runs/cultural_emergence/run2_8agent_seedA/checkpoints/iter_000400 \
-#       --source-agent "Silas Varnham" \
-#       --target-checkpoint runs/cultural_emergence/run3a_8agent_seedB/checkpoints/iter_000200 \
-#       --target-agent "Silas Varnham" \
-#       --output runs/cultural_emergence/run3b_migration/start_checkpoint \
-#       --reset-optimizer
-#
-# Then launch training:
-#   uv run python train_population.py \
-#       --config configs/cultural_emergence/run3b_migration.yaml \
-#       --resume-from runs/cultural_emergence/run3b_migration/start_checkpoint
-#
-# Continued training is performed from a hybrid configuration: 7 native
-# Pop-B adapters + 1 migrant Pop-A Silas.  All adapters update during
-# continued training as normal.
-
 model: Qwen/Qwen2.5-1.5B-Instruct
 dtype: bfloat16
 device: cuda:0
-attn_impl: eager
-
+attn_impl: sdpa
 characters:
-  - "Silas Varnham"
-  - "Petra Ouyang"
-  - "Diego Esparza"
-  - "Thaddeus 'Aurelius' Thorne"
-  - "Mira Stenholm"
-  - "Akira Goto"
-  - "Brenda Calloway"
-  - "Percy Holloway-Wynne"
-
+- Silas Varnham
+- Petra Ouyang
+- Diego Esparza
+- Thaddeus 'Aurelius' Thorne
+- Mira Stenholm
+- Akira Goto
+- Brenda Calloway
+- Percy Holloway-Wynne
 lora_shared_base: true
 lora_r: 64
 lora_alpha: 128
-
 pairing_strategy: random_no_self
-
 iters: 150
 rollouts: 8
 lr: 1e-5
 kl_coef: 0.05
 beta: 0.01
 grad_accum: 4
-seed: 2          # match Pop B's seed (since we resume from Pop B)
-
+seed: 2
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
-
 snapshot_eval_path: eval_contexts/robotic_athanor.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 128
-
 max_episode_tokens: 4096
-
 environments:
-  - name: robotic_athanor
-    type: concordia
-    scenario: robotic_athanor
-    character_set: extended_8
-    max_steps: 16
-    token_budget: 128
-    max_turns: 200
-
+- name: robotic_athanor
+  type: forum
+  token_budget: 128
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
 output_dir: runs/cultural_emergence/run3b_migration
+gradient_checkpointing: true

@@ -17,6 +17,8 @@ dependencies = [
     "pyyaml>=6.0",
     "sentence-transformers>=5.4.1",
     "gdm-concordia>=2.1.0",
+    "protobuf>=5.29.6",
+    "sentencepiece>=0.2.1",
 ]
 
 [project.optional-dependencies]
