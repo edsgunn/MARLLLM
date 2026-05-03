@@ -102,6 +102,12 @@ def collect_snapshot(
     agents_out: dict[str, dict[str, list[dict]]] = {}
     seen_objects: dict[int, str] = {}  # share results across tied agents
 
+    # Pre-tokenise every context once (re-used across agents).
+    context_ids = [
+        (ctx["id"], _build_prompt_ids(eval_data, ctx, tokenizer))
+        for ctx in eval_data["contexts"]
+    ]
+
     for agent_id, agent in population.items():
         if id(agent) in seen_objects:
             agents_out[agent_id] = agents_out[seen_objects[id(agent)]]
@@ -113,28 +119,42 @@ def collect_snapshot(
         except Exception:
             pass
 
-        per_agent: dict[str, list[dict]] = {}
-        for ctx in eval_data["contexts"]:
-            prompt_ids = _build_prompt_ids(eval_data, ctx, tokenizer)
-            samples: list[dict] = []
-            for _ in range(samples_per_context):
-                try:
-                    token_ids, _logp = agent.act(
-                        context_token_ids=list(prompt_ids),
-                        n_tokens=max_new_tokens,
-                        temperature=temperature,
-                        eos_token_ids=eos_token_ids,
+        # Flatten (context × samples_per_context) into a single batch so the
+        # agent's batched generate path handles all rollouts in one go,
+        # rather than one-at-a-time through the slow per-token loop.
+        batch_contexts: list[list[int]] = []
+        batch_meta: list[tuple[str, int]] = []  # (ctx_id, sample_idx)
+        for ctx_id, prompt_ids in context_ids:
+            for k in range(samples_per_context):
+                batch_contexts.append(list(prompt_ids))
+                batch_meta.append((ctx_id, k))
+
+        per_agent: dict[str, list[dict]] = {cid: [] for cid, _ in context_ids}
+
+        if batch_contexts:
+            try:
+                batch_ids, _batch_lps = agent.act_batch(
+                    contexts=batch_contexts,
+                    n_tokens=max_new_tokens,
+                    temperature=temperature,
+                    eos_token_ids=eos_token_ids,
+                )
+            except Exception as e:
+                _LOG.warning(
+                    "Snapshot batched sampling failed for agent %s: %s",
+                    agent_id, e,
+                )
+                # Fill with error placeholders so output schema stays consistent.
+                for ctx_id, _k in batch_meta:
+                    per_agent[ctx_id].append(
+                        {"text": "", "tokens": 0, "error": str(e)}
                     )
-                except Exception as e:
-                    _LOG.warning(
-                        "Snapshot sampling failed for agent %s ctx %s: %s",
-                        agent_id, ctx.get("id"), e,
+            else:
+                for (ctx_id, _k), token_ids in zip(batch_meta, batch_ids):
+                    text = tokenizer.decode(token_ids, skip_special_tokens=False)
+                    per_agent[ctx_id].append(
+                        {"text": text, "tokens": len(token_ids)}
                     )
-                    samples.append({"text": "", "tokens": 0, "error": str(e)})
-                    continue
-                text = tokenizer.decode(token_ids, skip_special_tokens=False)
-                samples.append({"text": text, "tokens": len(token_ids)})
-            per_agent[ctx["id"]] = samples
 
         agents_out[agent_id] = per_agent
 

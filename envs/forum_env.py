@@ -386,3 +386,32 @@ def make_robotic_athanor_forum(
         post_order=post_order,
         seed=seed,
     )
+
+
+def make_conjecture_inn_forum(
+    *,
+    tokenizer: PreTrainedTokenizerBase,
+    character_set: str = "canonical_4",
+    max_posts: int = 12,
+    post_order: str = "round_robin",
+    action_token_budget: int = 128,
+    seed: int | None = None,
+) -> ForumEnv:
+    """Build a ForumEnv configured with the Conjecture Inn character roster."""
+    from envs.conjecture_inn_personas import (
+        FORUM_DESCRIPTION, get_character_set, get_personas,
+    )
+    return ForumEnv(
+        agent_names=get_character_set(character_set),
+        agent_personas=get_personas(character_set),
+        tokenizer=tokenizer,
+        forum_description=FORUM_DESCRIPTION,
+        initial_invitation=(
+            "A new thread has just opened in the Open Conjectures section. "
+            "The forum is active and members are posting throughout the day."
+        ),
+        action_token_budget=action_token_budget,
+        max_posts=max_posts,
+        post_order=post_order,
+        seed=seed,
+    )

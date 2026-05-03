@@ -61,22 +61,31 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
         data[k] = np.array([r.get(k, float("nan")) for r in rows], dtype=float)
 
     # Discover entity prefixes from keys.
-    # Matches both numeric-suffixed names (agent_0, player_1) and plain names
-    # (Marcus, Sophia). Excludes known non-agent top-level namespaces.
+    # An "entity" key has the shape ``<prefix>/<metric...>`` where prefix is
+    # an agent name (which may contain spaces, apostrophes, hyphens, dots —
+    # e.g. "Silas Varnham", "Thaddeus 'Aurelius' Thorne") and not one of the
+    # known non-agent namespaces below.
     import re as _re
-    _SKIP_PREFIXES = {"env_episodes"}
-    entity_prefix_re = _re.compile(r"^([A-Za-z][A-Za-z0-9_]*)/(.+)$")
+    _SKIP_PREFIXES = {
+        "env_episodes",  # per-env episode counts
+        "cpu", "mem",    # system telemetry
+        "time",          # wall-time breakdown
+        "rollout",       # rollout-stage stats
+        "agents",        # already-stacked aggregates (don't re-discover)
+    }
     entity_metrics: dict[str, set[str]] = {}  # prefix -> set of metric names
     for k in keys:
-        m = entity_prefix_re.match(k)
-        if m:
-            prefix, metric = m.group(1), m.group(2)
-            if prefix not in _SKIP_PREFIXES:
-                entity_metrics.setdefault(prefix, set()).add(metric)
+        if "/" not in k:
+            continue
+        prefix, metric = k.split("/", 1)
+        if prefix in _SKIP_PREFIXES or not prefix:
+            continue
+        entity_metrics.setdefault(prefix, set()).add(metric)
 
     # Find the ordered list of entity prefixes.
     # Prefer numeric-suffixed groups (agent_0, agent_1 …); fall back to
-    # alphabetical order for named agents (Marcus, Sophia, Viktor …).
+    # YAML-config order if available (preserves "characters:" ordering),
+    # else alphabetical order.
     base_re = _re.compile(r"^([a-zA-Z_]+)(\d+)$")
     base_groups: dict[str, list[tuple[int, str]]] = {}
     for prefix in entity_metrics:
@@ -246,6 +255,171 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Per-experiment: compute utilisation
+# ---------------------------------------------------------------------------
+
+def plot_compute_utilization(exp_dir: Path, data: dict[str, np.ndarray]) -> Path | None:
+    """How efficiently are we training: time breakdown, throughput, memory.
+
+    Returns None if the run has no compute-telemetry keys (older runs).
+    """
+    iters = data.get("iteration", np.arange(len(data["total_loss"])))
+
+    # Telemetry keys we expect from the trainer's per-iteration logging.
+    have_time = any(k in data for k in
+                    ["time/iter_s", "time/rollout_s", "time/loss_s"])
+    have_thru = any(k in data for k in
+                    ["rollout/tokens_per_s", "rollout/gen_calls"])
+    have_gpu = any(k.startswith("mem/gpu") for k in data)
+    have_cpu = "cpu/percent" in data or "mem/cpu_rss_gb" in data
+
+    if not (have_time or have_thru or have_gpu or have_cpu):
+        return None
+
+    fig, axes = plt.subplots(3, 2, figsize=(11, 10), squeeze=False)
+    fig.suptitle(f"{exp_dir.name} — compute utilisation",
+                 fontsize=11, fontweight="bold")
+
+    # ── Row 0 col 0: stacked time breakdown per iteration ──────────────────
+    ax = axes[0, 0]
+    components = [
+        ("time/rollout_s", "rollout (gen)", "#4DBBD5"),
+        ("time/loss_s",    "loss + backward", "#E64B35"),
+        ("time/optim_s",   "optimizer step", "#F39B7F"),
+        ("time/env_step_s","env step",       "#7E6148"),
+    ]
+    series = [(label, color, smooth(data[k])) for k, label, color in components if k in data]
+    if series:
+        labels = [s[0] for s in series]
+        colors = [s[1] for s in series]
+        arrs = np.stack([s[2] for s in series])
+        ax.stackplot(iters, arrs, labels=labels, colors=colors, alpha=0.85)
+        if "time/iter_s" in data:
+            ax.plot(iters, smooth(data["time/iter_s"]), color="#222222",
+                    linewidth=1.2, linestyle="--", label="iter total")
+        ax.legend(loc="upper right", fontsize=7)
+        ax.set_title("Time breakdown per iteration")
+        ax.set_ylabel("seconds")
+    else:
+        ax.set_visible(False)
+
+    # ── Row 0 col 1: rollout fraction (gen / iter) ─────────────────────────
+    ax = axes[0, 1]
+    if "rollout/gen_frac" in data:
+        ax.plot(iters, smooth(data["rollout/gen_frac"]) * 100,
+                color="#4DBBD5", label="generation %")
+        ax.set_ylim(0, 100)
+        ax.set_title("Generation share of iteration time")
+        ax.set_ylabel("% of iter")
+        ax.axhline(50, color="grey", linestyle=":", linewidth=0.8)
+    elif "time/iter_s" in data and "time/rollout_s" in data:
+        frac = data["time/rollout_s"] / np.maximum(data["time/iter_s"], 1e-6)
+        ax.plot(iters, smooth(frac) * 100, color="#4DBBD5")
+        ax.set_ylim(0, 100)
+        ax.set_title("Generation share of iteration time")
+        ax.set_ylabel("% of iter")
+    else:
+        ax.set_visible(False)
+
+    # ── Row 1 col 0: generation throughput ─────────────────────────────────
+    ax = axes[1, 0]
+    if "rollout/tokens_per_s" in data:
+        ax.plot(iters, smooth(data["rollout/tokens_per_s"]),
+                color="#4DBBD5", label="generated tokens/s")
+        ax.set_title("Generation throughput")
+        ax.set_ylabel("tokens / second")
+        ax.legend(loc="lower right", fontsize=8)
+    else:
+        ax.set_visible(False)
+
+    # ── Row 1 col 1: rollout batch sizes (mean / max) ──────────────────────
+    ax = axes[1, 1]
+    plotted = False
+    if "rollout/mean_batch" in data:
+        ax.plot(iters, smooth(data["rollout/mean_batch"]),
+                color="#4DBBD5", label="mean batch")
+        plotted = True
+    if "rollout/max_batch" in data:
+        ax.plot(iters, smooth(data["rollout/max_batch"]),
+                color="#222222", linestyle=":", linewidth=1.0, label="max batch")
+        plotted = True
+    if "rollout/gen_calls" in data:
+        ax2 = ax.twinx()
+        ax2.plot(iters, smooth(data["rollout/gen_calls"]),
+                 color="#F39B7F", linewidth=1.0, label="gen calls / iter")
+        ax2.set_ylabel("gen calls", color="#F39B7F")
+        ax2.tick_params(axis="y", labelcolor="#F39B7F")
+        ax2.spines["right"].set_visible(True)
+        plotted = True
+    if plotted:
+        ax.set_title("Rollout batching")
+        ax.set_ylabel("batch size")
+        ax.legend(loc="upper left", fontsize=7)
+    else:
+        ax.set_visible(False)
+
+    # ── Row 2 col 0: GPU memory ────────────────────────────────────────────
+    ax = axes[2, 0]
+    gpu_total = None
+    plotted = False
+    if "mem/gpu0/total_gb" in data and len(data["mem/gpu0/total_gb"]) > 0:
+        gpu_total = float(np.nanmax(data["mem/gpu0/total_gb"]))
+    pairs = [
+        ("mem/gpu0/alloc_gb",      "alloc",         "#4DBBD5"),
+        ("mem/gpu0/reserved_gb",   "reserved",      "#F39B7F"),
+        ("mem/gpu0/peak_alloc_gb", "peak alloc",    "#E64B35"),
+    ]
+    for key, label, color in pairs:
+        if key in data:
+            ax.plot(iters, smooth(data[key]), color=color, label=label)
+            plotted = True
+    if gpu_total is not None and gpu_total > 0:
+        ax.axhline(gpu_total, color="grey", linestyle=":", linewidth=0.8,
+                   label=f"GPU total {gpu_total:.0f} GiB")
+    if plotted:
+        ax.set_title("GPU memory")
+        ax.set_ylabel("GiB")
+        ax.legend(loc="lower right", fontsize=7)
+    else:
+        ax.set_visible(False)
+
+    # ── Row 2 col 1: CPU memory + utilisation ──────────────────────────────
+    ax = axes[2, 1]
+    plotted = False
+    if "mem/cpu_rss_gb" in data:
+        ax.plot(iters, smooth(data["mem/cpu_rss_gb"]),
+                color="#55A868", label="RSS")
+        ax.set_ylabel("CPU RSS (GiB)", color="#55A868")
+        ax.tick_params(axis="y", labelcolor="#55A868")
+        plotted = True
+    if "cpu/percent" in data:
+        ax2 = ax.twinx()
+        ax2.plot(iters, smooth(data["cpu/percent"]),
+                 color="#C44E52", linewidth=1.0, label="CPU %")
+        ax2.set_ylabel("CPU %", color="#C44E52")
+        ax2.tick_params(axis="y", labelcolor="#C44E52")
+        ax2.spines["right"].set_visible(True)
+        plotted = True
+    if plotted:
+        ax.set_title("CPU memory + utilisation")
+    else:
+        ax.set_visible(False)
+
+    # X labels
+    for ax_row in axes:
+        for ax in ax_row:
+            if ax.get_visible():
+                ax.set_xlabel("iteration")
+                ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
+    fig.tight_layout()
+    out = exp_dir / "compute_utilization.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Suite-level: comparison bar chart
 # ---------------------------------------------------------------------------
 
@@ -399,6 +573,9 @@ def main() -> None:
                 continue
             out = plot_training_curves(exp_dir, all_data[exp_dir.name])
             print(f"  {out.relative_to(suite_dir.parent)}")
+            out = plot_compute_utilization(exp_dir, all_data[exp_dir.name])
+            if out is not None:
+                print(f"  {out.relative_to(suite_dir.parent)}")
 
     # Suite-level plots
     if not args.no_suite and len(all_data) > 1:

@@ -77,6 +77,108 @@ def _sample_batch(
     return next_toks, log_probs
 
 
+@torch.no_grad()
+def _generate_batch(
+    backbone: nn.Module,
+    tokenizer: PreTrainedTokenizerBase,
+    device: torch.device,
+    contexts: list[list[int]],
+    n_tokens: int,
+    temperature: float,
+    eos_token_ids: list[int] | None,
+    cache_implementation: str | None = None,
+) -> tuple[list[list[int]], list[list[float]]]:
+    """Batched autoregressive sampling via HF ``model.generate``.
+
+    Replaces the per-token Python loop that the agents used to drive directly,
+    handing scheduling/KV-cache/eos-stopping to HF's compiled generate path.
+    Faster on small batches because per-step Python overhead is amortised
+    inside the C++/CUDA kernels.
+
+    Returns ``(token_ids_per_seq, logprobs_per_seq)`` — same contract as the
+    legacy implementation. Logprobs are ``log_softmax`` of the *processed*
+    scores (after temperature/top-p warpers), gathered at the sampled token,
+    matching what the old ``_sample_batch`` produced.
+    """
+    if device.type == "cuda":
+        torch.cuda.set_device(device.index or 0)
+
+    B = len(contexts)
+    eos_set = set(eos_token_ids or [])
+    pad_id = tokenizer.pad_token_id
+    max_in = max(len(c) for c in contexts)
+
+    input_ids = torch.full((B, max_in), pad_id, dtype=torch.long, device=device)
+    attention_mask = torch.zeros(B, max_in, dtype=torch.long, device=device)
+    for i, ctx in enumerate(contexts):
+        L = len(ctx)
+        input_ids[i, max_in - L:] = torch.tensor(ctx, dtype=torch.long, device=device)
+        attention_mask[i, max_in - L:] = 1
+
+    gen_kwargs: dict = dict(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_new_tokens=int(n_tokens),
+        return_dict_in_generate=True,
+        output_scores=True,
+        pad_token_id=pad_id,
+        use_cache=True,
+        # Disable HF's cross-rank generation sync. When WORLD_SIZE > 1, HF
+        # auto-enables synced_gpus assuming a model-parallel inference setup
+        # where all ranks step through the same sequence together. For our
+        # data-parallel rollout (each rank generates its own different
+        # sequences), that sync raises a device-side assertion as soon as
+        # one rank's batch finishes ahead of another's.
+        synced_gpus=False,
+    )
+    if eos_token_ids:
+        gen_kwargs["eos_token_id"] = list(eos_token_ids)
+    if temperature == 0.0:
+        gen_kwargs["do_sample"] = False
+    else:
+        gen_kwargs["do_sample"] = True
+        gen_kwargs["temperature"] = float(temperature)
+        gen_kwargs["top_p"] = 1.0
+        gen_kwargs["top_k"] = 0  # disable HF's default top_k=50
+    if cache_implementation is not None:
+        # "static" pairs with torch.compile to give CUDA-graph-stable shapes.
+        # Without compile it's a small allocator win; with compile it's a major
+        # speedup because the forward becomes graph-capturable.
+        gen_kwargs["cache_implementation"] = cache_implementation
+
+    out = backbone.generate(**gen_kwargs)
+    new_tokens = out.sequences[:, max_in:]  # (B, T_out)
+    T_out = new_tokens.shape[1]
+
+    if T_out > 0 and out.scores:
+        # out.scores: tuple of T_out tensors of shape (B, V), warped.
+        scores = torch.stack(out.scores, dim=1)  # (B, T_out, V)
+        log_probs_full = F.log_softmax(scores, dim=-1)
+        chosen_logp = log_probs_full.gather(2, new_tokens.unsqueeze(-1)).squeeze(-1)
+    else:
+        chosen_logp = torch.zeros((B, 0), device=device)
+
+    new_tokens_cpu = new_tokens.cpu().tolist()
+    chosen_logp_cpu = chosen_logp.cpu().tolist()
+
+    all_ids: list[list[int]] = []
+    all_lps: list[list[float]] = []
+    for i in range(B):
+        ids = new_tokens_cpu[i]
+        lps = chosen_logp_cpu[i]
+        # When some rows finish early, HF pads finished rows' positions with
+        # pad_token_id. Trim each row at the first EOS occurrence (inclusive).
+        # If no EOS appears, the row hit max_new_tokens — keep everything.
+        cut = len(ids)
+        for j, t in enumerate(ids):
+            if t in eos_set:
+                cut = j + 1
+                break
+        all_ids.append(ids[:cut])
+        all_lps.append(lps[:cut])
+    return all_ids, all_lps
+
+
 class Agent(ABC):
     """
     Interface that the Trainer and Loss see.
@@ -272,6 +374,9 @@ class IndependentAgent(Agent):
 
         if compile_model:
             self._backbone = torch.compile(self._backbone)
+        # See LoRASharedBaseAgent: pair compile with static cache so the
+        # captured graph stays valid across generate calls.
+        self._cache_impl: str | None = "static" if compile_model else None
 
         self._lora_active = lora_r > 0
         if self._lora_active:
@@ -414,80 +519,12 @@ class IndependentAgent(Agent):
         temperature: float = 1.0,
         eos_token_ids: list[int] | None = None,
     ) -> tuple[list[list[int]], list[list[float]]]:
-        """
-        Sample up to ``n_tokens`` for each context in a batched forward pass.
-
-        Contexts are left-padded to the same length so they form a (B, T)
-        tensor.  After the first (full-context) step, subsequent steps feed
-        only the newly generated token (B, 1) reusing the KV cache, so the
-        per-step cost is proportional to B rather than B × T.
-
-        EOS handling
-        ------------
-        If ``eos_token_ids`` is supplied, each row stops contributing once it
-        samples any EOS id (the EOS token is included in that row's output).
-        The forward pass continues for the remaining unfinished rows; tokens
-        sampled by already-finished rows are dropped from their output. The
-        loop exits early when every row has finished.
-
-        Returns:
-            (list[list[int]], list[list[float]]) — token IDs and log-probs
-            for each context, in the same order as the input.
-        """
-        if self.device.type == "cuda":
-            torch.cuda.set_device(self.device.index or 0)
-        B = len(contexts)
-        if B == 1:
-            ids, lps = self.act(contexts[0], n_tokens, temperature, eos_token_ids)
-            return [ids], [lps]
-
-        eos_set = set(eos_token_ids or [])
-        max_len = max(len(c) for c in contexts)
-        pad_id = self._tokenizer.pad_token_id
-
-        input_ids = torch.full((B, max_len), pad_id, dtype=torch.long, device=self.device)
-        attention_mask = torch.zeros(B, max_len, dtype=torch.long, device=self.device)
-        for i, ctx in enumerate(contexts):
-            L = len(ctx)
-            input_ids[i, max_len - L:] = torch.tensor(ctx, dtype=torch.long, device=self.device)
-            attention_mask[i, max_len - L:] = 1
-
-        all_ids: list[list[int]] = [[] for _ in range(B)]
-        all_lps: list[list[float]] = [[] for _ in range(B)]
-        finished: list[bool] = [False] * B
-        past_key_values = None
-
-        for step in range(n_tokens):
-            out = self._backbone(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                use_cache=True,
-            )
-            logits = out.logits[:, -1, :]  # (B, V)
-            past_key_values = out.past_key_values
-
-            next_toks, log_probs_t = _sample_batch(logits, temperature)  # (B,1) each
-
-            for i in range(B):
-                if finished[i]:
-                    continue
-                tok = int(next_toks[i, 0])
-                all_ids[i].append(tok)
-                all_lps[i].append(float(log_probs_t[i, 0]))
-                if tok in eos_set:
-                    finished[i] = True
-
-            if all(finished):
-                break
-
-            input_ids = next_toks  # (B, 1)
-            attention_mask = torch.cat(
-                [attention_mask, torch.ones(B, 1, dtype=torch.long, device=self.device)],
-                dim=1,
-            )
-
-        return all_ids, all_lps
+        """Batched autoregressive sampling — delegates to ``_generate_batch``."""
+        return _generate_batch(
+            self._backbone, self._tokenizer, self.device,
+            contexts, n_tokens, temperature, eos_token_ids,
+            cache_implementation=self._cache_impl,
+        )
 
     # ------------------------------------------------------------------ #
     # Training: differentiable forward pass                                #
@@ -585,6 +622,7 @@ class LoRASharedBaseAgent(Agent):
         device: torch.device | str,
         keep_ref_model: bool = False,
         context_formatter: str = "auto",
+        compile_rollout: bool = False,
     ) -> None:
         self._agent_id = agent_id
         self._character_prompt = character_prompt
@@ -593,6 +631,11 @@ class LoRASharedBaseAgent(Agent):
         self._tokenizer = tokenizer
         self.device = torch.device(device)
         self._keep_ref_model = keep_ref_model
+        # When the trainer has torch.compile-d the shared backbone, the rollout
+        # path uses cache_implementation="static" so the compiled graph sees
+        # fixed cache shapes (and can stay graph-captured rather than recompiling
+        # every call). No-op when compile_rollout is False.
+        self._cache_impl: str | None = "static" if compile_rollout else None
 
         hidden_size = shared_backbone.config.hidden_size
         model_dtype = next(p for p in shared_backbone.parameters() if p.dtype.is_floating_point).dtype
@@ -693,57 +736,17 @@ class LoRASharedBaseAgent(Agent):
         temperature: float = 1.0,
         eos_token_ids: list[int] | None = None,
     ) -> tuple[list[list[int]], list[list[float]]]:
+        """Batched autoregressive sampling — delegates to ``_generate_batch``.
+
+        Activates this agent's adapter on the shared backbone first so the
+        generate path forward-passes through the right LoRA delta.
+        """
         self._activate()
-        if self.device.type == "cuda":
-            torch.cuda.set_device(self.device.index or 0)
-
-        B = len(contexts)
-        if B == 1:
-            ids, lps = self.act(contexts[0], n_tokens, temperature, eos_token_ids)
-            return [ids], [lps]
-
-        eos_set = set(eos_token_ids or [])
-        max_len = max(len(c) for c in contexts)
-        pad_id = self._tokenizer.pad_token_id
-        input_ids = torch.full((B, max_len), pad_id, dtype=torch.long, device=self.device)
-        attention_mask = torch.zeros(B, max_len, dtype=torch.long, device=self.device)
-        for i, ctx in enumerate(contexts):
-            L = len(ctx)
-            input_ids[i, max_len - L:] = torch.tensor(ctx, dtype=torch.long, device=self.device)
-            attention_mask[i, max_len - L:] = 1
-
-        all_ids: list[list[int]] = [[] for _ in range(B)]
-        all_lps: list[list[float]] = [[] for _ in range(B)]
-        finished: list[bool] = [False] * B
-        past_key_values = None
-
-        for _ in range(n_tokens):
-            out = self._backbone(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                use_cache=True,
-            )
-            logits = out.logits[:, -1, :]
-            past_key_values = out.past_key_values
-            next_toks, log_probs_t = _sample_batch(logits, temperature)
-            for i in range(B):
-                if finished[i]:
-                    continue
-                tok = int(next_toks[i, 0])
-                all_ids[i].append(tok)
-                all_lps[i].append(float(log_probs_t[i, 0]))
-                if tok in eos_set:
-                    finished[i] = True
-            if all(finished):
-                break
-            input_ids = next_toks
-            attention_mask = torch.cat(
-                [attention_mask, torch.ones(B, 1, dtype=torch.long, device=self.device)],
-                dim=1,
-            )
-
-        return all_ids, all_lps
+        return _generate_batch(
+            self._backbone, self._tokenizer, self.device,
+            contexts, n_tokens, temperature, eos_token_ids,
+            cache_implementation=self._cache_impl,
+        )
 
     # ------------------------------------------------------------------ #
     # Training: differentiable forward pass                                #

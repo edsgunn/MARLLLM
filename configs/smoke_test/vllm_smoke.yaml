@@ -18,11 +18,11 @@ lora_r: 64
 lora_alpha: 128
 pairing_strategy: random_no_self
 iters: 2
-rollouts: 4
+rollouts: 16
 lr: 1e-5
 kl_coef: 0.05
 beta: 0.01
-grad_accum: 4
+grad_accum: 16
 seed: 1
 log_every: 1
 checkpoint_every: 999

@@ -1,3 +1,5 @@
+name: run3a_8agent_seedB
+script: train_population
 model: Qwen/Qwen2.5-1.5B-Instruct
 dtype: bfloat16
 device: cuda:0
@@ -15,12 +17,12 @@ lora_shared_base: true
 lora_r: 64
 lora_alpha: 128
 pairing_strategy: random_no_self
-iters: 200
-rollouts: 8
+iters: 50
+rollouts: 32
 lr: 1e-5
 kl_coef: 0.05
 beta: 0.01
-grad_accum: 4
+grad_accum: 16
 seed: 2
 log_every: 5
 checkpoint_every: 25
@@ -28,7 +30,7 @@ num_checkpoint_traces: 8
 snapshot_eval_path: eval_contexts/robotic_athanor.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 128
-max_episode_tokens: 4096
+max_episode_tokens: 24576
 environments:
 - name: robotic_athanor
   type: forum

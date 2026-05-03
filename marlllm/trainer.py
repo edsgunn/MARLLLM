@@ -401,10 +401,13 @@ class Trainer:
             steps: list[EpisodeStep] = []
             pids = prompt_ids.get(aid, [])
             if pids:
+                prompt_type = (
+                    TokenType.OBS if self.config.prompt_as_observation else TokenType.PAD
+                )
                 steps.append(EpisodeStep(
                     agent_id=aid,
                     token_ids=formatter.wrap_prompt(pids),
-                    token_type=TokenType.PAD,
+                    token_type=prompt_type,
                     log_probs=[],
                     info={},
                 ))

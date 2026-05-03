@@ -1,0 +1,47 @@
+# 7B capacity test — same task as run1 (2-agent robotic_athanor) but on
+# Qwen2.5-7B-Instruct instead of 1.5B. Hypothesis: 1.5B's predictive capacity
+# was the bottleneck — perception-loss gradient was effectively noise on
+# multi-character forum contexts, driving the policy off-distribution.
+# kl_coef and beta are restored to the original values (kl05 ablation didn't
+# stabilise training, so the divergence isn't pure regularisation strength).
+# lr lowered from 1e-5 → 5e-6 since LoRA r=64 has more capacity on 7B and
+# standard LoRA-RLHF settings on 7B+ run at lr 1e-6 to 5e-6.
+name: run4_2agent_7B
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "12:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+characters:
+- Silas Varnham
+- Thaddeus 'Aurelius' Thorne
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 100
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+snapshot_eval_path: eval_contexts/robotic_athanor.json
+snapshot_samples_per_context: 8
+snapshot_max_new_tokens: 384
+max_episode_tokens: 16384
+environments:
+- name: robotic_athanor
+  type: forum
+  token_budget: 384
+  character_set: canonical_2
+  max_posts: 12
+  post_order: round_robin
+output_dir: runs/cultural_emergence/run4_2agent_7B
+gradient_checkpointing: true

@@ -69,7 +69,7 @@ ISAMBARD_MAX_HOURS   = 24
 ISAMBARD_GPUS_PER_NODE = 4          # max GH200s available per node
 ISAMBARD_CPUS_PER_GPU  = 72         # ARM Grace cores per GH200 NUMA domain
 # Modules loaded automatically unless --no-default-modules is passed.
-ISAMBARD_DEFAULT_MODULES = ["cuda/12.6", "brics/nccl"]
+ISAMBARD_DEFAULT_MODULES = ["cuda/12.6", "brics/nccl", "gcc-native/12.3"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -132,6 +132,7 @@ def make_job_script(
     default_modules: list[str],
     venv_activate: str | None,
     output_dir_prefix: str | None,
+    extra_args: str = "",
 ) -> str:
     slurm_cfg  = cfg.get("slurm", {})
     name       = cfg.get("name", config_path.stem)
@@ -210,9 +211,17 @@ def make_job_script(
     hf_home_line = f'export HF_HOME="{hf_home or _default_hf_home}"'
 
     # ── Venv / uv activation ──────────────────────────────────────────────
+    # When gpus_per_node > 1 we launch via torchrun for data-parallel training.
+    # The trainer detects RANK/LOCAL_RANK/WORLD_SIZE from torchrun and shards
+    # episodes across ranks with manual gradient all-reduce.
+    use_ddp = gpus_per_node > 1
+    if use_ddp:
+        launch_prefix = f"torchrun --standalone --nnodes=1 --nproc_per_node={gpus_per_node}"
+    else:
+        launch_prefix = "python"
     if venv_activate:
         activate_block = f'source "{venv_activate}"'
-        python_cmd = f'python "{project_dir}/{script}.py" --config "{config_path.resolve()}"'
+        python_cmd = f'{launch_prefix} "{project_dir}/{script}.py" --config "{config_path.resolve()}"'
     else:
         activate_block = f"""\
 if [ -f "{project_dir}/.venv/bin/activate" ]; then
@@ -223,9 +232,18 @@ else
     echo "[ERROR] No venv found and uv is not on PATH. Aborting." >&2
     exit 1
 fi"""
-        python_cmd = (
-            f'uv run --no-sync python "{project_dir}/{script}.py" --config "{config_path.resolve()}"'
-        )
+        # `uv run` runs a sub-command; for torchrun we run it via uv run too so
+        # the PATH/venv is consistent.
+        if use_ddp:
+            python_cmd = (
+                f'uv run --no-sync {launch_prefix} "{project_dir}/{script}.py" '
+                f'--config "{config_path.resolve()}"'
+            )
+        else:
+            python_cmd = (
+                f'uv run --no-sync python "{project_dir}/{script}.py" '
+                f'--config "{config_path.resolve()}"'
+            )
 
     # ── Output-dir prefix remapping ───────────────────────────────────────
     # Allows redirecting run outputs to $PROJECTDIR or $SCRATCHDIR at submit
@@ -236,6 +254,9 @@ fi"""
         run_subdir = Path(out_dir_cfg).name if "/" in out_dir_cfg else out_dir_cfg
         output_dir_override = f'--output-dir "{output_dir_prefix}/{run_subdir}"'
         python_cmd += f" {output_dir_override}"
+
+    if extra_args:
+        python_cmd += f" {extra_args}"
 
     script_body = f"""\
 #!/bin/bash -l
@@ -429,6 +450,12 @@ def parse_args() -> argparse.Namespace:
         help="Save generated job scripts here instead of a temp dir. "
              "Useful for auditing exactly what was submitted.",
     )
+    p.add_argument(
+        "--extra-args", default="", metavar="ARGS",
+        help="Extra CLI args to append to the train_population.py command in "
+             "every generated job, e.g. --extra-args=\"--compile\". Quoted as "
+             "a single string; split into argv tokens via the shell.",
+    )
     return p.parse_args()
 
 
@@ -495,6 +522,7 @@ def main() -> None:
             default_modules=default_modules,
             venv_activate=args.venv,
             output_dir_prefix=args.output_dir_prefix,
+            extra_args=args.extra_args,
         )
 
         # ── Write job script ──────────────────────────────────────────────

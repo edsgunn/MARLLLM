@@ -269,11 +269,14 @@ def _build_forum_env(
 
     Required keys (one of):
       ``character_set``  : ``canonical_2`` | ``canonical_4`` | ``extended_8``
-                           — uses the Robotic Athanor persona set.
+                           — uses the persona set selected by ``scenario``.
       ``personas``       : explicit dict of ``name → persona text`` (overrides
                            character_set if both are present).
 
     Optional keys:
+      ``scenario``         : ``robotic_athanor`` (default) or ``conjecture_inn``.
+                             Selects which persona module backs ``character_set``
+                             and supplies the default forum framing.
       ``max_posts``        : total posts in the episode (default 12).
       ``post_order``       : ``round_robin`` (default) or ``random``.
       ``token_budget``     : tokens per agent turn (default 128).
@@ -282,9 +285,29 @@ def _build_forum_env(
       ``seed``             : per-env RNG seed (default ``args.seed``).
     """
     from envs.forum_env import ForumEnv
-    from envs.robotic_athanor_personas import (
-        FORUM_DESCRIPTION, get_character_set, get_personas,
-    )
+
+    scenario = spec_dict.get("scenario", "robotic_athanor")
+    if scenario == "robotic_athanor":
+        from envs.robotic_athanor_personas import (
+            FORUM_DESCRIPTION, get_character_set, get_personas,
+        )
+        default_invitation = (
+            "A new thread has just opened on the Alchemical Theory section. "
+            "The forum is active and members are posting throughout the day."
+        )
+    elif scenario == "conjecture_inn":
+        from envs.conjecture_inn_personas import (
+            FORUM_DESCRIPTION, get_character_set, get_personas,
+        )
+        default_invitation = (
+            "A new thread has just opened in the Open Conjectures section. "
+            "The forum is active and members are posting throughout the day."
+        )
+    else:
+        raise ValueError(
+            f"Unknown forum scenario {scenario!r}. "
+            f"Supported: 'robotic_athanor', 'conjecture_inn'."
+        )
 
     seed = int(spec_dict.get("seed", default_seed))
 
@@ -297,10 +320,7 @@ def _build_forum_env(
         personas = get_personas(cset)
 
     forum_description = spec_dict.get("forum_description") or FORUM_DESCRIPTION
-    initial_invitation = spec_dict.get("initial_invitation") or (
-        "A new thread has just opened on the Alchemical Theory section. "
-        "The forum is active and members are posting throughout the day."
-    )
+    initial_invitation = spec_dict.get("initial_invitation") or default_invitation
 
     return ForumEnv(
         agent_names=agent_names,
@@ -475,6 +495,28 @@ def parse_args() -> argparse.Namespace:
                         "behavioural-distribution snapshots at each checkpoint.")
     p.add_argument("--snapshot-samples-per-context", type=int, default=8)
     p.add_argument("--snapshot-max-new-tokens", type=int, default=128)
+
+    # ── Variance-decomposition diagnostic ─────────────────────────────────
+    # Estimates Var[G_t] = Var_a[E[G|a]] + E_a[Var[G|a]] on a fixed held-out
+    # context set; lets us tell whether the action-loss gradient has signal
+    # or is mostly noise. See marlllm/variance_decomposition.py.
+    p.add_argument("--var-decomp-enabled", action="store_true",
+                   help="Enable the variance-decomposition diagnostic.")
+    p.add_argument("--var-decomp-eval-contexts-path", default=None,
+                   help="Path to held-out eval-contexts JSONL. Auto-built on "
+                        "first run if the file does not exist.")
+    p.add_argument("--var-decomp-n-contexts", type=int, default=32)
+    p.add_argument("--var-decomp-K", type=int, default=8,
+                   help="Number of action samples per context.")
+    p.add_argument("--var-decomp-M", type=int, default=4,
+                   help="Number of env-response samples per (context, action).")
+    p.add_argument("--var-decomp-max-continuation-steps", type=int, default=0,
+                   help="0 = run continuations to env termination.")
+    p.add_argument("--var-decomp-n-eval-early", type=int, default=5,
+                   help="Eval cadence (iters) while iter <= var_decomp_switch_iter.")
+    p.add_argument("--var-decomp-n-eval-late", type=int, default=25,
+                   help="Eval cadence (iters) after the switch.")
+    p.add_argument("--var-decomp-switch-iter", type=int, default=50)
     p.add_argument("--output-dir", default="runs/population")
     p.add_argument("--resume", action="store_true",
                    help="Resume from latest checkpoint.")
@@ -528,6 +570,31 @@ def _build_character_prompts(args: argparse.Namespace) -> dict[str, str | list[s
 
 def main() -> None:
     args = parse_args()
+
+    # Use TF32 Tensor Cores for any leftover float32 matmuls (e.g. inductor
+    # may upcast some ops in compiled kernels). Cheap; the 10-bit mantissa
+    # is well within bf16's noise floor for our use case.
+    torch.set_float32_matmul_precision("high")
+
+    # Distributed launch detection. When invoked via torchrun, RANK / LOCAL_RANK
+    # / WORLD_SIZE are set; we initialise NCCL and pin each process to its
+    # local_rank-th GPU. Without those env vars we run as a single-rank job.
+    import os
+    ddp_world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    ddp_rank       = int(os.environ.get("RANK", "0"))
+    ddp_local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    ddp = ddp_world_size > 1
+    if ddp:
+        import torch.distributed as dist
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(ddp_local_rank)
+        # Force device override so the per-rank GPU assignment takes effect.
+        args.device = f"cuda:{ddp_local_rank}"
+        print(f"[ddp] rank={ddp_rank}/{ddp_world_size} local_rank={ddp_local_rank} device={args.device}")
+
+    # Seed identically on every rank so model init + LoRA adapter init produce
+    # bit-identical starting weights. Per-rank divergence in env / sampling RNG
+    # is handled inside PopulationTrainer via a rank-offset rng_counter.
     torch.manual_seed(args.seed)
 
     from marlllm import (
@@ -542,7 +609,8 @@ def main() -> None:
     from marlllm.population import EnvironmentSpec, PopulationTrainer
 
     character_prompts = _build_character_prompts(args)
-    print(f"Population: {list(character_prompts.keys())} ({len(character_prompts)} agents)")
+    if ddp_rank == 0:
+        print(f"Population: {list(character_prompts.keys())} ({len(character_prompts)} agents)")
 
     dtype_map = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
     torch_dtype = dtype_map.get(args.dtype, "auto")
@@ -607,6 +675,15 @@ def main() -> None:
             print(f"Attaching LoRA adapter '{name}' (r={args.lora_r})")
             peft_model.add_adapter(name, lora_config)
 
+        if args.compile:
+            # mode="default" does kernel fusion via Inductor without capturing
+            # CUDA graphs. We avoid "reduce-overhead" because transformers
+            # reuses output tensors across forward calls, which CUDA graphs
+            # don't tolerate (RuntimeError on output tensor overwrites).
+            print("torch.compile-ing the shared backbone forward (mode='default'). "
+                  "First rollout/loss step will be slow as kernels warm up.")
+            peft_model.forward = torch.compile(peft_model.forward, mode="default")
+
         for name, prompt in character_prompts.items():
             # For LoRA agents, store the first prompt variant as the character_prompt
             # (used by the agent object itself; training uses per-episode sampled prompts).
@@ -619,6 +696,7 @@ def main() -> None:
                 tokenizer=tokenizer,
                 device=device,
                 keep_ref_model=keep_ref,
+                compile_rollout=args.compile,
             )
 
         print(f"LoRA shared base: 1 backbone, {len(names)} independent adapters.")
@@ -692,6 +770,15 @@ def main() -> None:
         snapshot_eval_path=args.snapshot_eval_path,
         snapshot_samples_per_context=args.snapshot_samples_per_context,
         snapshot_max_new_tokens=args.snapshot_max_new_tokens,
+        var_decomp_enabled=args.var_decomp_enabled,
+        var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path,
+        var_decomp_n_contexts=args.var_decomp_n_contexts,
+        var_decomp_K=args.var_decomp_K,
+        var_decomp_M=args.var_decomp_M,
+        var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps,
+        var_decomp_n_eval_early=args.var_decomp_n_eval_early,
+        var_decomp_n_eval_late=args.var_decomp_n_eval_late,
+        var_decomp_switch_iter=args.var_decomp_switch_iter,
         output_dir=args.output_dir,
         device=device,
         seed=args.seed,
@@ -748,6 +835,8 @@ def main() -> None:
         pairing_strategy=args.pairing_strategy,
         sampling_engine=sampling_engine,
         sampling_engine_peft_model=sampling_engine_peft_model,
+        ddp_rank=ddp_rank,
+        ddp_world_size=ddp_world_size,
     )
 
     start_iteration = 1
@@ -774,6 +863,10 @@ def main() -> None:
     print(f"Output directory: {args.output_dir}")
     print()
     trainer.train(start_iteration=start_iteration)
+
+    if ddp:
+        import torch.distributed as dist
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

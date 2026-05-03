@@ -179,6 +179,8 @@ class PopulationTrainer:
         pairing_strategy: str = "random_no_self",
         sampling_engine: Any = None,
         sampling_engine_peft_model: Any = None,
+        ddp_rank: int = 0,
+        ddp_world_size: int = 1,
     ) -> None:
         if len(population) < 1:
             raise ValueError("population must have at least one member")
@@ -250,6 +252,15 @@ class PopulationTrainer:
                     all_params.append(p)
         self.optimizer = AdamW(all_params, lr=config.lr)
 
+        # Data-parallel state. When world_size > 1 each rank runs an independent
+        # train() loop on its own slice of episodes; gradients are all-reduced
+        # before every optimizer.step() so all ranks converge on the same
+        # optimizer state. Only rank 0 writes checkpoints/traces/snapshots/metrics.
+        self.ddp_rank = ddp_rank
+        self.ddp_world_size = ddp_world_size
+        self.ddp = ddp_world_size > 1
+        self._ddp_params = all_params  # cached for the gradient all-reduce
+
         # Chat-template EOS ids: stop generation cleanly on <|im_end|> /
         # <|endoftext|> (or the equivalent for the active model family) so
         # actions don't drag garbage past the end-of-turn marker.
@@ -264,8 +275,12 @@ class PopulationTrainer:
             except Exception:
                 pass
         self._rollout_stats: dict[str, float] = {}
-        self._rng_counter = config.seed
-        self._rng = random.Random(config.seed)
+        # Each rank gets its own slice of the seed space so envs/pairings
+        # diverge across ranks (we want different episodes per rank, not
+        # duplicates).
+        rank_seed_offset = ddp_rank * 1_000_003  # prime, avoids accidental aliasing
+        self._rng_counter = config.seed + rank_seed_offset
+        self._rng = random.Random(config.seed + rank_seed_offset)
 
         names = list(population.keys())
         if pairing_strategy == "round_robin":
@@ -279,19 +294,82 @@ class PopulationTrainer:
         self._logger = self._setup_logging()
         self._metrics_path = Path(config.output_dir) / "metrics.jsonl"
 
+        # Variance-decomposition eval state (lazy: contexts built on first use).
+        self._var_decomp_contexts: list | None = None
+        self._var_decomp_metrics_path = (
+            Path(config.output_dir) / "variance_decomposition.jsonl"
+        )
+
     # ------------------------------------------------------------------ #
     # Main training loop                                                   #
     # ------------------------------------------------------------------ #
 
+    # ------------------------------------------------------------------ #
+    # DDP helpers                                                          #
+    # ------------------------------------------------------------------ #
+
+    def _ddp_all_reduce_grads(self) -> None:
+        """Average .grad across ranks for every trainable parameter.
+
+        Pads ranks that didn't compute a grad for some parameter (e.g. an
+        adapter whose agent didn't appear in any of this rank's episodes)
+        with a zero tensor of the right shape so all ranks participate in
+        every collective. Without this, NCCL hangs because of the missing
+        op on those ranks.
+        """
+        import torch.distributed as dist
+        for p in self._ddp_params:
+            if p.grad is None:
+                # This rank has no gradient for p — fill with zeros so the
+                # all-reduce still happens (and contributes 0).
+                p.grad = torch.zeros_like(p)
+            dist.all_reduce(p.grad, op=dist.ReduceOp.AVG)
+
+    def _ddp_reduce_metrics(self, metrics: dict[str, float]) -> dict[str, float]:
+        """Average scalar metrics across ranks. Sums episode counts."""
+        import torch.distributed as dist
+        if not self.ddp or not metrics:
+            return metrics
+        # Sums for things that should aggregate, averages for everything else.
+        SUM_KEYS_PREFIX = ("rollout/gen_tokens", "rollout/gen_calls", "n_episodes",
+                            "unique_pairings", "env_episodes/")
+        keys = sorted(metrics.keys())
+        # Pack into one tensor per reduction op for efficiency.
+        sum_keys = [k for k in keys if any(k.startswith(p) for p in SUM_KEYS_PREFIX)]
+        avg_keys = [k for k in keys if k not in sum_keys and isinstance(metrics[k], (int, float))]
+        if sum_keys:
+            t = torch.tensor([float(metrics[k]) for k in sum_keys], device="cuda")
+            dist.all_reduce(t, op=dist.ReduceOp.SUM)
+            for k, v in zip(sum_keys, t.cpu().tolist()):
+                metrics[k] = v
+        if avg_keys:
+            t = torch.tensor([float(metrics[k]) for k in avg_keys], device="cuda")
+            dist.all_reduce(t, op=dist.ReduceOp.AVG)
+            for k, v in zip(avg_keys, t.cpu().tolist()):
+                metrics[k] = v
+        return metrics
+
+    @property
+    def is_main_rank(self) -> bool:
+        return self.ddp_rank == 0
+
     def train(self, start_iteration: int = 1) -> None:
         pop_names = list(self.population.keys())
         env_names = [s.name for s in self.environments]
-        self._logger.info(
-            "Population training: %d members %s | envs=%s | pairing=%s | iters=%d",
-            len(pop_names), pop_names, env_names, self.pairing_strategy,
-            self.config.num_iterations,
+        if self.ddp_rank == 0:
+            self._logger.info(
+                "Population training: %d members %s | envs=%s | pairing=%s | iters=%d | ddp_world_size=%d",
+                len(pop_names), pop_names, env_names, self.pairing_strategy,
+                self.config.num_iterations, self.ddp_world_size,
+            )
+            self._logger.info("Output directory: %s", self.config.output_dir)
+
+        # When running data-parallel, each rank only collects 1/world_size of the
+        # configured episodes per iter. The aggregate work is the same as a
+        # single-rank run with episodes_per_iter, but split across ranks.
+        local_episodes_per_iter = max(
+            1, self.config.episodes_per_iter // self.ddp_world_size
         )
-        self._logger.info("Output directory: %s", self.config.output_dir)
 
         for iteration in range(start_iteration, self.config.num_iterations + 1):
 
@@ -302,7 +380,7 @@ class PopulationTrainer:
             # ── 1. Collect episodes ───────────────────────────────────────
             _t_phase = time.perf_counter()
             raw_episodes: list[_RawEpisode] = self._collect_episodes_batched(
-                self.config.episodes_per_iter
+                local_episodes_per_iter
             )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -385,6 +463,15 @@ class PopulationTrainer:
 
             # ── 3. Optimizer step ─────────────────────────────────────────
             _t_phase = time.perf_counter()
+            if self.ddp:
+                # Average gradients across ranks before stepping. We don't wrap
+                # in DistributedDataParallel because PEFT swaps the wrapped
+                # forward (adapter switching) and torch.compile + DDP +
+                # find_unused_parameters has rough edges. Manual all-reduce on
+                # the .grad buffers is equivalent, simpler, and easy to reason
+                # about: every rank applies the same averaged gradient and
+                # therefore stays bit-identical in optimizer state.
+                self._ddp_all_reduce_grads()
             self.optimizer.step()
             if self.sampling_engine is not None and self._sampling_engine_peft_model is not None:
                 # Push fresh LoRA weights into vLLM so the next rollout
@@ -403,7 +490,12 @@ class PopulationTrainer:
             all_metrics["time/rollout_s"] = rollout_s
             all_metrics["time/loss_s"]    = loss_s
             all_metrics["time/optim_s"]   = optim_s
-            all_metrics["time/iter_s"]    = rollout_s + loss_s + optim_s
+            iter_s = rollout_s + loss_s + optim_s
+            all_metrics["time/iter_s"]    = iter_s
+            # Phase fraction of total iter wall time (different from rollout/gen_frac
+            # which is the fraction of the rollout *phase* spent in actual generation).
+            all_metrics["time/rollout_frac"] = (rollout_s / iter_s) if iter_s > 0 else 0.0
+            all_metrics["time/loss_frac"]    = (loss_s / iter_s) if iter_s > 0 else 0.0
             gen_time = self._rollout_stats.get("gen_time_s", 0.0)
             gen_tokens = self._rollout_stats.get("gen_tokens", 0)
             all_metrics["time/gen_s"]       = gen_time
@@ -433,26 +525,50 @@ class PopulationTrainer:
             for env_name, count in env_counts.items():
                 all_metrics[f"env_episodes/{env_name}"] = count
 
-            # ── 5. Log and checkpoint ─────────────────────────────────────
-            if iteration % self.config.log_every == 0:
-                self._log_metrics(iteration, all_metrics)
-                for raw_ep in raw_episodes:
-                    hist, ep_info, pairing, pids, env_name, ctx_snapshot, env_trace_k = raw_ep
-                    if hist:
-                        self._write_trace(iteration, ctx_snapshot, ep_info, pairing, env_name, env_trace_k)
-                        break
+            # Reduce metrics across ranks before logging — sum-style for counts,
+            # average for losses/timings — so the JSONL row is identical to a
+            # single-rank run with the same total episodes_per_iter.
+            if self.ddp:
+                all_metrics = self._ddp_reduce_metrics(all_metrics)
 
-            self._write_metrics_jsonl(all_metrics)
+            # ── 4b. Variance-decomposition diagnostic (rank 0 only) ──────
+            # Run after the optimizer step so we measure the *current*
+            # post-update policy. Cadence-gated by config.
+            if self.is_main_rank and self._should_run_var_decomp(iteration):
+                self._run_var_decomp(iteration, all_metrics)
 
-            if iteration % self.config.checkpoint_every == 0:
-                self.save_checkpoint(iteration)
-                self._write_checkpoint_traces(iteration, raw_episodes)
-                self._write_behavioral_snapshot(iteration)
+            # ── 5. Log and checkpoint (rank 0 only) ──────────────────────
+            if self.is_main_rank:
+                if iteration % self.config.log_every == 0:
+                    self._log_metrics(iteration, all_metrics)
+                    for raw_ep in raw_episodes:
+                        hist, ep_info, pairing, pids, env_name, ctx_snapshot, env_trace_k = raw_ep
+                        if hist:
+                            self._write_trace(iteration, ctx_snapshot, ep_info, pairing, env_name, env_trace_k)
+                            break
 
-        self.save_checkpoint(self.config.num_iterations, tag="final")
-        self._write_checkpoint_traces(self.config.num_iterations, raw_episodes)
-        self._write_behavioral_snapshot(self.config.num_iterations)
-        self._logger.info("Training complete.")
+                self._write_metrics_jsonl(all_metrics)
+
+                if iteration % self.config.checkpoint_every == 0:
+                    self.save_checkpoint(iteration)
+                    self._write_checkpoint_traces(iteration, raw_episodes)
+                    self._write_behavioral_snapshot(iteration)
+
+            # All ranks barrier here so non-main ranks don't race ahead while
+            # rank 0 is doing slow snapshot/checkpoint I/O. Without this, rank 0
+            # falls behind and gradient all-reduce next iter would block.
+            if self.ddp:
+                import torch.distributed as dist
+                dist.barrier()
+
+        if self.is_main_rank:
+            self.save_checkpoint(self.config.num_iterations, tag="final")
+            self._write_checkpoint_traces(self.config.num_iterations, raw_episodes)
+            self._write_behavioral_snapshot(self.config.num_iterations)
+            self._logger.info("Training complete.")
+        if self.ddp:
+            import torch.distributed as dist
+            dist.barrier()
 
     # ------------------------------------------------------------------ #
     # Prompt sampling                                                       #
@@ -754,10 +870,13 @@ class PopulationTrainer:
             steps: list[EpisodeStep] = []
             prompt = pids.get(pop_name, [])
             if prompt:
+                prompt_type = (
+                    TokenType.OBS if self.config.prompt_as_observation else TokenType.PAD
+                )
                 steps.append(EpisodeStep(
                     agent_id=pop_name,
                     token_ids=formatter.wrap_prompt(prompt),
-                    token_type=TokenType.PAD,
+                    token_type=prompt_type,
                     log_probs=[],
                     info={},
                 ))
@@ -963,6 +1082,127 @@ class PopulationTrainer:
             samples_per_context=self.config.snapshot_samples_per_context,
         )
         self._logger.info("Behavioural snapshot saved: %s", out)
+
+    # ------------------------------------------------------------------ #
+    # Variance-decomposition diagnostic                                    #
+    # ------------------------------------------------------------------ #
+
+    def _should_run_var_decomp(self, iteration: int) -> bool:
+        if not getattr(self.config, "var_decomp_enabled", False):
+            return False
+        switch = int(self.config.var_decomp_switch_iter)
+        cadence = (
+            self.config.var_decomp_n_eval_early if iteration <= switch
+            else self.config.var_decomp_n_eval_late
+        )
+        cadence = max(1, int(cadence))
+        return iteration % cadence == 0
+
+    def _ensure_var_decomp_contexts(self) -> list:
+        """Load held-out contexts from disk, harvesting them on first use.
+
+        Building the set requires running rollouts with the current
+        population (frozen-but-pre-train). We do this lazily on the first
+        call rather than at trainer __init__ so that the build happens
+        after any pre-train setup (compile, vLLM init) and only when
+        var_decomp_enabled is True.
+        """
+        if self._var_decomp_contexts is not None:
+            return self._var_decomp_contexts
+
+        from marlllm.variance_decomposition import (
+            build_eval_contexts, load_eval_contexts, write_eval_contexts,
+        )
+
+        cfg_path = getattr(self.config, "var_decomp_eval_contexts_path", None)
+        if cfg_path:
+            path = Path(cfg_path)
+        else:
+            run_name = Path(self.config.output_dir).name or "run"
+            path = Path("data/eval_contexts") / f"{run_name}.var_decomp.jsonl"
+
+        if path.exists():
+            self._logger.info("Loading variance-decomp contexts from %s", path)
+            self._var_decomp_contexts = load_eval_contexts(path)
+            return self._var_decomp_contexts
+
+        self._logger.info(
+            "Building %d variance-decomp contexts (saving to %s)",
+            self.config.var_decomp_n_contexts, path,
+        )
+        contexts = build_eval_contexts(
+            population=self.population,
+            environments=self.environments,
+            tokeniser=self.tokeniser,
+            config=self.config,
+            n_contexts=self.config.var_decomp_n_contexts,
+            rng_seed=self.config.seed,
+            eos_token_ids=self._eos_token_ids,
+        )
+        write_eval_contexts(contexts, path)
+        self._var_decomp_contexts = contexts
+        return contexts
+
+    def _run_var_decomp(self, iteration: int, metrics_inout: dict) -> None:
+        """Run the variance-decomposition eval, log to JSONL, fold into metrics."""
+        from marlllm.variance_decomposition import variance_decomposition
+
+        contexts = self._ensure_var_decomp_contexts()
+        if not contexts:
+            return
+
+        t0 = time.time()
+        try:
+            results = variance_decomposition(
+                population=self.population,
+                environments=self.environments,
+                eval_contexts=contexts,
+                tokeniser=self.tokeniser,
+                config=self.config,
+                K=self.config.var_decomp_K,
+                M=self.config.var_decomp_M,
+                max_continuation_steps=self.config.var_decomp_max_continuation_steps,
+                eos_token_ids=self._eos_token_ids,
+                pad_token_id=self._pad_token_id(),
+            )
+        except Exception as e:
+            self._logger.warning("Variance-decomposition eval failed: %s", e)
+            return
+        elapsed = time.time() - t0
+
+        # Fold scalar metrics into the iteration's metrics dict using the
+        # eval/<agent>/<metric> namespace requested in the spec.
+        for pop_name, agg in results.items():
+            for key in ("signal", "noise", "snr", "log_signal", "log_noise", "log_snr"):
+                metrics_inout[f"eval/{pop_name}/{key}"] = float(agg[key])
+            metrics_inout[f"eval/{pop_name}/n_contexts"] = int(agg["n_contexts"])
+        metrics_inout["eval/var_decomp/wall_time_s"] = elapsed
+
+        # Write the full per-context arrays to a separate JSONL so plotting
+        # can do scatter / per-context diagnostics without re-reading the
+        # main metrics stream.
+        record = {"iteration": iteration, "wall_time_s": elapsed, "agents": {}}
+        for pop_name, agg in results.items():
+            record["agents"][pop_name] = {
+                "signal": agg["signal"],
+                "noise": agg["noise"],
+                "snr": agg["snr"],
+                "log_signal": agg["log_signal"],
+                "log_noise": agg["log_noise"],
+                "log_snr": agg["log_snr"],
+                "n_contexts": agg["n_contexts"],
+                "per_context": agg["per_context"],
+            }
+        with open(self._var_decomp_metrics_path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        self._logger.info(
+            "var_decomp iter=%d %s | %.1fs",
+            iteration,
+            " ".join(
+                f"{n}/snr={results[n]['snr']:.3g}" for n in sorted(results)
+            ),
+            elapsed,
+        )
 
     def _write_metrics_jsonl(self, metrics: dict) -> None:
         with open(self._metrics_path, "a") as f:

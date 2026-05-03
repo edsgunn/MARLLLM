@@ -1,0 +1,44 @@
+# Hyperparameter ablation: stronger KL anchor + no entropy bonus.
+# Hypothesis: with mean_return ~0, the original kl_coef=0.05 + beta=0.01
+# was too weak to anchor each LoRA adapter against value-loss / perception-loss
+# gradient noise, allowing policies to drift to incoherent text.
+# Same training schedule as run1; separate output_dir to keep results disjoint.
+name: run1_2agent_robotic_athanor_kl05
+script: train_population
+slurm:
+  gpus_per_node: 4   # data-parallel via torchrun; trainer detects WORLD_SIZE
+  time: "08:00:00"
+model: Qwen/Qwen2.5-1.5B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+characters:
+- Silas Varnham
+- Thaddeus 'Aurelius' Thorne
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 100
+rollouts: 16
+lr: 1e-5
+kl_coef: 0.5      # was 0.05 — 10× stronger anchor to base
+beta: 0.0         # was 0.01 — disable entropy bonus
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+snapshot_eval_path: eval_contexts/robotic_athanor.json
+snapshot_samples_per_context: 8
+snapshot_max_new_tokens: 384
+max_episode_tokens: 16384
+environments:
+- name: robotic_athanor
+  type: forum
+  token_budget: 384
+  character_set: canonical_2
+  max_posts: 12
+  post_order: round_robin
+output_dir: runs/cultural_emergence/run1_2agent_seed1_kl05
+gradient_checkpointing: true

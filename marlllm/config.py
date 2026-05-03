@@ -29,6 +29,15 @@ class TrainingConfig:
     # partner while agent_0 is trained — the "focal vs fixed partner" setup.
     frozen_agents: list[str] = field(default_factory=list)
 
+    # Treat the character prompt as an observation the agent emits about itself,
+    # rather than as masked exogenous conditioning. When True (default), prompt
+    # tokens are tagged TokenType.OBS — they contribute to L_perc (next-token
+    # prediction) but never to the policy gradient. Over training the model
+    # learns to predict its own character prompt, absorbing it into the weights.
+    # When False, prompt tokens are tagged TokenType.PAD (legacy behaviour):
+    # they condition generation but receive no loss of any kind.
+    prompt_as_observation: bool = True
+
     # Per-agent perception masking (Cells B/C/D/E of the distillation ablation).
     # When non-empty, L_perc only counts OBS tokens whose *source* agent
     # (agent_id_mask at that position) is in this list. Default = empty list,
@@ -73,3 +82,18 @@ class TrainingConfig:
     snapshot_eval_path: str | None = None
     snapshot_samples_per_context: int = 8
     snapshot_max_new_tokens: int = 128
+
+    # Variance-decomposition diagnostic.
+    # Estimates Var[G_t] = Var_a[E[G|a]] + E_a[Var[G|a]] on a fixed held-out
+    # context set, so we can detect dark-room collapse (signal ↓ noise ↓) and
+    # entrenched diffuse non-learning (signal ↓ noise ↑) directly rather than
+    # inferring them from entropy curves. See marlllm/variance_decomposition.py.
+    var_decomp_enabled: bool = False
+    var_decomp_eval_contexts_path: str | None = None  # auto-built if missing
+    var_decomp_n_contexts: int = 32
+    var_decomp_K: int = 8                        # actions sampled per context
+    var_decomp_M: int = 4                        # env-response samples per (context, action)
+    var_decomp_max_continuation_steps: int = 0   # 0 = run to env termination
+    var_decomp_n_eval_early: int = 5             # cadence while iter <= switch
+    var_decomp_n_eval_late: int = 25             # cadence after the switch
+    var_decomp_switch_iter: int = 50             # iter at which cadence relaxes

@@ -98,10 +98,10 @@ class CCSMLoss(Loss):
             l_perc = obs_surprises.mean()
 
         # ---- Action loss ----
-        # act_mask already excludes position 0 because the Trainer always prepends
-        # the character prompt as PAD-typed tokens, so position 0 is never ACT.
-        # _act_log_probs uses the causal shift (logits[:,:-1] → input_ids[:,1:]),
-        # which matches act_mask[:,1:] — both exclude position 0 naturally.
+        # act_mask excludes position 0: the Trainer always prepends the character
+        # prompt (as OBS or PAD depending on prompt_as_observation), so position 0
+        # is never ACT. _act_log_probs uses the causal shift (logits[:,:-1] →
+        # input_ids[:,1:]), which matches act_mask[:,1:] — both exclude pos 0.
         if act_mask.any():
             act_returns = returns[act_mask]  # G_t at act positions
 

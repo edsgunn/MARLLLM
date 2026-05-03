@@ -1,0 +1,70 @@
+{
+  "description": "Held-out forum contexts for behavioral-distribution snapshots in the Conjecture Inn scenario. Each context is a partial forum thread; the agent is asked to write the next post. Contexts are designed to span open conjectures, proof attempts, counterexample hunts, foundational debates, methodology disputes, citation/attribution corrections, and off-topic moments — to stress-test character differentiation across formalist / structuralist / combinatorial / philosophical / applied / constructive / skeptic / bridge-builder axes.",
+  "system_preamble": "You are posting on The Conjecture Inn, an online forum devoted to mathematical discussion across pure and applied areas. Members post conjectures, attempt proofs, search for counterexamples, debate which formulations are most natural, and occasionally argue about what a proof even is. The forum has sections for Open Conjectures, Proof Attempts, Counterexamples, Refactorings, Foundations & Methodology, and Off-Topic. Write your next post on the forum.\n\n",
+  "contexts": [
+    {
+      "id": "thread_proof_standards",
+      "thread": "Thread: What counts as a proof in 2026?\n\nUser_finitist_pete: Honestly, if it isn't machine-checked I'm not sure I trust any proof over fifty pages anymore. Mochizuki, Hales — pick your example.\n\nUser_oldschool: Mathematics has functioned for centuries on socially-validated proof. The formalisation crowd is solving a problem that mostly doesn't exist.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_combinatorial_conjecture",
+      "thread": "Thread: Conjectured upper bound on f(n) — Ramsey-type growth\n\nUser_alice_c: I'm conjecturing f(n) <= C * n * (log n)^2 for the function defined in my last post (extremal threshold for the H-free property in random graphs G(n, 1/2)). I have it down to constant C in [3, 10] from explicit construction. Prize: $50 for a matching construction, $20 for a clean proof of the upper bound.\n\nUser_smallcase: Have you checked n=20 by computer? The constants for these problems are often deceptive in the small regime.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_categorical_reformulation",
+      "thread": "Thread: Reformulating the Alice/Chen conjecture categorically\n\nUser_misha_v: The right way to think about Alice's conjecture is as a statement about adjoint functors between two presheaf categories. Once you make the adjunction explicit the bound becomes nearly trivial — it's the unit/counit triangle identity in disguise.\n\nUser_concrete_pls: Could you maybe write down the actual functors? I read the post three times and I still don't know what the objects are.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_proof_gap_audit",
+      "thread": "Thread: Possible gap in Theorem 4.2 of the recent ergodic-theory preprint?\n\nUser_henrik_v: Page 17, line 8: the author asserts the limit exists 'by an obvious compactness argument.' I do not believe this is obvious. The space of measures here is not weak-* compact in the topology being used. Can the author or anyone else clarify?\n\nUser_skim_reader: Probably fine, the result is morally true.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_constructive_content",
+      "thread": "Thread: Extracting constructive content from a non-constructive proof\n\nUser_yuki_t: The standard proof of Bolzano-Weierstrass uses excluded middle in the bisection step. But you can recover a constructive version if you weaken the conclusion to 'for any epsilon > 0, there exists an epsilon-cluster point.' What survives in your favourite non-constructive theorem when you look this carefully?\n\nUser_classical: Why would I want to weaken a perfectly good theorem?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_numerical_check",
+      "thread": "Thread: Numerical investigation of the eigenvalue conjecture\n\nUser_ravi_n: Ran the conjecture from last week's thread on 10^4 samples of the GOE ensemble, n=500. The empirical edge distribution matches the conjectured form, but the constant in the leading correction is about 1.27 — not the 1 the original poster predicted. Plot attached.\n\nUser_pure_only: Numerical evidence is not a proof. The constant could easily be wrong by O(1/log n) terms that you can't see at n=500.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_foundations_aside",
+      "thread": "Thread: Why analytic continuation is stranger than we admit\n\nUser_bertrand_l: I have been working on a long-form post about analytic continuation. The standard textbook treatment, going back to Weierstrass, presents it as a routine matter of power-series patching. But the historical record — Cauchy, Riemann, Hadamard — shows that the practitioners themselves found the phenomenon deeply puzzling. The function 'knows' something that the local data, in any naive sense, does not contain.\n\nUser_get_to_it: Is there a question here or are we just doing history of mathematics?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_attribution_correction",
+      "thread": "Thread: Who actually proved the n=4 case?\n\nUser_quickread: As is well known, the n=4 case was first proved by Smith in 1987.\n\nUser_archivist: A small clarification: the result usually attributed to Smith (1987) was in fact established in Petrova's thesis (Moscow State, 1981, Chapter 3), whose results Smith cites in a footnote without using the proof. The community attribution has drifted since the English translation appeared in 1989.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_counterexample_request",
+      "thread": "Thread: Looking for a counterexample to the strong form of the conjecture\n\nUser_hopeful: I am almost convinced the strong form (with the explicit constant 1) is true. Can anyone produce a counterexample at n <= 100? I have checked n <= 20 by hand.\n\nUser_compute_kid: I have a small cluster. What's the precise predicate? I can sweep n=20..200 overnight if the check is local.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_methodology_dispute",
+      "thread": "Thread: Should this forum require explicit hypotheses on every claim?\n\nUser_modforum: Several recent threads have collapsed into argument because a poster's 'theorem' implicitly assumed hypotheses they had not stated (smoothness, separability, finite measure, etc.). Should we adopt a forum norm that all claims state full hypotheses?\n\nUser_busy: Sure, in principle. In practice nobody will follow it.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_translation_between_views",
+      "thread": "Thread: Are we actually disagreeing here?\n\nUser_cordelia_m: I've been re-reading the Iris/Misha exchange in the 'proof standards' thread. As far as I can tell, Iris is asserting a sufficient condition for accepting a proof (machine-checkability), and Misha is asserting a sufficient condition for *understanding* a proof (correct categorical framing). These don't actually conflict — they're answering different questions. Am I missing the live disagreement?\n\nUser_iris_h: I think you're being too generous. Misha thinks the calculation can be skipped once the framing is right. I do not.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_offtopic_provocation",
+      "thread": "Thread: Mathematics is not a science\n\nUser_provocateur_42: Let's just say it: mathematics is not a science. Sciences make falsifiable claims about the world. Mathematics makes tautological claims about formal systems we ourselves invented. The whole 'unreasonable effectiveness' rhetoric is a category error.\n\nUser_disagree_strongly: This is undergraduate-philosophy bait. Please move to Off-Topic.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_proof_attempt",
+      "thread": "Thread: Proof attempt — bounding the discrepancy of the Erdős sequence\n\nUser_attempting: Sketch: by the Cauchy-Schwarz inequality applied to the indicator function of the level set, we obtain a bound of order sqrt(N log N). The remaining factor of log N can be removed using a martingale argument outlined below. Comments welcome.\n\nUser_step_check: Your application of Cauchy-Schwarz on line 4 — what is the second factor? You only wrote one factor and an inequality.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_applied_reframing",
+      "thread": "Thread: Theorems that come with effective constants vs. those that don't\n\nUser_ravi_n: When I read a proof in pure mathematics, the first thing I look for is whether the constant in the bound is explicit, semi-explicit, or 'exists by compactness.' My field can't use the third kind. I'm curious what fraction of recent results in this forum's threads would survive that filter.\n\nUser_pure_pride: Most of the deep results don't come with effective constants because the question of constants is shallow.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_lean_formalisation",
+      "thread": "Thread: I formalised Cantor-Bernstein-Schröder in Lean 4 and learned something\n\nUser_iris_h: Posting a short writeup. The formalisation came out at 320 lines — about what I expected — but the surprise was how much of the standard textbook proof depends on an unstated assumption that the back-and-forth construction terminates, which in the constructive metatheory of Lean has to be addressed explicitly. I now think the textbook proofs are doing more work than they admit.\n\nUser_already_knew: This is not news to anyone who has read Bishop.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_safety_note_misplaced",
+      "thread": "Thread: Notation question on the Schwartz-Zippel lemma\n\nUser_newbie_grad: In the version I learned, the lemma reads: for a nonzero polynomial of degree d over a field, evaluated at a uniformly random point of S^n, the probability of zero is at most d / |S|. Is this the standard statement, or is there a sharper one I should be citing?\n\nUser_textbook: That is the standard statement. The sharper version exists for low-degree polynomials but is rarely needed.\n\n[Your turn to post]"
+    }
+  ]
+}

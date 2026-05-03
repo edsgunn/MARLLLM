@@ -1,0 +1,63 @@
+# 8-agent counterpart to run4_2agent_7B_conjecture: same 7B base, same task
+# regime as run5_8agent_7B but on the Conjecture Inn extended-8 roster.
+# Hyperparameters mirror run5 so any difference is attributable to the
+# substantive forum domain rather than capacity / scheduling.
+name: run5_8agent_7B_conjecture
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "12:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+characters:
+- Iris Halverson
+- Misha Volkov
+- Alice Chen
+- Bertrand Lefebvre
+- Ravi Nair
+- Yuki Tanaka
+- Henrik Voss
+- Cordelia Marsh
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 100
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+snapshot_eval_path: eval_contexts/conjecture_inn.json
+snapshot_samples_per_context: 8
+snapshot_max_new_tokens: 128
+max_episode_tokens: 24576
+environments:
+- name: conjecture_inn
+  type: forum
+  scenario: conjecture_inn
+  token_budget: 128
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/cultural_emergence/run5_8agent_7B_conjecture
+gradient_checkpointing: true
+
+# Variance-decomposition diagnostic. K, M, n_contexts halved vs the 2-agent
+# run because here we have 8 focal agents to evaluate per call (the K*M
+# continuation cost is per context, not per agent — but with 32 contexts
+# spread across 8 agents you'd get ~4 per agent which is too few for a
+# stable signal/noise estimate; raising n_contexts compensates).
+var_decomp_enabled: true
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50
