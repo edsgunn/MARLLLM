@@ -323,7 +323,7 @@ fi
 export NCCL_DEBUG=WARN
 export NCCL_SOCKET_IFNAME=hsn             # use Slingshot high-speed NICs
 export FI_CXI_ATS=0                       # disable address translation for CXI
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 # ── Python / venv ─────────────────────────────────────────────────────────────
 {activate_block}

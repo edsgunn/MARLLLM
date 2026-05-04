@@ -132,14 +132,26 @@ def collect_snapshot(
         per_agent: dict[str, list[dict]] = {cid: [] for cid, _ in context_ids}
 
         if batch_contexts:
+            # Chunk the (N_contexts × samples_per_context) batch so we don't
+            # hit OOM on large eval sets. With 7B + 384 new tokens, a single
+            # all-at-once batch can demand 20+ GB of activations. 8 at a time
+            # keeps the per-call working set under ~3 GB.
+            CHUNK = 8
+            batch_ids: list[list[int]] = []
+            failed = False
             try:
-                batch_ids, _batch_lps = agent.act_batch(
-                    contexts=batch_contexts,
-                    n_tokens=max_new_tokens,
-                    temperature=temperature,
-                    eos_token_ids=eos_token_ids,
-                )
+                for i in range(0, len(batch_contexts), CHUNK):
+                    chunk_ids, _ = agent.act_batch(
+                        contexts=batch_contexts[i : i + CHUNK],
+                        n_tokens=max_new_tokens,
+                        temperature=temperature,
+                        eos_token_ids=eos_token_ids,
+                    )
+                    batch_ids.extend(chunk_ids)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
             except Exception as e:
+                failed = True
                 _LOG.warning(
                     "Snapshot batched sampling failed for agent %s: %s",
                     agent_id, e,
@@ -149,7 +161,7 @@ def collect_snapshot(
                     per_agent[ctx_id].append(
                         {"text": "", "tokens": 0, "error": str(e)}
                     )
-            else:
+            if not failed:
                 for (ctx_id, _k), token_ids in zip(batch_meta, batch_ids):
                     text = tokenizer.decode(token_ids, skip_special_tokens=False)
                     per_agent[ctx_id].append(

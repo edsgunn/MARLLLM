@@ -51,6 +51,29 @@ Or install as a library into another project:
 uv add git+https://github.com/you/MARLLLM
 ```
 
+### Installation on Isambard (with vLLM rollout)
+
+The `.venv` for Isambard is built **not** with `uv sync` but via the
+Isambard tutorial recipe ([docs](https://docs.isambard.ac.uk/user-documentation/tutorials/distributed-inference/)),
+which pins torch to the cu129 wheel that vLLM 0.15.x requires. The build is
+performed inside an `srun` GPU allocation so wheel resolution detects CUDA:
+
+```bash
+sbatch slurm_scripts/install_vllm.sh   # wipes .venv and rebuilds it
+```
+
+> ⚠️  **Do not run `uv sync` against the Isambard venv.**
+> `uv sync` reads `pyproject.toml` and regenerates `uv.lock` against PyPI
+> defaults — it will pull a different torch than the one vLLM was built
+> against and silently break the rollout path. To add a package, use
+> `uv pip install <pkg>` (operates on the active venv, doesn't touch the
+> lockfile). To rebuild from scratch, re-run `slurm_scripts/install_vllm.sh`.
+
+The login node can still run anything that doesn't touch CUDA kernels:
+`submit_batch.py`, `scripts/plot_results.py`, etc. Importing `torch` works
+(returns `cuda.is_available() == False`); importing `vllm` may not — but
+those scripts don't need it.
+
 ---
 
 ## Quickstart

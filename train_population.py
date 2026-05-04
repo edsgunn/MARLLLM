@@ -447,6 +447,12 @@ def parse_args() -> argparse.Namespace:
                         "to debug; useful if you hit graph-capture issues.")
     p.add_argument("--vllm-dtype", default="bfloat16",
                    help="Dtype for the vLLM engine (bfloat16 / float16 / auto).")
+    p.add_argument("--vllm-quantization", default=None,
+                   help="Quantization for vLLM weights (e.g. 'fp8'). Halves "
+                        "weight memory at minor accuracy cost. Default: none.")
+    p.add_argument("--use-8bit-adam", action="store_true",
+                   help="Use bitsandbytes' AdamW8bit. Halves optimizer state "
+                        "memory at no expressiveness cost.")
 
     # ── Training ──────────────────────────────────────────────────────────
     p.add_argument("--iters",          type=int,   default=500)
@@ -760,6 +766,7 @@ def main() -> None:
         max_episode_tokens=args.max_episode_tokens,
         num_iterations=args.iters,
         lr=args.lr,
+        use_8bit_adam=args.use_8bit_adam,
         log_every=args.log_every,
         checkpoint_every=args.checkpoint_every,
         num_checkpoint_traces=args.num_checkpoint_traces,
@@ -818,6 +825,8 @@ def main() -> None:
             max_num_seqs=args.vllm_max_num_seqs,
             enforce_eager=args.vllm_enforce_eager,
             dtype=args.vllm_dtype,
+            quantization=args.vllm_quantization,
+            local_rank=ddp_local_rank,
         )
         print("vLLM sampling engine ready.")
 

@@ -248,6 +248,11 @@ class ForumEnv(AECEnv):
             self._rng = random.Random(seed)
 
         self.agents = list(self.possible_agents)
+        if self._post_order == "round_robin":
+            # Shuffle the round-robin permutation per episode so the same
+            # agent doesn't always open — otherwise the opener anchors the
+            # whole thread to their interests every time.
+            self._rng.shuffle(self.agents)
         self._pending_posts = {a: [] for a in self.agents}
         self._initial_delivered = {a: False for a in self.agents}
         self._post_count = 0

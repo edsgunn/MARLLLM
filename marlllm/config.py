@@ -53,6 +53,9 @@ class TrainingConfig:
     num_iterations: int = 500
     lr: float = 3e-5
     log_every: int = 10
+    # Use bitsandbytes' 8-bit AdamW (halves optimizer state vs fp32 m/v).
+    # Saves ~5-10 GB on a 7B-LoRA setup with no expressiveness loss.
+    use_8bit_adam: bool = False
 
     # Device
     device: str = "cpu"

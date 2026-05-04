@@ -66,6 +66,8 @@ class VLLMSamplingEngine:
         adapter_dir: str | None = None,
         enforce_eager: bool = False,
         max_num_seqs: int | None = None,
+        quantization: str | None = None,
+        local_rank: int = 0,
     ) -> None:
         try:
             import vllm  # noqa: F401
@@ -115,9 +117,54 @@ class VLLMSamplingEngine:
             llm_kwargs["max_model_len"] = max_model_len
         if max_num_seqs is not None:
             llm_kwargs["max_num_seqs"] = max_num_seqs
+        if quantization is not None:
+            llm_kwargs["quantization"] = quantization
 
-        logger.info("Constructing vllm.LLM(%s)", llm_kwargs)
-        self._llm = LLM(**llm_kwargs)
+        # Construct vLLM in an isolated env so the spawned EngineCore subprocess
+        # is independent of the trainer's distributed setup:
+        #   * CUDA_VISIBLE_DEVICES → pin to this rank's GPU (else every engine
+        #     collides on cuda:0 and OOMs).
+        #   * WORLD_SIZE / RANK / LOCAL_RANK / MASTER_ADDR / MASTER_PORT (set
+        #     by torchrun) → must be cleared. Otherwise the EngineCore inherits
+        #     them and torch.distributed.init_process_group inside the engine
+        #     waits for `WORLD_SIZE-1` peers to join its private TCPStore.
+        #     They never do → 600s timeout per engine, no progress.
+        # Env is restored after LLM() so the trainer's DDP context is intact.
+        _env_overrides = {
+            "CUDA_VISIBLE_DEVICES": str(local_rank),
+            "WORLD_SIZE": None,
+            "RANK": None,
+            "LOCAL_RANK": None,
+            "LOCAL_WORLD_SIZE": None,
+            "MASTER_ADDR": None,
+            "MASTER_PORT": None,
+            "GROUP_RANK": None,
+            "ROLE_RANK": None,
+            "ROLE_WORLD_SIZE": None,
+            "TORCHELASTIC_RUN_ID": None,
+            "TORCHELASTIC_RESTART_COUNT": None,
+            "TORCHELASTIC_MAX_RESTARTS": None,
+            "TORCHELASTIC_USE_AGENT_STORE": None,
+        }
+        _saved_env = {k: os.environ.get(k) for k in _env_overrides}
+        for k, v in _env_overrides.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        try:
+            logger.info(
+                "Constructing vllm.LLM on local_rank=%d "
+                "(CUDA_VISIBLE_DEVICES=%s, torchrun env scrubbed): %s",
+                local_rank, os.environ.get("CUDA_VISIBLE_DEVICES"), llm_kwargs,
+            )
+            self._llm = LLM(**llm_kwargs)
+        finally:
+            for k, v in _saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     # ------------------------------------------------------------------ #
     # Adapter management                                                  #
@@ -250,6 +297,26 @@ class VLLMSamplingEngine:
             all_ids.append(ids)
             all_lps.append(lps)
         return all_ids, all_lps
+
+    # ------------------------------------------------------------------ #
+    # Sleep / wake (memory ↔ CPU) so the trainer can use the GPU         #
+    # ------------------------------------------------------------------ #
+
+    def sleep(self, level: int = 2) -> None:
+        """Offload vLLM weights (level=1) or weights+KV cache (level=2) to CPU.
+
+        Call between rollouts to free GPU memory for the loss/backward step.
+        Idempotent — calling sleep() on an already-asleep engine is a no-op.
+        """
+        if not getattr(self, "_is_asleep", False):
+            self._llm.sleep(level=level)
+            self._is_asleep = True
+
+    def wake_up(self) -> None:
+        """Restore vLLM weights and KV cache to GPU. Idempotent."""
+        if getattr(self, "_is_asleep", False):
+            self._llm.wake_up()
+            self._is_asleep = False
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                           #

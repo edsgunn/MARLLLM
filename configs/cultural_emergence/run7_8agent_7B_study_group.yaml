@@ -13,6 +13,16 @@ model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
+# Memory-tuned for vLLM + DDP co-location on 4 × GH200 (95 GB each):
+#   - lora_modules: q,v only (~5x less LoRA than all-7-projection default)
+#   - use_8bit_adam: bitsandbytes AdamW8bit (halves Adam state)
+#   - vllm_quantization: fp8 (halves vLLM weight memory ~17 GB → ~9 GB)
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
 characters:
 - Priya Shah
 - Tom Whitaker
@@ -39,7 +49,7 @@ num_checkpoint_traces: 8
 snapshot_eval_path: eval_contexts/study_group.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 384
-max_episode_tokens: 32768
+max_episode_tokens: 24576
 environments:
 - name: study_group
   type: forum

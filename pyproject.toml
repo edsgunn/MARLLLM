@@ -1,3 +1,12 @@
+# =============================================================================
+# Isambard note: do NOT run `uv sync` against the venv on Isambard.
+# The venv is built via slurm_scripts/install_vllm.sh following the Isambard
+# vLLM tutorial recipe (torch+cu129, vllm[flashinfer]==0.15.1). `uv sync` will
+# regenerate uv.lock against PyPI defaults and pull a torch version that breaks
+# vLLM. To add packages ad-hoc use `uv pip install <pkg>`; to rebuild the venv
+# re-run install_vllm.sh. See README.md § "Installation on Isambard".
+# =============================================================================
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -38,4 +47,18 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["marlllm", "envs"]
+
+# Pin torch to the CUDA 12.9 wheel index that vLLM 0.15.x is built against.
+# Without this, `uv sync` resolves torch from PyPI defaults (CPU or cu12x build
+# of-the-day) and corrupts the vllm-compatible install. Editors that auto-run
+# `uv sync` on pyproject.toml saves are the most common trigger.
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu129" }
+torchvision = { index = "pytorch-cu129" }
+torchaudio = { index = "pytorch-cu129" }
 

@@ -250,7 +250,11 @@ class PopulationTrainer:
                 if id(p) not in seen_ids:
                     seen_ids.add(id(p))
                     all_params.append(p)
-        self.optimizer = AdamW(all_params, lr=config.lr)
+        if getattr(config, "use_8bit_adam", False):
+            import bitsandbytes as bnb
+            self.optimizer = bnb.optim.AdamW8bit(all_params, lr=config.lr)
+        else:
+            self.optimizer = AdamW(all_params, lr=config.lr)
 
         # Data-parallel state. When world_size > 1 each rank runs an independent
         # train() loop on its own slice of episodes; gradients are all-reduced
@@ -477,6 +481,20 @@ class PopulationTrainer:
             1, self.config.episodes_per_iter // self.ddp_world_size
         )
 
+        # ── Baseline rollout at iter 0 (before any training) ──────────────
+        # Collect a batch of episodes from the untrained policy and dump
+        # traces so we have a "what does the model do out of the box" record
+        # to compare later checkpoints against. Only on a fresh run.
+        if start_iteration == 1:
+            baseline_episodes: list[_RawEpisode] = self._collect_episodes_batched(
+                local_episodes_per_iter
+            )
+            if self.is_main_rank:
+                self._write_checkpoint_traces(0, baseline_episodes)
+            if self.ddp:
+                import torch.distributed as dist
+                dist.barrier()
+
         for iteration in range(start_iteration, self.config.num_iterations + 1):
 
             if torch.cuda.is_available():
@@ -585,6 +603,11 @@ class PopulationTrainer:
                 self.sampling_engine.sync_all_adapters(self._sampling_engine_peft_model)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
+                # Release the caching allocator's reserved-but-unallocated blocks
+                # so subsequent steps (DDP metric reduce, next iter's rollout
+                # forward) have room. Without this, fragmentation builds across
+                # many small backward calls and tiny allocations later OOM.
+                torch.cuda.empty_cache()
             optim_s = time.perf_counter() - _t_phase
 
             # ── 4. Metrics ────────────────────────────────────────────────
@@ -660,11 +683,17 @@ class PopulationTrainer:
 
                 self._write_metrics_jsonl(all_metrics)
 
+                if iteration % self.config.log_every == 0:
+                    self._auto_plot_training_curves()
+
                 if iteration % self.config.checkpoint_every == 0:
                     self.save_checkpoint(iteration)
                     self._write_checkpoint_traces(iteration, raw_episodes)
                     self._write_behavioral_snapshot(iteration)
-                    self._auto_plot_training_curves()
+                    # Snapshot eval allocates large activation buffers and leaves
+                    # the caching allocator fragmented; release before next iter.
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
             # All ranks barrier here so non-main ranks don't race ahead while
             # rank 0 is doing slow snapshot/checkpoint I/O. Without this, rank 0

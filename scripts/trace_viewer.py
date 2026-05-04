@@ -25,9 +25,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+_ASSISTANT_TURN_RE = re.compile(
+    r"<\|im_start\|>assistant\n(.*?)<\|im_end\|>", re.DOTALL
+)
+_THINK_RE = re.compile(r"\s*<think>(.*?)</think>", re.DOTALL)
+
+
+def _extract_thinkings(context_text: str) -> list[str]:
+    """Extract per-assistant-turn thinking blocks (empty string if absent)."""
+    out: list[str] = []
+    for turn in _ASSISTANT_TURN_RE.findall(context_text or ""):
+        m = _THINK_RE.match(turn)
+        out.append(m.group(1).strip() if m else "")
+    return out
 
 # ── Embedded HTML/JS/CSS ──────────────────────────────────────────────────────
 
@@ -176,6 +191,19 @@ _HTML = r"""<!DOCTYPE html>
   .forum-post-body { padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
                      white-space: pre-wrap; word-break: break-word; line-height: 1.55;
                      color: var(--text); background: rgba(0,0,0,0.25); }
+  .forum-think { margin: 0; background: rgba(255,255,255,0.03);
+                 border-bottom: 1px dashed rgba(255,255,255,0.12); }
+  .forum-think > summary { padding: 4px 12px; cursor: pointer; font-size: 10px;
+                           font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+                           color: #aab; list-style: none; user-select: none; }
+  .forum-think > summary::-webkit-details-marker { display: none; }
+  .forum-think > summary::before { content: '▸ '; display: inline-block; width: 1em;
+                                   transition: transform 0.1s; color: #889; }
+  .forum-think[open] > summary::before { content: '▾ '; }
+  .forum-think > summary:hover { color: #ccd; }
+  .forum-think-body { padding: 8px 14px 10px; font-family: var(--font-mono); font-size: 12px;
+                      white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+                      color: #99a; font-style: italic; }
 
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -854,11 +882,19 @@ function renderForumView(trace) {
   thread.forEach(post => {
     const speaker = post.speaker || '(unknown)';
     const c = agentColor(speaker, agents);
+    let thinkHtml = '';
+    if (post.thinking) {
+      thinkHtml = '<details class="forum-think">'
+                + '<summary>thinking</summary>'
+                + '<div class="forum-think-body">' + esc(post.thinking) + '</div>'
+                + '</details>';
+    }
     html += '<div class="forum-post" style="border-color:' + c.border + '">'
           + '<div class="forum-post-hdr" style="background:' + c.bg + '">'
           + esc(speaker)
           + '<span class="post-idx">#' + esc(post.post_index) + '</span>'
           + '</div>'
+          + thinkHtml
           + '<div class="forum-post-body">' + esc(post.text || '') + '</div>'
           + '</div>';
   });
@@ -929,17 +965,31 @@ def _convert_forum_records(records: list, trace_name: str) -> dict:
             if a not in all_agents:
                 all_agents.append(a)
         contexts = {}
+        thinkings_by_agent: dict[str, list[str]] = {}
         for aid, at in agents_raw.items():
             if isinstance(at, dict):
-                contexts[aid] = at.get("context_text", "")
+                ctx_text = at.get("context_text", "")
             else:
-                contexts[aid] = str(at)
+                ctx_text = str(at)
+            contexts[aid] = ctx_text
+            thinkings_by_agent[aid] = _extract_thinkings(ctx_text)
+
+        thread = list(env_t.get("thread") or [])
+        speaker_post_counts: dict[str, int] = {}
+        for post in thread:
+            speaker = post.get("speaker")
+            n = speaker_post_counts.get(speaker, 0)
+            speaker_post_counts[speaker] = n + 1
+            thinks = thinkings_by_agent.get(speaker, [])
+            if n < len(thinks) and thinks[n]:
+                post["thinking"] = thinks[n]
+
         ep_meta = {k: v for k, v in env_t.items() if k != "thread" and k != "agents"}
         episodes.append({
             "episode": rec.get("episode", 0),
             "meta": ep_meta,
             "participating_agents": ep_agents,
-            "thread": env_t.get("thread") or [],
+            "thread": thread,
             "agent_contexts": contexts,
         })
     return {
