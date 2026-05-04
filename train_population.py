@@ -50,9 +50,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import torch
+# Triton's JIT picks the C compiler from Python sysconfig, which on Isambard
+# resolves to `nvc` (NVIDIA HPC SDK). nvc rejects `-Wno-psabi` and every kernel
+# build fails — force gcc before torch/vllm import so the runtime sees it.
+os.environ.setdefault("CC", "gcc")
+os.environ.setdefault("CXX", "g++")
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+import torch  # noqa: E402
 
 
 def _auto_device(fallback: str = "cpu") -> str:
@@ -424,11 +429,12 @@ def parse_args() -> argparse.Namespace:
                    help="Comma-separated module names for LoRA. None = auto-detect.")
 
     # ── vLLM rollout (optional) ───────────────────────────────────────────
-    p.add_argument("--use-vllm", action="store_true",
-                   help="Use vLLM for rollout sampling. Requires --lora-shared-base. "
-                        "After each optimizer.step() the LoRA adapters are saved to "
-                        "disk and re-registered with vLLM so the next rollout sees "
-                        "the latest weights.")
+    p.add_argument("--use-vllm", action=argparse.BooleanOptionalAction, default=True,
+                   help="Use vLLM for rollout sampling (default: on). Requires "
+                        "--lora-shared-base. After each optimizer.step() the LoRA "
+                        "adapters are saved to disk and re-registered with vLLM so "
+                        "the next rollout sees the latest weights. Pass --no-use-vllm "
+                        "(or set use_vllm: false in YAML) to fall back to HF rollout.")
     p.add_argument("--vllm-gpu-mem-util", type=float, default=0.45,
                    help="vLLM gpu_memory_utilization. Must leave room for the "
                         "training model on the same GPU. Lower this if you OOM.")
@@ -787,12 +793,12 @@ def main() -> None:
 
     sampling_engine = None
     sampling_engine_peft_model = None
+    if args.use_vllm and not args.lora_shared_base:
+        print("[WARN] use_vllm is on but lora_shared_base is off — vLLM rollout "
+              "only supports the LoRA-shared-base path. Falling back to HF "
+              "rollout. Pass --no-use-vllm to silence this warning.")
+        args.use_vllm = False
     if args.use_vllm:
-        if not args.lora_shared_base:
-            raise ValueError(
-                "--use-vllm currently only supports the --lora-shared-base path. "
-                "Full fine-tuning would need a different weight-sync mechanism."
-            )
         from marlllm.vllm_engine import VLLMSamplingEngine
         # All LoRA-shared-base agents reference the same peft_model on first_agent.
         sampling_engine_peft_model = first_agent._backbone

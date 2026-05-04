@@ -144,8 +144,24 @@ class VLLMSamplingEngine:
             except TypeError:
                 # Older peft: save_pretrained doesn't take selected_adapters.
                 peft_model.save_pretrained(str(path))
+
+            # PEFT's save_pretrained writes any non-"default" named adapter
+            # into a `<save_dir>/<adapter_name>/` subdirectory, not directly
+            # into save_dir. vLLM's LoRARequest.lora_path must point at the
+            # directory that actually contains adapter_config.json, so resolve
+            # it explicitly here. Fall back to `path` for the "default" case.
+            actual_path = path / name
+            if not (actual_path / "adapter_config.json").is_file():
+                if (path / "adapter_config.json").is_file():
+                    actual_path = path
+                else:
+                    raise FileNotFoundError(
+                        f"adapter_config.json not found after save_pretrained "
+                        f"under {path} (checked {path}/ and {actual_path}/). "
+                        f"Contents: {list(path.rglob('*'))[:20]}"
+                    )
             self._current_ids[name] = int_id
-            self._current_paths[name] = path
+            self._current_paths[name] = actual_path
         finally:
             if prev_active is not None and prev_active != name:
                 try:

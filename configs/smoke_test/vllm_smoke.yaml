@@ -10,6 +10,13 @@ model: Qwen/Qwen2.5-1.5B-Instruct
 dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
+# vLLM rollout — toggled here in config rather than via CLI flags.
+use_vllm: true
+vllm_gpu_mem_util: 0.40
+vllm_dtype: bfloat16
+vllm_enforce_eager: true
+vllm_max_model_len: 2048
+vllm_max_num_seqs: 16
 characters:
 - Silas Varnham
 - Thaddeus 'Aurelius' Thorne
