@@ -1,8 +1,8 @@
-# 8-agent counterpart to run4_2agent_7B_conjecture: same 7B base, same task
-# regime as run5_8agent_7B but on the Conjecture Inn extended-8 roster.
+# 8-agent counterpart to run4_2agent_7B_study_group: same 7B base, same task
+# regime as run5_8agent_7B but on the Study Group extended-8 roster.
 # Hyperparameters mirror run5 so any difference is attributable to the
 # substantive forum domain rather than capacity / scheduling.
-name: run5_8agent_7B_conjecture
+name: run5_8agent_7B_study_group
 script: train_population
 slurm:
   gpus_per_node: 4
@@ -12,14 +12,14 @@ dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
 characters:
-- Iris Halverson
-- Misha Volkov
-- Alice Chen
-- Bertrand Lefebvre
-- Ravi Nair
-- Yuki Tanaka
-- Henrik Voss
-- Cordelia Marsh
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+- Marcus Webb
 lora_shared_base: true
 lora_r: 64
 lora_alpha: 128
@@ -34,19 +34,19 @@ seed: 1
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
-snapshot_eval_path: eval_contexts/conjecture_inn.json
+snapshot_eval_path: eval_contexts/study_group.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 128
 max_episode_tokens: 24576
 environments:
-- name: conjecture_inn
+- name: study_group
   type: forum
-  scenario: conjecture_inn
+  scenario: study_group
   token_budget: 128
   character_set: extended_8
   max_posts: 16
   post_order: round_robin
-output_dir: runs/cultural_emergence/run5_8agent_7B_conjecture
+output_dir: runs/cultural_emergence/run5_8agent_7B_study_group
 gradient_checkpointing: true
 
 # Variance-decomposition diagnostic. K, M, n_contexts halved vs the 2-agent

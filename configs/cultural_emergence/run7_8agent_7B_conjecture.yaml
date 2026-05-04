@@ -1,8 +1,10 @@
-# 8-agent counterpart to run4_2agent_7B_conjecture: same 7B base, same task
-# regime as run5_8agent_7B but on the Conjecture Inn extended-8 roster.
-# Hyperparameters mirror run5 so any difference is attributable to the
-# substantive forum domain rather than capacity / scheduling.
-name: run5_8agent_7B_conjecture
+# Run 7 — 8-agent thinking-tokens variant on the Conjecture Inn scenario.
+# Identical to run5_8agent_7B_conjecture except `thinking_enabled: true`.
+# Public post budget held at 128 (matching run5 exactly).  Total budget
+# (thinking + post combined) is 384 — the model is told both numbers and
+# learns to split between private reasoning and public post within those
+# two limits.
+name: run7_8agent_7B_conjecture
 script: train_population
 slurm:
   gpus_per_node: 4
@@ -36,24 +38,21 @@ checkpoint_every: 25
 num_checkpoint_traces: 8
 snapshot_eval_path: eval_contexts/conjecture_inn.json
 snapshot_samples_per_context: 8
-snapshot_max_new_tokens: 128
-max_episode_tokens: 24576
+snapshot_max_new_tokens: 384
+max_episode_tokens: 32768
 environments:
 - name: conjecture_inn
   type: forum
   scenario: conjecture_inn
-  token_budget: 128
+  post_token_budget: 128
+  total_token_budget: 384
   character_set: extended_8
   max_posts: 16
   post_order: round_robin
-output_dir: runs/cultural_emergence/run5_8agent_7B_conjecture
+  thinking_enabled: true
+output_dir: runs/cultural_emergence/run7_8agent_7B_conjecture
 gradient_checkpointing: true
 
-# Variance-decomposition diagnostic. K, M, n_contexts halved vs the 2-agent
-# run because here we have 8 focal agents to evaluate per call (the K*M
-# continuation cost is per context, not per agent — but with 32 contexts
-# spread across 8 agents you'd get ~4 per agent which is too few for a
-# stable signal/noise estimate; raising n_contexts compensates).
 var_decomp_enabled: false
 var_decomp_n_contexts: 64
 var_decomp_K: 4

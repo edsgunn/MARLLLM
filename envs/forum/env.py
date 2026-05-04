@@ -104,11 +104,17 @@ class ForumEnv(AECEnv):
         initial_invitation: str = (
             "A new thread has just opened on the forum. The discussion is active."
         ),
-        action_token_budget: int = 128,
+        action_token_budget: int | None = None,
         max_posts: int = 12,
         post_order: str = "round_robin",
         seed: int | None = None,
         reward_fn: Callable[[Any, str], float] | None = None,
+        post_length_note: str | None = None,
+        thinking_enabled: bool = False,
+        thinking_open_tag: str = "<think>",
+        thinking_close_tag: str = "</think>",
+        post_token_budget: int | None = None,
+        total_token_budget: int | None = None,
     ) -> None:
         super().__init__()
 
@@ -117,7 +123,37 @@ class ForumEnv(AECEnv):
         self._tok = tokenizer
         self._forum_description = forum_description
         self._initial_invitation = initial_invitation
-        self.action_token_budget = action_token_budget
+        # Budget model:
+        #   * ``post_token_budget``  — instructed cap on the public post
+        #     (the part that lands in every OTHER agent's context).  The
+        #     forum cares about this number; the model is told it explicitly.
+        #   * ``total_token_budget`` — hard cap on tokens generated this
+        #     turn (thinking + post combined).  This is what the trainer
+        #     enforces via ``action_token_budget``.  When thinking is
+        #     enabled the model is shown this number and learns to balance
+        #     how many of the total tokens go to private reasoning vs the
+        #     public post — the only constraint is post ≤ post_budget and
+        #     total ≤ total_budget.
+        #   * ``action_token_budget`` — legacy single-number alias.  When
+        #     supplied (and the new fields are not), it is taken as the
+        #     total cap, with the post cap defaulting to the same value.
+        self._post_token_budget = (
+            int(post_token_budget) if post_token_budget is not None
+            else (int(action_token_budget) if action_token_budget is not None else 128)
+        )
+        if total_token_budget is not None:
+            total = int(total_token_budget)
+        elif action_token_budget is not None:
+            total = int(action_token_budget)
+        else:
+            total = self._post_token_budget
+        if total < self._post_token_budget:
+            raise ValueError(
+                f"total_token_budget ({total}) must be >= post_token_budget "
+                f"({self._post_token_budget})."
+            )
+        self._total_token_budget = total
+        self.action_token_budget = total
         self._max_posts = int(max_posts)
         if post_order not in ("round_robin", "random"):
             raise ValueError(
@@ -127,6 +163,30 @@ class ForumEnv(AECEnv):
         self._seed = seed
         self._rng = random.Random(seed)
         self._reward_fn = reward_fn if reward_fn is not None else (lambda _s, _a: 0.0)
+
+        # Optional "thinking tokens" toggle.  When enabled the model is told
+        # it may write private reasoning between ``<think>`` and ``</think>``
+        # before its final post.  The agent's own context keeps the raw
+        # action tokens (the trainer's append-only path is unchanged), but
+        # the env strips the tagged regions before recording the post on the
+        # canonical thread or delivering it to other agents.
+        self._thinking_enabled = bool(thinking_enabled)
+        self._thinking_open_tag = thinking_open_tag
+        self._thinking_close_tag = thinking_close_tag
+
+        # Optional sentence appended to the initial ctx so the model is told
+        # up-front roughly how long a post is allowed to be — small instruct
+        # models otherwise frequently exceed the per-turn token budget and
+        # get cut off mid-sentence.  ``None`` → derive from action_token_budget.
+        if post_length_note is None:
+            post_words = max(1, int(self._post_token_budget * 0.7))
+            post_length_note = (
+                f"Posts on this forum are capped at about {self._post_token_budget} "
+                f"tokens (roughly {post_words} words). Anything longer is cut off "
+                f"mid-sentence, so keep each post within that budget — finish your "
+                f"thought before you run out of room."
+            )
+        self._post_length_note = post_length_note
 
         # PettingZoo AEC state — populated in reset()
         self.agents: list[str] = []
@@ -169,6 +229,12 @@ class ForumEnv(AECEnv):
             post_order=self._post_order,
             seed=self._seed,
             reward_fn=self._reward_fn,
+            post_length_note=self._post_length_note,
+            thinking_enabled=self._thinking_enabled,
+            thinking_open_tag=self._thinking_open_tag,
+            thinking_close_tag=self._thinking_close_tag,
+            post_token_budget=self._post_token_budget,
+            total_token_budget=self._total_token_budget,
         )
         memo[id(self)] = new
         return new
@@ -267,14 +333,64 @@ class ForumEnv(AECEnv):
         try:
             ids = list(action)
         except TypeError:
-            return str(action)
-        if not ids:
-            return ""
-        return self._tok.decode(ids, skip_special_tokens=True)
+            text = str(action)
+        else:
+            if not ids:
+                return ""
+            text = self._tok.decode(ids, skip_special_tokens=True)
+        if self._thinking_enabled:
+            text = self._strip_thinking(text)
+        return text
+
+    def _strip_thinking(self, text: str) -> str:
+        """Remove ``<think>...</think>`` regions from a generated post.
+
+        Only the public post is forwarded to the canonical thread and to
+        other agents.  Unclosed thinking blocks (e.g. when the agent ran
+        out of token budget mid-reasoning) are dropped from the close tag
+        on, which is the right behaviour: the partial reasoning shouldn't
+        leak into the public thread.
+        """
+        o, c = self._thinking_open_tag, self._thinking_close_tag
+        out: list[str] = []
+        i = 0
+        while i < len(text):
+            j = text.find(o, i)
+            if j < 0:
+                out.append(text[i:])
+                break
+            out.append(text[i:j])
+            k = text.find(c, j + len(o))
+            if k < 0:
+                break  # unclosed — drop the rest
+            i = k + len(c)
+        return "".join(out).strip()
 
     def _render_initial_ctx(self) -> str:
         """First-observation framing each agent sees once."""
-        return f"{self._forum_description}\n\n{self._initial_invitation}"
+        parts = [self._forum_description, self._initial_invitation]
+        if self._post_length_note:
+            parts.append(self._post_length_note)
+        if self._thinking_enabled:
+            post_words = max(1, int(self._post_token_budget * 0.7))
+            total_words = max(1, int(self._total_token_budget * 0.7))
+            parts.append(
+                f"Before each post you may write private reasoning between "
+                f"{self._thinking_open_tag} and {self._thinking_close_tag}. "
+                f"Anything inside those tags stays in your own private notes "
+                f"and is not shown to other forum members; only the text "
+                f"outside the tags is posted. Two limits: the public post "
+                f"itself must stay under about {self._post_token_budget} "
+                f"tokens (~{post_words} words), and the total of thinking + "
+                f"post combined must stay under about "
+                f"{self._total_token_budget} tokens (~{total_words} words) "
+                f"— anything past the total is cut off mid-sentence. Within "
+                f"those two limits you can spend as much or as little as "
+                f"you like on private reasoning. Always close "
+                f"{self._thinking_close_tag} before you start writing the "
+                f"post."
+            )
+        return "\n\n".join(p for p in parts if p)
 
     def _frame_posts(self, posts: list[tuple[str, str]]) -> str:
         """Render new partner posts as direct-speech narrative.
@@ -358,60 +474,3 @@ class ForumEnv(AECEnv):
         pass
 
 
-# ---------------------------------------------------------------------------
-# Convenience constructor
-# ---------------------------------------------------------------------------
-
-
-def make_robotic_athanor_forum(
-    *,
-    tokenizer: PreTrainedTokenizerBase,
-    character_set: str = "canonical_4",
-    max_posts: int = 12,
-    post_order: str = "round_robin",
-    action_token_budget: int = 128,
-    seed: int | None = None,
-) -> ForumEnv:
-    """Build a ForumEnv configured with the Robotic Athanor character roster."""
-    from envs.robotic_athanor_personas import (
-        FORUM_DESCRIPTION, get_character_set, get_personas,
-    )
-    return ForumEnv(
-        agent_names=get_character_set(character_set),
-        agent_personas=get_personas(character_set),
-        tokenizer=tokenizer,
-        forum_description=FORUM_DESCRIPTION,
-        action_token_budget=action_token_budget,
-        max_posts=max_posts,
-        post_order=post_order,
-        seed=seed,
-    )
-
-
-def make_conjecture_inn_forum(
-    *,
-    tokenizer: PreTrainedTokenizerBase,
-    character_set: str = "canonical_4",
-    max_posts: int = 12,
-    post_order: str = "round_robin",
-    action_token_budget: int = 128,
-    seed: int | None = None,
-) -> ForumEnv:
-    """Build a ForumEnv configured with the Conjecture Inn character roster."""
-    from envs.conjecture_inn_personas import (
-        FORUM_DESCRIPTION, get_character_set, get_personas,
-    )
-    return ForumEnv(
-        agent_names=get_character_set(character_set),
-        agent_personas=get_personas(character_set),
-        tokenizer=tokenizer,
-        forum_description=FORUM_DESCRIPTION,
-        initial_invitation=(
-            "A new thread has just opened in the Open Conjectures section. "
-            "The forum is active and members are posting throughout the day."
-        ),
-        action_token_budget=action_token_budget,
-        max_posts=max_posts,
-        post_order=post_order,
-        seed=seed,
-    )

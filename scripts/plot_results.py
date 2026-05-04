@@ -55,6 +55,25 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
     if not rows:
         return None
 
+    # Deduplicate restart-overlap rows.
+    # When training is resumed from checkpoint N, iterations N+1..K may be
+    # logged twice in metrics.jsonl: once by the original run before it died,
+    # and again by the resumed run. Plotting both produces a visible jump back
+    # in time. We keep the *last* record per iteration (the resumed run's
+    # values are the ones that match the saved weights) and re-sort by
+    # iteration ascending. Original metrics.jsonl on disk is untouched — this
+    # is purely a load-time view.
+    if any("iteration" in r for r in rows):
+        deduped: dict[int, dict] = {}
+        no_iter: list[dict] = []
+        for r in rows:
+            it = r.get("iteration")
+            if it is None:
+                no_iter.append(r)
+            else:
+                deduped[int(it)] = r  # later occurrences overwrite earlier
+        rows = [deduped[k] for k in sorted(deduped.keys())] + no_iter
+
     keys = list(rows[0].keys())
     data: dict[str, np.ndarray] = {}
     for k in keys:
@@ -72,6 +91,8 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
         "time",          # wall-time breakdown
         "rollout",       # rollout-stage stats
         "agents",        # already-stacked aggregates (don't re-discover)
+        "gen",           # per-env generation-token diagnostics
+        "eval",          # var-decomp diagnostics
     }
     entity_metrics: dict[str, set[str]] = {}  # prefix -> set of metric names
     for k in keys:
@@ -118,6 +139,29 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
     return data
 
 
+def plot_experiment(exp_dir: Path) -> Path | None:
+    """Generate ``training_curves.png`` (and compute_utilization if telemetry
+    is present) for a single experiment directory.
+
+    Used both by the CLI and by the trainer's auto-plot hook. Returns the
+    training-curves PNG path, or ``None`` if no ``metrics.jsonl`` was found.
+    """
+    exp_dir = Path(exp_dir)
+    data = load_metrics(exp_dir)
+    if data is None:
+        return None
+    out = plot_training_curves(exp_dir, data)
+    try:
+        plot_compute_utilization(exp_dir, data)
+    except Exception:
+        pass
+    try:
+        plot_generation_usage(exp_dir, data)
+    except Exception:
+        pass
+    return out
+
+
 def smooth(x: np.ndarray, w: int = 10) -> np.ndarray:
     if len(x) < w:
         return x
@@ -141,113 +185,156 @@ def _agent_mean(data: dict, key: str) -> np.ndarray | None:
     return arr.mean(axis=0) if arr is not None else None
 
 
+def _plot_per_agent(ax, iters, agents_arr, agent_names, *, alpha=0.95, lw=1.2):
+    """Plot one line per agent on ``ax`` using the shared agent palette.
+
+    No legend is created on the axis itself — agent identity is conveyed by
+    a single figure-level legend assembled in ``plot_training_curves``.
+    """
+    for i, series in enumerate(agents_arr):
+        label = agent_names[i] if i < len(agent_names) else f"agent_{i}"
+        ax.plot(iters, smooth(series),
+                color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
+                label=label, alpha=alpha, linewidth=lw)
+
+
 def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     iters = data.get("iteration", np.arange(len(data["total_loss"])))
     has_kl = np.any(data.get("agents/kl", np.zeros(1)) != 0)
     agent_names: list[str] = data.get("agent_names", [])
+    n_agents = (data.get("agents/mean_return").shape[0]
+                if "agents/mean_return" in data else len(agent_names))
 
-    # Layout: 3 rows always; optional KL row appended
-    n_rows = 3 + (1 if has_kl else 0)
-    fig, axes = plt.subplots(n_rows, 2, figsize=(11, 3.5 * n_rows), squeeze=False)
-    fig.suptitle(exp_dir.name, fontsize=11, fontweight="bold")
+    # Layout (4 rows × 2 cols):
+    #   row 0 : total loss              | loss components (mean over agents)
+    #   row 1 : mean return             | value loss (per agent)
+    #   row 2 : action loss             | perception loss          ← paired
+    #   row 3 : KL from reference       | policy entropy           ← paired
+    # KL panel is shown even when kl_coef==0 (it just sits at zero); this keeps
+    # the layout stable across runs and makes the pairing obvious.
+    fig, axes = plt.subplots(4, 2, figsize=(12, 13.5), squeeze=False,
+                             sharex=True)
+    fig.suptitle(exp_dir.name, fontsize=12, fontweight="bold", y=0.995)
 
-    # ── Row 0: total loss | loss breakdown (per-component, log scale) ────────
+    # ── Row 0 col 0: total loss ──────────────────────────────────────────────
     ax = axes[0, 0]
-    ax.plot(iters, smooth(data["total_loss"]), color="#333333", label="total")
-    ax.fill_between(iters, data["total_loss"], alpha=0.10, color="#333333")
+    ax.plot(iters, smooth(data["total_loss"]), color="#222222",
+            linewidth=1.6, label="total (smoothed)")
+    ax.plot(iters, data["total_loss"], color="#222222",
+            alpha=0.18, linewidth=0.7, label="raw")
     ax.set_title("Total loss")
     ax.set_ylabel("loss")
+    ax.legend(loc="best", fontsize=7, frameon=False)
 
+    # ── Row 0 col 1: loss components (symlog) ────────────────────────────────
     ax = axes[0, 1]
     _COMP_COLORS = {"perc": "#E64B35", "act": "#4DBBD5", "value": "#F39B7F"}
-    _COMP_LABELS = {"perc": "perception (NTP on obs)", "act": "action (REINFORCE)",
+    _COMP_LABELS = {"perc": "perception (NTP on obs)",
+                    "act":  "action (REINFORCE)",
                     "value": "value"}
     any_comp = False
     for comp, color in _COMP_COLORS.items():
         mean = _agent_mean(data, f"{comp}_loss")
         if mean is not None:
-            ax.plot(iters, smooth(mean), color=color, label=_COMP_LABELS[comp])
+            ax.plot(iters, smooth(mean), color=color, label=_COMP_LABELS[comp],
+                    linewidth=1.4)
             any_comp = True
     if any_comp:
-        # Log scale because value_loss dominates by ~3 orders of magnitude
-        pos_floor = 1e-4
-        ax.set_yscale("symlog", linthresh=pos_floor)
-        ax.set_ylabel("loss (symlog scale)")
-        ax.legend(loc="upper right")
+        ax.set_yscale("symlog", linthresh=1e-4)
+        ax.set_ylabel("loss (symlog)")
+        ax.legend(loc="best", fontsize=7, frameon=False)
     ax.set_title("Loss components (mean over agents)")
 
-    # ── Row 1: mean return | policy entropy ──────────────────────────────────
+    # ── Row 1 col 0: mean return ────────────────────────────────────────────
     ax = axes[1, 0]
     if "agents/mean_return" in data:
         all_returns = data["agents/mean_return"]
         mean_ret = all_returns.mean(axis=0)
-        ax.axhline(0, color="#aaa", linewidth=0.8, linestyle="--")
+        ax.axhline(0, color="#bbb", linewidth=0.8, linestyle="--")
         ax.fill_between(iters,
                         all_returns.min(axis=0),
                         all_returns.max(axis=0),
-                        alpha=0.15, color="#4C72B0", label="agent range")
-        ax.plot(iters, smooth(mean_ret), color="#4C72B0", label="mean")
-        for i, series in enumerate(all_returns):
-            ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    alpha=0.55, linewidth=0.9)
-        ax.legend(loc="upper left")
+                        alpha=0.12, color="#4C72B0")
+        _plot_per_agent(ax, iters, all_returns, agent_names,
+                        alpha=0.55, lw=0.9)
+        ax.plot(iters, smooth(mean_ret), color="#222222",
+                linewidth=1.8, label="population mean")
+        ax.legend(loc="best", fontsize=7, frameon=False)
     ax.set_title("Mean return")
     ax.set_ylabel("return")
 
+    # ── Row 1 col 1: value loss per agent ───────────────────────────────────
     ax = axes[1, 1]
-    if "agents/entropy" in data:
-        for i, series in enumerate(data["agents/entropy"]):
-            ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
-        ax.legend(loc="upper right")
-    ax.set_title("Policy entropy (per agent)")
-    ax.set_ylabel("entropy (nats)")
+    if "agents/value_loss" in data:
+        _plot_per_agent(ax, iters, data["agents/value_loss"], agent_names)
+    ax.set_title("Value loss (per agent)")
+    ax.set_ylabel("loss")
 
-    # ── Row 2: action loss (per agent) | value loss (per agent) ──────────────
+    # ── Row 2: ACTION ‖ PERCEPTION  (paired side-by-side) ───────────────────
     ax = axes[2, 0]
     if "agents/act_loss" in data:
-        for i, series in enumerate(data["agents/act_loss"]):
-            ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
-        ax.legend(loc="upper right")
+        _plot_per_agent(ax, iters, data["agents/act_loss"], agent_names)
     ax.set_title("Action loss — REINFORCE (per agent)")
     ax.set_ylabel("loss")
 
     ax = axes[2, 1]
-    if "agents/value_loss" in data:
-        for i, series in enumerate(data["agents/value_loss"]):
-            ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
-        ax.legend(loc="upper right")
-    ax.set_title("Value loss (per agent)")
+    if "agents/perc_loss" in data:
+        _plot_per_agent(ax, iters, data["agents/perc_loss"], agent_names)
+    ax.set_title("Perception loss — NTP on obs (per agent)")
     ax.set_ylabel("loss")
 
-    # ── Row 3 (optional): KL | perception loss ───────────────────────────────
-    if has_kl:
-        ax = axes[3, 0]
-        if "agents/kl" in data:
-            for i, series in enumerate(data["agents/kl"]):
-                ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                        label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
-            ax.legend()
-        ax.set_title("KL from reference (per agent)")
-        ax.set_ylabel("KL")
+    # ── Row 3: KL ‖ ENTROPY  (paired side-by-side) ──────────────────────────
+    ax = axes[3, 0]
+    if "agents/kl" in data:
+        _plot_per_agent(ax, iters, data["agents/kl"], agent_names)
+    ax.set_title("KL from reference (per agent)"
+                 + ("" if has_kl else "  [kl_coef=0]"))
+    ax.set_ylabel("KL (nats)")
+    if not has_kl:
+        ax.set_ylim(-1, 1)
 
-        ax = axes[3, 1]
-        if "agents/perc_loss" in data:
-            for i, series in enumerate(data["agents/perc_loss"]):
-                ax.plot(iters, smooth(series), color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
-                        label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
-            ax.legend()
-        ax.set_title("Perception loss — NTP on obs tokens (per agent)")
-        ax.set_ylabel("loss")
+    ax = axes[3, 1]
+    if "agents/entropy" in data:
+        _plot_per_agent(ax, iters, data["agents/entropy"], agent_names)
+    ax.set_title("Policy entropy (per agent)")
+    ax.set_ylabel("entropy (nats)")
 
-    for ax_row in axes:
-        for ax in ax_row:
-            ax.set_xlabel("iteration")
-            ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+    # X labels + integer ticks on the bottom row only (sharex handles the rest).
+    for ax in axes[-1]:
+        ax.set_xlabel("iteration")
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
 
-    fig.tight_layout()
+    # ── Single shared agent legend (out of the way of all lines) ────────────
+    # Build proxy handles in agent order so the legend matches the colour map
+    # regardless of which axis was drawn first.
+    if n_agents > 0:
+        from matplotlib.lines import Line2D
+        handles = [
+            Line2D([0], [0], color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
+                   linewidth=2.0,
+                   label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
+            for i in range(n_agents)
+        ]
+        ncol = min(n_agents, 8)
+        fig.legend(handles=handles,
+                   loc="lower center",
+                   bbox_to_anchor=(0.5, -0.005),
+                   ncol=ncol,
+                   frameon=True,
+                   fancybox=True,
+                   framealpha=0.95,
+                   borderpad=0.6,
+                   columnspacing=1.6,
+                   handlelength=2.4,
+                   fontsize=9,
+                   title="Agents",
+                   title_fontsize=9)
+        # Reserve room at the bottom for the legend strip; tight_layout would
+        # otherwise overlap it.
+        fig.tight_layout(rect=[0, 0.035, 1, 0.975])
+    else:
+        fig.tight_layout(rect=[0, 0, 1, 0.975])
+
     out = exp_dir / "training_curves.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
@@ -420,6 +507,131 @@ def plot_compute_utilization(exp_dir: Path, data: dict[str, np.ndarray]) -> Path
 
 
 # ---------------------------------------------------------------------------
+# Per-experiment: generation-token usage (post / thinking / truncation)
+# ---------------------------------------------------------------------------
+
+def plot_generation_usage(exp_dir: Path, data: dict[str, np.ndarray]) -> Path | None:
+    """Per-env breakdown of how the model spends its token budget.
+
+    Three columns per env row:
+      - per-turn token usage (action / thinking / post) with budget guidelines
+      - budget-pressure rates (total truncation, post truncation, unclosed think)
+      - per-episode trace length and posts/episode
+
+    Returns None if the run logged no ``gen/<env>/...`` keys.
+    """
+    iters = data.get("iteration", np.arange(len(data["total_loss"])))
+    env_names = sorted({
+        k.split("/", 2)[1] for k in data.keys()
+        if k.startswith("gen/") and k.count("/") >= 2
+    })
+    if not env_names:
+        return None
+
+    # Try to read budgets from the run config so we can draw the cap lines.
+    post_caps: dict[str, float] = {}
+    total_caps: dict[str, float] = {}
+    try:
+        cfg = json.loads((exp_dir / "config.json").read_text())
+        for env_cfg in cfg.get("environments", []) or []:
+            name = env_cfg.get("name")
+            if not name:
+                continue
+            pb = env_cfg.get("post_token_budget") or env_cfg.get("token_budget")
+            tb = env_cfg.get("total_token_budget") or env_cfg.get("token_budget")
+            if pb is not None: post_caps[name]  = float(pb)
+            if tb is not None: total_caps[name] = float(tb)
+    except Exception:
+        pass
+
+    n_rows = len(env_names)
+    fig, axes = plt.subplots(n_rows, 3, figsize=(13, 3.6 * n_rows),
+                             squeeze=False, sharex=True)
+    fig.suptitle(f"{exp_dir.name} — generation token usage",
+                 fontsize=11, fontweight="bold")
+
+    for r, env in enumerate(env_names):
+        p = f"gen/{env}"
+
+        # ── col 0: per-turn token usage ────────────────────────────────
+        ax = axes[r, 0]
+        for key, label, color in [
+            (f"{p}/mean_action_tokens",   "action (think+post)", "#222222"),
+            (f"{p}/mean_thinking_tokens", "thinking",            "#8172B2"),
+            (f"{p}/mean_post_tokens",     "post",                "#4DBBD5"),
+        ]:
+            if key in data:
+                ax.plot(iters, smooth(data[key]), color=color,
+                        label=label, linewidth=1.4)
+        if env in total_caps:
+            ax.axhline(total_caps[env], color="#222222", linestyle=":",
+                       linewidth=0.8, label=f"total cap {total_caps[env]:.0f}")
+        if env in post_caps and post_caps[env] != total_caps.get(env):
+            ax.axhline(post_caps[env], color="#4DBBD5", linestyle=":",
+                       linewidth=0.8, label=f"post cap {post_caps[env]:.0f}")
+        ax.set_title(f"{env} — per-turn tokens")
+        ax.set_ylabel("tokens / turn")
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="best", fontsize=7, frameon=False)
+
+        # ── col 1: budget-pressure / behaviour rates ───────────────────
+        ax = axes[r, 1]
+        for key, label, color in [
+            (f"{p}/total_truncation_rate",   "total trunc",      "#E64B35"),
+            (f"{p}/post_truncation_rate",    "post over budget", "#F39B7F"),
+            (f"{p}/unclosed_thinking_rate",  "unclosed <think>", "#C44E52"),
+            (f"{p}/thinking_present_rate",   "thinking used",    "#8172B2"),
+            (f"{p}/thinking_frac",           "think/action frac","#55A868"),
+        ]:
+            if key in data:
+                ax.plot(iters, smooth(data[key]) * 100,
+                        color=color, label=label, linewidth=1.3)
+        ax.set_title(f"{env} — budget pressure")
+        ax.set_ylabel("% of turns / %")
+        ax.set_ylim(0, 100)
+        ax.legend(loc="best", fontsize=7, frameon=False)
+
+        # ── col 2: episode-level trace length ──────────────────────────
+        ax = axes[r, 2]
+        plotted = False
+        if f"{p}/mean_episode_total_tokens" in data:
+            ax.plot(iters, smooth(data[f"{p}/mean_episode_total_tokens"]),
+                    color="#222222", label="trace tokens (obs+act)", linewidth=1.4)
+            plotted = True
+        if f"{p}/mean_episode_act_tokens" in data:
+            ax.plot(iters, smooth(data[f"{p}/mean_episode_act_tokens"]),
+                    color="#4DBBD5", label="generated tokens", linewidth=1.3)
+            plotted = True
+        if f"{p}/max_episode_total_tokens" in data:
+            ax.plot(iters, smooth(data[f"{p}/max_episode_total_tokens"]),
+                    color="#888888", linestyle=":", linewidth=1.0,
+                    label="max trace tokens")
+            plotted = True
+        if plotted:
+            ax.set_ylabel("tokens / episode")
+            ax.set_ylim(bottom=0)
+        if f"{p}/mean_posts_per_episode" in data:
+            ax2 = ax.twinx()
+            ax2.plot(iters, smooth(data[f"{p}/mean_posts_per_episode"]),
+                     color="#DD8452", linewidth=1.0, label="posts/episode")
+            ax2.set_ylabel("posts / episode", color="#DD8452")
+            ax2.tick_params(axis="y", labelcolor="#DD8452")
+            ax2.spines["right"].set_visible(True)
+        ax.set_title(f"{env} — episode length")
+        ax.legend(loc="best", fontsize=7, frameon=False)
+
+    for ax in axes[-1]:
+        ax.set_xlabel("iteration")
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    out = exp_dir / "generation_usage.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Suite-level: comparison bar chart
 # ---------------------------------------------------------------------------
 
@@ -574,6 +786,9 @@ def main() -> None:
             out = plot_training_curves(exp_dir, all_data[exp_dir.name])
             print(f"  {out.relative_to(suite_dir.parent)}")
             out = plot_compute_utilization(exp_dir, all_data[exp_dir.name])
+            if out is not None:
+                print(f"  {out.relative_to(suite_dir.parent)}")
+            out = plot_generation_usage(exp_dir, all_data[exp_dir.name])
             if out is not None:
                 print(f"  {out.relative_to(suite_dir.parent)}")
 

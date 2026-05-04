@@ -160,7 +160,22 @@ _HTML = r"""<!DOCTYPE html>
   /* Agents chips */
   #agents-bar { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
   .agent-chip { font-size: 11px; padding: 2px 9px; border-radius: 10px;
-                background: var(--card); color: var(--text); }
+                background: var(--card); color: var(--text); display: inline-flex;
+                align-items: center; gap: 5px; }
+  .agent-chip .agent-swatch { width: 9px; height: 9px; border-radius: 50%; }
+
+  /* Forum view */
+  #forum-view { display: flex; flex-direction: column; gap: 10px; max-width: 880px; }
+  .forum-post { border-radius: 6px; overflow: hidden; border: 1px solid;
+                background: rgba(255,255,255,0.02); }
+  .forum-post-hdr { padding: 6px 12px; font-size: 12px; font-weight: 600;
+                    display: flex; align-items: center; gap: 10px;
+                    color: #fff; }
+  .forum-post-hdr .post-idx { font-family: var(--font-mono); font-size: 10px;
+                              opacity: 0.7; font-weight: 400; }
+  .forum-post-body { padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+                     white-space: pre-wrap; word-break: break-word; line-height: 1.55;
+                     color: var(--text); background: rgba(0,0,0,0.25); }
 
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -176,10 +191,14 @@ _HTML = r"""<!DOCTYPE html>
 
 <div id="main">
   <div id="toolbar">
-    <label>Episode</label>
+    <label>Iter</label>
     <select id="iter-select"><option>—</option></select>
+    <span id="ep-wrap" style="display:none"><label>Ep</label>
+      <select id="ep-select" style="background:var(--card);border:1px solid #333;color:var(--text);padding:3px 7px;border-radius:4px;font-size:12px"></select>
+    </span>
     <div class="tb-sep"></div>
     <label>View</label>
+    <button class="tb-btn"        id="btn-forum"   onclick="setMode('forum')" style="display:none">Forum</button>
     <button class="tb-btn active" id="btn-env"     onclick="setMode('env')">Environment log</button>
     <button class="tb-btn"        id="btn-context" onclick="setMode('context')">Agent context</button>
     <div id="agent-tabs"></div>
@@ -213,10 +232,27 @@ let currentExp   = null;
 let currentTrace = null;
 let currentMode  = 'env';
 let currentAgent = null;
+let currentEpisode = 0;
 let annotate     = true;
 let metricsData  = [];
 let metricsVisible = false;
 let tracesList   = [];    // array of trace stem names, e.g. ["iter_000000", ...]
+
+const FORUM_PALETTE = [
+  {bg:'#2d4a7a', border:'#4a7ab8'},
+  {bg:'#7a4a2d', border:'#b87a4a'},
+  {bg:'#2d7a4a', border:'#4ab87a'},
+  {bg:'#7a2d6a', border:'#b84aa0'},
+  {bg:'#7a702d', border:'#b8a84a'},
+  {bg:'#2d6a7a', border:'#4aa0b8'},
+  {bg:'#5a2d7a', border:'#8a4ab8'},
+  {bg:'#7a2d3a', border:'#b84a5a'},
+];
+function agentColor(agent, agentList) {
+  const idx = agentList.indexOf(agent);
+  if (idx < 0) return FORUM_PALETTE[0];
+  return FORUM_PALETTE[idx % FORUM_PALETTE.length];
+}
 
 // ── API ───────────────────────────────────────────────────────────────────────
 async function api(path) {
@@ -278,8 +314,38 @@ async function loadTrace(name) {
   try {
     const data = await api('/api/trace?exp=' + encodeURIComponent(currentExp) + '&trace=' + encodeURIComponent(name));
     currentTrace = data;
-    currentAgent = data.participating_agents[0] || null;
-    buildAgentTabs(data.participating_agents);
+    currentEpisode = 0;
+
+    const isForum = data.format === 'forum';
+    const btnForum = document.getElementById('btn-forum');
+    const btnEnv = document.getElementById('btn-env');
+    btnForum.style.display = isForum ? 'inline-block' : 'none';
+    btnEnv.style.display = isForum ? 'none' : 'inline-block';
+    if (isForum) currentMode = 'forum';
+    else if (currentMode === 'forum') currentMode = 'env';
+
+    // Episode selector for multi-episode traces
+    const epWrap = document.getElementById('ep-wrap');
+    const epSel = document.getElementById('ep-select');
+    if (isForum && data.episodes && data.episodes.length > 1) {
+      epWrap.style.display = 'inline-flex';
+      epSel.innerHTML = '';
+      data.episodes.forEach((ep, i) => {
+        const o = document.createElement('option');
+        o.value = i;
+        const pairing = (ep.meta && ep.meta.pairing) ? ep.meta.pairing : ('episode ' + ep.episode);
+        o.textContent = pairing;
+        epSel.appendChild(o);
+      });
+      epSel.value = 0;
+    } else {
+      epWrap.style.display = 'none';
+    }
+
+    const agents = currentEpisodeAgents();
+    currentAgent = agents[0] || null;
+    buildAgentTabs(agents);
+    refreshModeButtons();
     document.getElementById('iter-select').value = name;
     if (metricsVisible) updateMetricsMarker();
     render();
@@ -289,6 +355,31 @@ async function loadTrace(name) {
       '<div style="padding:40px;color:#c44;font-size:12px">Error: ' + esc(e.message) + '</div>';
   }
 }
+
+function currentEpisodeData() {
+  if (!currentTrace) return null;
+  if (currentTrace.format === 'forum') {
+    return (currentTrace.episodes || [])[currentEpisode] || null;
+  }
+  return null;
+}
+
+function currentEpisodeAgents() {
+  if (!currentTrace) return [];
+  if (currentTrace.format === 'forum') {
+    const ep = currentEpisodeData();
+    return ep ? ep.participating_agents : currentTrace.participating_agents;
+  }
+  return currentTrace.participating_agents || [];
+}
+
+document.getElementById('ep-select').onchange = function() {
+  currentEpisode = parseInt(this.value, 10) || 0;
+  const agents = currentEpisodeAgents();
+  currentAgent = agents[0] || null;
+  buildAgentTabs(agents);
+  render();
+};
 
 // ── Metrics panel ─────────────────────────────────────────────────────────────
 function toggleMetrics() {
@@ -615,11 +706,16 @@ function setupChartEvents(canvas, group, traceIters) {
 // ── Mode / view controls ──────────────────────────────────────────────────────
 function setMode(m) {
   currentMode = m;
-  ['env','context'].forEach(id => {
-    document.getElementById('btn-' + id).classList.toggle('active', id === m);
-  });
-  document.getElementById('agent-tabs').style.display = m === 'context' ? 'flex' : 'none';
+  refreshModeButtons();
   render();
+}
+
+function refreshModeButtons() {
+  ['forum','env','context'].forEach(id => {
+    const el = document.getElementById('btn-' + id);
+    if (el) el.classList.toggle('active', id === currentMode);
+  });
+  document.getElementById('agent-tabs').style.display = currentMode === 'context' ? 'flex' : 'none';
 }
 
 function buildAgentTabs(agents) {
@@ -722,23 +818,93 @@ function renderContextRaw(turns) {
   return '<div id="raw-view">' + esc(raw) + '</div>';
 }
 
+function renderForumView(trace) {
+  const ep = currentEpisodeData();
+  if (!ep) return '<div style="color:var(--muted)">No episode data.</div>';
+  const agents = ep.participating_agents || [];
+
+  // Meta header (trace-level + episode-level)
+  let metaHtml = '<div id="meta-card">';
+  Object.entries(trace.meta || {}).forEach(([k, v]) => {
+    metaHtml += '<div class="meta-item"><span class="meta-key">' + esc(k) + '</span>'
+              + '<span class="meta-val">' + esc(v) + '</span></div>';
+  });
+  Object.entries(ep.meta || {}).forEach(([k, v]) => {
+    metaHtml += '<div class="meta-item"><span class="meta-key">' + esc(k) + '</span>'
+              + '<span class="meta-val">' + esc(v) + '</span></div>';
+  });
+  metaHtml += '</div>';
+
+  // Agents legend with colour swatches
+  let html = metaHtml;
+  html += '<div id="agents-bar">';
+  agents.forEach(a => {
+    const c = agentColor(a, agents);
+    html += '<span class="agent-chip">'
+          + '<span class="agent-swatch" style="background:' + c.border + '"></span>'
+          + esc(a) + '</span>';
+  });
+  html += '</div>';
+
+  html += '<div class="section-hdr">Forum thread</div>';
+  const thread = (ep.thread || []).slice().sort((a,b) => (a.post_index||0) - (b.post_index||0));
+  if (!thread.length) return html + '<div style="color:var(--muted)">No posts.</div>';
+
+  html += '<div id="forum-view">';
+  thread.forEach(post => {
+    const speaker = post.speaker || '(unknown)';
+    const c = agentColor(speaker, agents);
+    html += '<div class="forum-post" style="border-color:' + c.border + '">'
+          + '<div class="forum-post-hdr" style="background:' + c.bg + '">'
+          + esc(speaker)
+          + '<span class="post-idx">#' + esc(post.post_index) + '</span>'
+          + '</div>'
+          + '<div class="forum-post-body">' + esc(post.text || '') + '</div>'
+          + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function render() {
   if (!currentTrace) return;
   const content = document.getElementById('content');
+  if (currentMode === 'forum') {
+    content.innerHTML = renderForumView(currentTrace);
+    return;
+  }
   if (currentMode === 'env') {
     content.innerHTML = renderEnvLog(currentTrace);
+    return;
+  }
+
+  // context mode
+  let contextSource;
+  if (currentTrace.format === 'forum') {
+    const ep = currentEpisodeData();
+    contextSource = ep ? ep.agent_contexts : {};
   } else {
-    const turns = currentTrace.agent_contexts[currentAgent] || [];
-    let html = renderMeta(currentTrace);
-    html += '<div style="display:flex;gap:7px;margin-bottom:10px;align-items:center">';
-    html += '<div class="section-hdr" style="margin:0">Context: ' + esc(currentAgent) + '</div>';
-    html += '<div style="margin-left:auto;display:flex;gap:5px">';
+    contextSource = currentTrace.agent_contexts || {};
+  }
+  const ctx = contextSource[currentAgent];
+  let html = renderMeta(currentTrace);
+  html += '<div style="display:flex;gap:7px;margin-bottom:10px;align-items:center">';
+  html += '<div class="section-hdr" style="margin:0">Context: ' + esc(currentAgent) + '</div>';
+  html += '</div>';
+
+  if (Array.isArray(ctx)) {
+    // legacy turns format
+    html += '<div style="display:flex;gap:5px;margin-bottom:10px;justify-content:flex-end">';
     html += '<button class="tb-btn' + (annotate ? ' active' : '') + '" onclick="setAnnotate(true)">Annotated</button>';
     html += '<button class="tb-btn' + (!annotate ? ' active' : '') + '" onclick="setAnnotate(false)">Raw</button>';
-    html += '</div></div>';
-    html += annotate ? renderContextAnnotated(turns) : renderContextRaw(turns);
-    content.innerHTML = html;
+    html += '</div>';
+    html += annotate ? renderContextAnnotated(ctx) : renderContextRaw(ctx);
+  } else if (typeof ctx === 'string') {
+    html += '<div id="raw-view">' + esc(ctx) + '</div>';
+  } else {
+    html += '<div style="color:var(--muted)">No context for this agent.</div>';
   }
+  content.innerHTML = html;
 }
 
 function setAnnotate(val) { annotate = val; render(); }
@@ -749,6 +915,39 @@ loadExperiments();
 </body>
 </html>
 """
+
+
+def _convert_forum_records(records: list, trace_name: str) -> dict:
+    """Convert list-of-episode-records (forum env format) to viewer payload."""
+    episodes = []
+    all_agents: list[str] = []
+    for rec in records:
+        env_t = rec.get("env_trace") or {}
+        agents_raw = rec.get("agents") or {}
+        ep_agents = list(env_t.get("agents") or list(agents_raw.keys()))
+        for a in ep_agents:
+            if a not in all_agents:
+                all_agents.append(a)
+        contexts = {}
+        for aid, at in agents_raw.items():
+            if isinstance(at, dict):
+                contexts[aid] = at.get("context_text", "")
+            else:
+                contexts[aid] = str(at)
+        ep_meta = {k: v for k, v in env_t.items() if k != "thread" and k != "agents"}
+        episodes.append({
+            "episode": rec.get("episode", 0),
+            "meta": ep_meta,
+            "participating_agents": ep_agents,
+            "thread": env_t.get("thread") or [],
+            "agent_contexts": contexts,
+        })
+    return {
+        "format": "forum",
+        "meta": {"iteration": trace_name, "episodes": len(episodes)},
+        "participating_agents": all_agents,
+        "episodes": episodes,
+    }
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -806,7 +1005,12 @@ class Handler(BaseHTTPRequestHandler):
 
             if json_path.exists():
                 with open(json_path) as f:
-                    self._json(json.load(f))
+                    data = json.load(f)
+                # Detect list-of-records format (cultural emergence / forum env)
+                if isinstance(data, list):
+                    self._json(_convert_forum_records(data, trace))
+                else:
+                    self._json(data)
             elif txt_path.exists():
                 with open(txt_path) as f:
                     text = f.read()

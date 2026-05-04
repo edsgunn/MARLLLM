@@ -35,6 +35,7 @@ htmlcov/
 runs/
 slurm_scripts/
 slurm_logs/
+data/
 
 # Model weights and HuggingFace cache
 *.pt

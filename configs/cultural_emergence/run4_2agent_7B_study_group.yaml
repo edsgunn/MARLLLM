@@ -1,9 +1,9 @@
-# 7B capacity test on the Conjecture Inn (mathematical-forum) scenario.
-# Direct counterpart of run4_2agent_7B but on the Conjecture Inn 2-agent
-# canonical pair (Iris Halverson — formalist; Misha Volkov — structuralist).
-# All hyperparameters held identical to run4 so the only change is the
-# substantive forum domain.
-name: run4_2agent_7B_conjecture
+# 7B capacity test on the Study Group (school-maths-chat) scenario.
+# Direct counterpart of run4_2agent_7B but on the Study Group 2-agent
+# canonical pair (Priya Shah — fast confident solver; Tom Whitaker — careful
+# pedant who reads everything three times). All hyperparameters held identical
+# to run4 so the only change is the substantive forum domain.
+name: run4_2agent_7B_study_group
 script: train_population
 slurm:
   gpus_per_node: 4
@@ -13,8 +13,8 @@ dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
 characters:
-- Iris Halverson
-- Misha Volkov
+- Priya Shah
+- Tom Whitaker
 lora_shared_base: true
 lora_r: 64
 lora_alpha: 128
@@ -29,19 +29,19 @@ seed: 1
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
-snapshot_eval_path: eval_contexts/conjecture_inn.json
+snapshot_eval_path: eval_contexts/study_group.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 384
 max_episode_tokens: 16384
 environments:
-- name: conjecture_inn
+- name: study_group
   type: forum
-  scenario: conjecture_inn
+  scenario: study_group
   token_budget: 384
   character_set: canonical_2
   max_posts: 12
   post_order: round_robin
-output_dir: runs/cultural_emergence/run4_2agent_7B_conjecture
+output_dir: runs/cultural_emergence/run4_2agent_7B_study_group
 gradient_checkpointing: true
 
 # Variance-decomposition diagnostic.

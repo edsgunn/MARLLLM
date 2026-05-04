@@ -6,7 +6,7 @@
 # stabilise training, so the divergence isn't pure regularisation strength).
 # lr lowered from 1e-5 → 5e-6 since LoRA r=64 has more capacity on 7B and
 # standard LoRA-RLHF settings on 7B+ run at lr 1e-6 to 5e-6.
-name: run4_2agent_7B
+name: run4_2agent_7B_robotic_athanor
 script: train_population
 slurm:
   gpus_per_node: 4
@@ -43,5 +43,5 @@ environments:
   character_set: canonical_2
   max_posts: 12
   post_order: round_robin
-output_dir: runs/cultural_emergence/run4_2agent_7B
+output_dir: runs/cultural_emergence/run4_2agent_7B_robotic_athanor
 gradient_checkpointing: true

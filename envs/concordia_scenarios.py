@@ -766,16 +766,7 @@ class _RoundRobinSim:
 # Scenario registry (string -> scenario class + defaults)
 # ---------------------------------------------------------------------------
 
-def _robotic_athanor_factory():
-    from envs.concordia_robotic_athanor import RoboticAthanorScenario
-    return RoboticAthanorScenario
-
-
 _SCENARIO_REGISTRY = {
-    "robotic_athanor": {
-        "cls_factory": _robotic_athanor_factory,
-        "agent_names": None,  # populated from scenario.agent_names
-    },
     "haggling": {
         "cls": HagglingScenario,
         "agent_names": ["merchant_0", "merchant_1"],

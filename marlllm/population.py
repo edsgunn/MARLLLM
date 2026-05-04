@@ -353,6 +353,112 @@ class PopulationTrainer:
     def is_main_rank(self) -> bool:
         return self.ddp_rank == 0
 
+    def _compute_generation_metrics(
+        self, raw_episodes: list["_RawEpisode"]
+    ) -> dict[str, float]:
+        """Per-env aggregates of action / thinking / post token usage.
+
+        Lets us see how the model spends its token budget: average post
+        length, average thinking length, fraction of the action spent in
+        thinking, and how often the post or total budget gets clipped.
+        """
+        env_by_name = {spec.name: spec.env for spec in self.environments}
+        agg: dict[str, dict[str, float]] = {}
+        for raw in raw_episodes:
+            history, _info, _pairing, _pids, env_name, _ctx, _trace = raw
+            env_t = env_by_name.get(env_name)
+            thinking_enabled = bool(getattr(env_t, "_thinking_enabled", False))
+            open_tag = getattr(env_t, "_thinking_open_tag", "<think>")
+            close_tag = getattr(env_t, "_thinking_close_tag", "</think>")
+            post_budget = int(getattr(env_t, "_post_token_budget", 0) or 0)
+            total_budget = int(getattr(env_t, "_total_token_budget", 0) or 0)
+            a = agg.setdefault(env_name, {
+                "n_actions": 0, "sum_action_tokens": 0,
+                "sum_thinking_tokens": 0, "sum_post_tokens": 0,
+                "n_thinking_present": 0, "n_total_truncated": 0,
+                "n_post_truncated": 0, "n_unclosed_thinking": 0,
+                "n_episodes": 0, "sum_episode_act_tokens": 0,
+                "sum_episode_total_tokens": 0, "sum_posts_per_episode": 0,
+                "max_action_tokens": 0, "max_episode_total_tokens": 0,
+            })
+            ep_act_tokens = 0
+            ep_total_tokens = 0
+            ep_posts = 0
+            for step in history:
+                ep_total_tokens += len(step.token_ids)
+                if step.token_type != TokenType.ACT:
+                    continue
+                ids = list(step.token_ids)
+                n_act = len(ids)
+                ep_act_tokens += n_act
+                ep_posts += 1
+                text = self.tokeniser.decode_action(ids)
+                thinking_tokens = 0
+                unclosed = False
+                if thinking_enabled and open_tag in text:
+                    j = text.find(open_tag)
+                    k_close = text.find(close_tag, j + len(open_tag))
+                    if k_close < 0:
+                        unclosed = True
+                        thinking_text = text[j:]
+                        post_text = text[:j]
+                    else:
+                        thinking_text = text[j:k_close + len(close_tag)]
+                        post_text = text[:j] + text[k_close + len(close_tag):]
+                    thinking_tokens = (
+                        len(self.tokeniser.encode_observation(thinking_text))
+                        if thinking_text else 0
+                    )
+                    post_tokens = (
+                        len(self.tokeniser.encode_observation(post_text.strip()))
+                        if post_text.strip() else 0
+                    )
+                else:
+                    post_tokens = n_act
+                a["n_actions"] += 1
+                a["sum_action_tokens"] += n_act
+                a["sum_thinking_tokens"] += thinking_tokens
+                a["sum_post_tokens"] += post_tokens
+                if n_act > a["max_action_tokens"]:
+                    a["max_action_tokens"] = n_act
+                if thinking_enabled and thinking_tokens > 0:
+                    a["n_thinking_present"] += 1
+                if unclosed:
+                    a["n_unclosed_thinking"] += 1
+                if total_budget and n_act >= total_budget:
+                    a["n_total_truncated"] += 1
+                if post_budget and post_tokens > post_budget:
+                    a["n_post_truncated"] += 1
+            a["n_episodes"] += 1
+            a["sum_episode_act_tokens"] += ep_act_tokens
+            a["sum_episode_total_tokens"] += ep_total_tokens
+            a["sum_posts_per_episode"] += ep_posts
+            if ep_total_tokens > a["max_episode_total_tokens"]:
+                a["max_episode_total_tokens"] = ep_total_tokens
+
+        out: dict[str, float] = {}
+        for env_name, a in agg.items():
+            n_act = a["n_actions"] or 1
+            n_eps = a["n_episodes"] or 1
+            p = f"gen/{env_name}"
+            out[f"{p}/mean_action_tokens"]   = a["sum_action_tokens"] / n_act
+            out[f"{p}/mean_thinking_tokens"] = a["sum_thinking_tokens"] / n_act
+            out[f"{p}/mean_post_tokens"]     = a["sum_post_tokens"] / n_act
+            out[f"{p}/thinking_frac"] = (
+                a["sum_thinking_tokens"] / a["sum_action_tokens"]
+                if a["sum_action_tokens"] > 0 else 0.0
+            )
+            out[f"{p}/thinking_present_rate"] = a["n_thinking_present"] / n_act
+            out[f"{p}/total_truncation_rate"] = a["n_total_truncated"] / n_act
+            out[f"{p}/post_truncation_rate"]  = a["n_post_truncated"] / n_act
+            out[f"{p}/unclosed_thinking_rate"] = a["n_unclosed_thinking"] / n_act
+            out[f"{p}/mean_episode_act_tokens"]   = a["sum_episode_act_tokens"] / n_eps
+            out[f"{p}/mean_episode_total_tokens"] = a["sum_episode_total_tokens"] / n_eps
+            out[f"{p}/mean_posts_per_episode"] = a["sum_posts_per_episode"] / n_eps
+            out[f"{p}/max_action_tokens"] = float(a["max_action_tokens"])
+            out[f"{p}/max_episode_total_tokens"] = float(a["max_episode_total_tokens"])
+        return out
+
     def train(self, start_iteration: int = 1) -> None:
         pop_names = list(self.population.keys())
         env_names = [s.name for s in self.environments]
@@ -525,16 +631,21 @@ class PopulationTrainer:
             for env_name, count in env_counts.items():
                 all_metrics[f"env_episodes/{env_name}"] = count
 
+            all_metrics.update(self._compute_generation_metrics(raw_episodes))
+
             # Reduce metrics across ranks before logging — sum-style for counts,
             # average for losses/timings — so the JSONL row is identical to a
             # single-rank run with the same total episodes_per_iter.
             if self.ddp:
                 all_metrics = self._ddp_reduce_metrics(all_metrics)
 
-            # ── 4b. Variance-decomposition diagnostic (rank 0 only) ──────
+            # ── 4b. Variance-decomposition diagnostic (cooperative DDP) ──
             # Run after the optimizer step so we measure the *current*
-            # post-update policy. Cadence-gated by config.
-            if self.is_main_rank and self._should_run_var_decomp(iteration):
+            # post-update policy. All ranks participate so DDP collectives
+            # (the per-iter barrier below, and next iter's gradient
+            # all-reduce) stay in lockstep — running this on rank 0 alone
+            # caused the 10-minute NCCL watchdog to trip at the next barrier.
+            if self._should_run_var_decomp(iteration):
                 self._run_var_decomp(iteration, all_metrics)
 
             # ── 5. Log and checkpoint (rank 0 only) ──────────────────────
@@ -553,6 +664,7 @@ class PopulationTrainer:
                     self.save_checkpoint(iteration)
                     self._write_checkpoint_traces(iteration, raw_episodes)
                     self._write_behavioral_snapshot(iteration)
+                    self._auto_plot_training_curves()
 
             # All ranks barrier here so non-main ranks don't race ahead while
             # rank 0 is doing slow snapshot/checkpoint I/O. Without this, rank 0
@@ -565,6 +677,7 @@ class PopulationTrainer:
             self.save_checkpoint(self.config.num_iterations, tag="final")
             self._write_checkpoint_traces(self.config.num_iterations, raw_episodes)
             self._write_behavioral_snapshot(self.config.num_iterations)
+            self._auto_plot_training_curves()
             self._logger.info("Training complete.")
         if self.ddp:
             import torch.distributed as dist
@@ -1098,65 +1211,109 @@ class PopulationTrainer:
         cadence = max(1, int(cadence))
         return iteration % cadence == 0
 
-    def _ensure_var_decomp_contexts(self) -> list:
-        """Load held-out contexts from disk, harvesting them on first use.
+    def _var_decomp_contexts_path(self) -> Path:
+        cfg_path = getattr(self.config, "var_decomp_eval_contexts_path", None)
+        if cfg_path:
+            return Path(cfg_path)
+        run_name = Path(self.config.output_dir).name or "run"
+        return Path("data/eval_contexts") / f"{run_name}.var_decomp.jsonl"
 
-        Building the set requires running rollouts with the current
-        population (frozen-but-pre-train). We do this lazily on the first
-        call rather than at trainer __init__ so that the build happens
-        after any pre-train setup (compile, vLLM init) and only when
-        var_decomp_enabled is True.
+    def _ensure_var_decomp_contexts(self) -> list:
+        """Load held-out contexts from disk, harvesting cooperatively if missing.
+
+        Under DDP every rank must call this in lockstep — the cooperative
+        harvest path uses ``all_gather_object`` so the file is built from
+        each rank's slice of the work. Rank 0 alone is too slow on 7B
+        (the initial 32-episode harvest exceeds the NCCL watchdog timeout).
         """
         if self._var_decomp_contexts is not None:
             return self._var_decomp_contexts
 
         from marlllm.variance_decomposition import (
-            build_eval_contexts, load_eval_contexts, write_eval_contexts,
+            EvalContext, build_eval_contexts, load_eval_contexts, write_eval_contexts,
         )
-
-        cfg_path = getattr(self.config, "var_decomp_eval_contexts_path", None)
-        if cfg_path:
-            path = Path(cfg_path)
-        else:
-            run_name = Path(self.config.output_dir).name or "run"
-            path = Path("data/eval_contexts") / f"{run_name}.var_decomp.jsonl"
+        path = self._var_decomp_contexts_path()
 
         if path.exists():
-            self._logger.info("Loading variance-decomp contexts from %s", path)
+            if self.is_main_rank:
+                self._logger.info("Loading variance-decomp contexts from %s", path)
             self._var_decomp_contexts = load_eval_contexts(path)
             return self._var_decomp_contexts
 
-        self._logger.info(
-            "Building %d variance-decomp contexts (saving to %s)",
-            self.config.var_decomp_n_contexts, path,
-        )
-        contexts = build_eval_contexts(
+        # Cooperative harvest: split n_contexts across ranks. Each rank uses
+        # a disjoint seed so contexts don't duplicate. Then gather + (rank 0)
+        # write + everyone caches the same final list.
+        target_total = int(self.config.var_decomp_n_contexts)
+        world = max(1, self.ddp_world_size)
+        n_per_rank = (target_total + world - 1) // world
+
+        if self.is_main_rank:
+            self._logger.info(
+                "Building %d variance-decomp contexts cooperatively across %d ranks "
+                "(%d per rank, saving to %s)",
+                target_total, world, n_per_rank, path,
+            )
+
+        local = build_eval_contexts(
             population=self.population,
             environments=self.environments,
             tokeniser=self.tokeniser,
             config=self.config,
-            n_contexts=self.config.var_decomp_n_contexts,
-            rng_seed=self.config.seed,
+            n_contexts=n_per_rank,
+            # Disjoint seeds across ranks so harvested contexts differ.
+            rng_seed=self.config.seed + 7919 * self.ddp_rank,
             eos_token_ids=self._eos_token_ids,
         )
-        write_eval_contexts(contexts, path)
+        local_json = [c.to_json() for c in local]
+
+        if self.ddp:
+            import torch.distributed as dist
+            gathered: list = [None] * self.ddp_world_size
+            dist.all_gather_object(gathered, local_json)
+            all_json = [d for sub in gathered for d in (sub or [])]
+        else:
+            all_json = list(local_json)
+
+        # Truncate to exactly target_total so the resulting set size is
+        # deterministic regardless of world_size.
+        all_json = all_json[:target_total]
+        contexts = [EvalContext.from_json(d) for d in all_json]
+
+        if self.is_main_rank:
+            write_eval_contexts(contexts, path)
+        if self.ddp:
+            import torch.distributed as dist
+            dist.barrier()  # wait for rank 0 to finish writing before anyone proceeds
+
         self._var_decomp_contexts = contexts
         return contexts
 
     def _run_var_decomp(self, iteration: int, metrics_inout: dict) -> None:
-        """Run the variance-decomposition eval, log to JSONL, fold into metrics."""
-        from marlllm.variance_decomposition import variance_decomposition
+        """Run the variance-decomposition eval cooperatively across DDP ranks.
+
+        Each rank evaluates its slice of contexts (``contexts[rank::world]``).
+        Per-context arrays are gathered to rank 0 via ``all_gather_object``;
+        rank 0 then aggregates and writes to ``variance_decomposition.jsonl``
+        and folds scalar metrics into the iteration's metrics dict.
+        """
+        from marlllm.variance_decomposition import (
+            variance_decomposition, aggregate_decomposition,
+        )
 
         contexts = self._ensure_var_decomp_contexts()
         if not contexts:
             return
 
+        # Slice across ranks. Order is preserved so per-context output stays
+        # interpretable when we re-merge on rank 0.
+        my_contexts = contexts[self.ddp_rank :: max(1, self.ddp_world_size)]
+
         t0 = time.time()
         try:
-            results = variance_decomposition(
+            local_results = variance_decomposition(
                 population=self.population,
                 environments=self.environments,
-                eval_contexts=contexts,
+                eval_contexts=my_contexts,
                 tokeniser=self.tokeniser,
                 config=self.config,
                 K=self.config.var_decomp_K,
@@ -1166,21 +1323,64 @@ class PopulationTrainer:
                 pad_token_id=self._pad_token_id(),
             )
         except Exception as e:
-            self._logger.warning("Variance-decomposition eval failed: %s", e)
-            return
+            self._logger.warning(
+                "Variance-decomposition eval failed on rank %d: %s",
+                self.ddp_rank, e,
+            )
+            local_results = {}
+
+        # Strip wall_time from local results before gathering — we'll
+        # recompute the wall-clock aggregate (max across ranks) on rank 0.
+        for v in local_results.values():
+            v.pop("wall_time_s", None)
+
+        if self.ddp:
+            import torch.distributed as dist
+            gathered: list = [None] * self.ddp_world_size
+            dist.all_gather_object(gathered, local_results)
+        else:
+            gathered = [local_results]
+
         elapsed = time.time() - t0
 
-        # Fold scalar metrics into the iteration's metrics dict using the
-        # eval/<agent>/<metric> namespace requested in the spec.
+        if not self.is_main_rank:
+            return
+
+        # Merge per-rank results: each rank may have processed different
+        # focal_pop_names. Re-aggregate from the merged per-context arrays.
+        merged: dict[str, dict[str, list]] = {}
+        for rank_results in gathered:
+            if not rank_results:
+                continue
+            for pop_name, agg in rank_results.items():
+                pc = agg.get("per_context", {})
+                m = merged.setdefault(pop_name, {
+                    "context_id": [], "signal": [], "noise": [],
+                    "mean_return": [], "n_rollouts": [],
+                })
+                m["context_id"].extend(pc.get("context_id", []))
+                m["signal"].extend(pc.get("signal", []))
+                m["noise"].extend(pc.get("noise", []))
+                m["mean_return"].extend(pc.get("mean_return", []))
+                m["n_rollouts"].extend(pc.get("n_rollouts", []))
+
+        if not merged:
+            return
+
+        results: dict[str, dict] = {}
+        for pop_name, m in merged.items():
+            agg = aggregate_decomposition(m["signal"], m["noise"])
+            agg["per_context"] = m
+            results[pop_name] = agg
+
+        # Fold scalar metrics into the iteration's metrics dict.
         for pop_name, agg in results.items():
             for key in ("signal", "noise", "snr", "log_signal", "log_noise", "log_snr"):
                 metrics_inout[f"eval/{pop_name}/{key}"] = float(agg[key])
             metrics_inout[f"eval/{pop_name}/n_contexts"] = int(agg["n_contexts"])
         metrics_inout["eval/var_decomp/wall_time_s"] = elapsed
 
-        # Write the full per-context arrays to a separate JSONL so plotting
-        # can do scatter / per-context diagnostics without re-reading the
-        # main metrics stream.
+        # Per-context detail to its own JSONL for plot_variance_decomposition.py.
         record = {"iteration": iteration, "wall_time_s": elapsed, "agents": {}}
         for pop_name, agg in results.items():
             record["agents"][pop_name] = {
@@ -1208,6 +1408,24 @@ class PopulationTrainer:
         with open(self._metrics_path, "a") as f:
             f.write(json.dumps(metrics) + "\n")
 
+    def _auto_plot_training_curves(self) -> None:
+        """Regenerate training_curves.png in the experiment directory.
+
+        Runs only on rank 0 (callers already gate on ``is_main_rank``). Wrapped
+        in try/except so a plotting failure never kills training. Plotting cost
+        scales with the number of logged iterations and runs at checkpoint
+        cadence only, so the overhead is negligible compared to a checkpoint.
+        """
+        try:
+            import sys
+            scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from plot_results import plot_experiment  # type: ignore
+            plot_experiment(Path(self.config.output_dir))
+        except Exception as e:
+            self._logger.warning(f"Auto-plot failed: {e}")
+
     def _log_metrics(self, iteration: int, metrics: dict) -> None:
         elapsed = metrics.get("wall_time", 0.0)
         parts = [
@@ -1227,6 +1445,19 @@ class PopulationTrainer:
             ret = metrics.get(f"{name}/mean_return")
             if ret is not None:
                 parts.append(f"{name}/ret {ret:.4f}")
+        for name in [s.name for s in self.environments]:
+            mp = metrics.get(f"gen/{name}/mean_post_tokens")
+            if mp is None:
+                continue
+            mt  = metrics.get(f"gen/{name}/mean_thinking_tokens", 0.0)
+            ma  = metrics.get(f"gen/{name}/mean_action_tokens", 0.0)
+            me  = metrics.get(f"gen/{name}/mean_episode_total_tokens", 0.0)
+            tr  = metrics.get(f"gen/{name}/total_truncation_rate", 0.0)
+            pr  = metrics.get(f"gen/{name}/post_truncation_rate", 0.0)
+            parts.append(
+                f"{name}/tok act{ma:.0f} think{mt:.0f} post{mp:.0f} "
+                f"ep{me:.0f} trunc(t{tr:.2f}/p{pr:.2f})"
+            )
         self._logger.info(" | ".join(parts))
 
     def _pad_token_id(self) -> int:

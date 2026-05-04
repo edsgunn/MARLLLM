@@ -166,31 +166,21 @@ def _build_concordia_env(
         if key in spec_dict:
             scenario_kwargs[key] = spec_dict[key]
 
-    if scenario_name == "robotic_athanor":
-        from envs.concordia_robotic_athanor import RoboticAthanorScenario
-        scenario = RoboticAthanorScenario(
-            gm_model=gm_model,
-            embedder=embedder,
-            **scenario_kwargs,
+    from envs.concordia_scenarios import _SCENARIO_REGISTRY
+    if scenario_name not in _SCENARIO_REGISTRY:
+        raise ValueError(
+            f"Unknown concordia scenario '{scenario_name}'. "
+            f"Available: {sorted(_SCENARIO_REGISTRY.keys())}"
         )
-        agent_names = list(scenario.agent_names)
-        reward_fn = scenario.reward_fn
-    else:
-        from envs.concordia_scenarios import _SCENARIO_REGISTRY
-        if scenario_name not in _SCENARIO_REGISTRY:
-            raise ValueError(
-                f"Unknown concordia scenario '{scenario_name}'. "
-                f"Available: {sorted(_SCENARIO_REGISTRY.keys())}"
-            )
-        entry = _SCENARIO_REGISTRY[scenario_name]
-        cls = entry["cls_factory"]() if "cls_factory" in entry else entry["cls"]
-        scenario = cls(gm_model=gm_model, embedder=embedder, **scenario_kwargs)
-        agent_names = (
-            entry["agent_names"]
-            if entry.get("agent_names") is not None
-            else list(scenario.agent_names)
-        )
-        reward_fn = scenario.reward_fn
+    entry = _SCENARIO_REGISTRY[scenario_name]
+    cls = entry["cls_factory"]() if "cls_factory" in entry else entry["cls"]
+    scenario = cls(gm_model=gm_model, embedder=embedder, **scenario_kwargs)
+    agent_names = (
+        entry["agent_names"]
+        if entry.get("agent_names") is not None
+        else list(scenario.agent_names)
+    )
+    reward_fn = scenario.reward_fn
 
     env = ConcordiaEnv(
         simulation_factory=scenario,
@@ -284,30 +274,16 @@ def _build_forum_env(
       ``forum_preamble``   : custom initial topic prompt.
       ``seed``             : per-env RNG seed (default ``args.seed``).
     """
-    from envs.forum_env import ForumEnv
+    from envs.forum import ForumEnv, JsonPersonaScenario
 
-    scenario = spec_dict.get("scenario", "robotic_athanor")
-    if scenario == "robotic_athanor":
-        from envs.robotic_athanor_personas import (
-            FORUM_DESCRIPTION, get_character_set, get_personas,
-        )
-        default_invitation = (
-            "A new thread has just opened on the Alchemical Theory section. "
-            "The forum is active and members are posting throughout the day."
-        )
-    elif scenario == "conjecture_inn":
-        from envs.conjecture_inn_personas import (
-            FORUM_DESCRIPTION, get_character_set, get_personas,
-        )
-        default_invitation = (
-            "A new thread has just opened in the Open Conjectures section. "
-            "The forum is active and members are posting throughout the day."
-        )
-    else:
+    scenario_name = spec_dict.get("scenario", "robotic_athanor")
+    try:
+        scenario = JsonPersonaScenario(scenario_name)
+    except FileNotFoundError as exc:
         raise ValueError(
-            f"Unknown forum scenario {scenario!r}. "
-            f"Supported: 'robotic_athanor', 'conjecture_inn'."
-        )
+            f"Unknown forum scenario {scenario_name!r}: no JSON found at "
+            f"envs/{scenario_name}.json."
+        ) from exc
 
     seed = int(spec_dict.get("seed", default_seed))
 
@@ -316,11 +292,11 @@ def _build_forum_env(
         agent_names = list(personas.keys())
     else:
         cset = spec_dict.get("character_set", "canonical_4")
-        agent_names = get_character_set(cset)
-        personas = get_personas(cset)
+        agent_names = scenario.get_character_set(cset)
+        personas = scenario.get_personas(cset)
 
-    forum_description = spec_dict.get("forum_description") or FORUM_DESCRIPTION
-    initial_invitation = spec_dict.get("initial_invitation") or default_invitation
+    forum_description = spec_dict.get("forum_description") or scenario.forum_description
+    initial_invitation = spec_dict.get("initial_invitation") or scenario.default_invitation
 
     return ForumEnv(
         agent_names=agent_names,
@@ -328,10 +304,16 @@ def _build_forum_env(
         tokenizer=tokenizer,
         forum_description=forum_description,
         initial_invitation=initial_invitation,
-        action_token_budget=spec_dict.get("token_budget", 128),
+        action_token_budget=spec_dict.get("token_budget"),
         max_posts=int(spec_dict.get("max_posts", 12)),
         post_order=spec_dict.get("post_order", "round_robin"),
         seed=seed,
+        post_length_note=spec_dict.get("post_length_note"),
+        thinking_enabled=bool(spec_dict.get("thinking_enabled", False)),
+        thinking_open_tag=spec_dict.get("thinking_open_tag", "<think>"),
+        thinking_close_tag=spec_dict.get("thinking_close_tag", "</think>"),
+        post_token_budget=spec_dict.get("post_token_budget"),
+        total_token_budget=spec_dict.get("total_token_budget"),
     )
 
 
@@ -585,8 +567,16 @@ def main() -> None:
     ddp_local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     ddp = ddp_world_size > 1
     if ddp:
+        import datetime
         import torch.distributed as dist
-        dist.init_process_group(backend="nccl")
+        # Long NCCL collective timeout: variance-decomposition eval can run for
+        # several minutes on rank 0 while other ranks idle at the next barrier.
+        # The default 10-min watchdog timeout is too tight for a slow harvest
+        # at 7B; bump to 60 min so the eval completes before any rank trips it.
+        dist.init_process_group(
+            backend="nccl",
+            timeout=datetime.timedelta(minutes=60),
+        )
         torch.cuda.set_device(ddp_local_rank)
         # Force device override so the per-rank GPU assignment takes effect.
         args.device = f"cuda:{ddp_local_rank}"
