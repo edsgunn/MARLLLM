@@ -1,9 +1,5 @@
 # Run 7 — 8-agent thinking-tokens variant on the Conjecture Inn scenario.
-# Identical to run5_8agent_7B_conjecture except `thinking_enabled: true`.
-# Public post budget held at 128 (matching run5 exactly).  Total budget
-# (thinking + post combined) is 384 — the model is told both numbers and
-# learns to split between private reasoning and public post within those
-# two limits.
+# Twin of run6_2agent_7B_conjecture; the only difference is 2 vs 8 agents.
 name: run7_8agent_7B_conjecture
 script: train_population
 slurm:
@@ -13,6 +9,16 @@ model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
+# Memory-tuned for vLLM + DDP co-location on 4 × GH200 (95 GB each):
+#   - lora_modules: q,v only (~5x less LoRA than all-7-projection default)
+#   - use_8bit_adam: bitsandbytes AdamW8bit (halves Adam state)
+#   - vllm_quantization: fp8 (halves vLLM weight memory ~17 GB → ~9 GB)
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
 characters:
 - Iris Halverson
 - Misha Volkov
@@ -39,7 +45,7 @@ num_checkpoint_traces: 8
 snapshot_eval_path: eval_contexts/conjecture_inn.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 384
-max_episode_tokens: 32768
+max_episode_tokens: 24576
 environments:
 - name: conjecture_inn
   type: forum

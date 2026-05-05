@@ -249,10 +249,14 @@ class ForumEnv(AECEnv):
 
         self.agents = list(self.possible_agents)
         if self._post_order == "round_robin":
-            # Shuffle the round-robin permutation per episode so the same
-            # agent doesn't always open — otherwise the opener anchors the
-            # whole thread to their interests every time.
-            self._rng.shuffle(self.agents)
+            # Shuffle the round-robin permutation so the same agent doesn't
+            # always open. The shuffle is keyed off ``order_seed`` (passed via
+            # options), separate from the main ``seed``, so the trainer can
+            # share one order across all parallel episodes in an iteration —
+            # keeping turn schedules aligned so vLLM can batch generations.
+            order_seed = (options or {}).get("order_seed")
+            order_rng = random.Random(order_seed) if order_seed is not None else self._rng
+            order_rng.shuffle(self.agents)
         self._pending_posts = {a: [] for a in self.agents}
         self._initial_delivered = {a: False for a in self.agents}
         self._post_count = 0

@@ -1,9 +1,5 @@
 # Run 7 — 8-agent thinking-tokens variant on the Study Group scenario.
-# Identical to run5_8agent_7B_study_group except `thinking_enabled: true`.
-# Public post budget held at 128 (matching run5 exactly).  Total budget
-# (thinking + post combined) is 384 — the model is told both numbers and
-# learns to split between private reasoning and public post within those
-# two limits.
+# Twin of run6_2agent_7B_study_group; the only difference is 2 vs 8 agents.
 name: run7_8agent_7B_study_group
 script: train_population
 slurm:

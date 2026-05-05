@@ -1,6 +1,6 @@
-# Run 7 — 8-agent thinking-tokens variant on the Robotic Athanor scenario.
-# Twin of run6_2agent_7B_robotic_athanor; the only difference is 2 vs 8 agents.
-name: run7_8agent_7B_robotic_athanor
+# Run 7 — 8-agent thinking-tokens variant on the Strathearn Study Group scenario.
+# Twin of run6_2agent_7B_study_group_strathearn; the only difference is 2 vs 8 agents.
+name: run7_8agent_7B_study_group_strathearn
 script: train_population
 slurm:
   gpus_per_node: 4
@@ -20,14 +20,14 @@ vllm_quantization: fp8
 lora_modules: q_proj,v_proj
 use_8bit_adam: true
 characters:
-- Silas Varnham
-- Petra Ouyang
-- Diego Esparza
-- Thaddeus 'Aurelius' Thorne
-- Mira Stenholm
-- Akira Goto
-- Brenda Calloway
-- Percy Holloway-Wynne
+- Mhairi Buchanan
+- Callum Reid
+- Niamh Donnelly
+- Daniyal Khan
+- Eilidh MacGregor
+- Joseph Akingbola
+- Ada Whitfield
+- Finn Nakamura
 lora_shared_base: true
 lora_r: 64
 lora_alpha: 128
@@ -42,21 +42,21 @@ seed: 1
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
-snapshot_eval_path: eval_contexts/robotic_athanor.json
+snapshot_eval_path: eval_contexts/study_group_strathearn.json
 snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 384
 max_episode_tokens: 24576
 environments:
-- name: robotic_athanor
+- name: study_group_strathearn
   type: forum
-  scenario: robotic_athanor
+  scenario: study_group_strathearn
   post_token_budget: 128
   total_token_budget: 384
   character_set: extended_8
   max_posts: 16
   post_order: round_robin
   thinking_enabled: true
-output_dir: runs/cultural_emergence/run7_8agent_7B_robotic_athanor
+output_dir: runs/cultural_emergence/run7_8agent_7B_study_group_strathearn
 gradient_checkpointing: true
 
 var_decomp_enabled: false

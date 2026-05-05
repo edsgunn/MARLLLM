@@ -1,0 +1,58 @@
+{
+  "description": "Held-out group-chat contexts for behavioral-distribution snapshots in the Strathearn Study Group scenario. Each context is a partial chat thread; the agent is asked to write the next message. Contexts span Problems We're Stuck On, Things We Worked Out, Wait Is This True (counterexamples and gotchas), Different Way to See It, What Even Is..., and Off-Topic — to stress-test character differentiation across methodical-convenor / fast-pattern / careful-explainer / abstraction-seeker / alumna-mentor / playful-disrupter / sceptic / newcomer axes.",
+  "system_preamble": "You are posting in The Study Group, the after-school maths group chat at Strathearn Academy in the East End of Glasgow. Members range from Year 10 to Year 13 plus one alumna. The chat covers problems people are stuck on, things they've worked out, counterexamples, reframings, and the occasional foundational question that the syllabus skipped over. Write your next message in the chat.\n\n",
+  "contexts": [
+    {
+      "id": "thread_consecutive_subsets",
+      "thread": "Thread: subsets of {1..n} with no two consecutive\n\nMhairi: I'm pretty sure the count is F(n+2) where F is Fibonacci. Quick check: n=3 gives subsets {}, {1}, {2}, {3}, {1,3} — that's 5 = F(5). I'll write the bijection up properly tomorrow.\n\nNiamh: wait, why is it F(n+2) and not F(n+1)? I always forget which index.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_modular_edge_case",
+      "thread": "Thread: does Mhairi's mod-p argument from last week actually cover n=1?\n\nNiamh: Going back over the proof carefully. The induction step assumes n >= 2 implicitly because the swap on line 4 needs two distinct residues. I think n=1 needs a separate one-line check, which is fine but should be stated.\n\nMhairi: ugh, you're right, sorry. one-line fix.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_triangular_pascal",
+      "thread": "Thread: triangular numbers in Pascal's triangle\n\nCallum: I noticed that 1, 3, 6, 10, 15... shows up as the third diagonal of Pascal's triangle. coincidence or is there a reason?\n\nMhairi: not a coincidence — T(n) = C(n+1, 2). Standard identity.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_handshakes_graph",
+      "thread": "Thread: handshakes ≡ edges?\n\nDaniyal: ok so the handshake problem (n people, everyone shakes everyone else's hand, count handshakes) and 'how many edges in K_n' — these are LITERALLY the same problem. People are agreeing with me but I don't think they actually believe it.\n\nAda: point 1: yes Daniyal we get it, both are C(n,2). point 2: what's the new content here.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_what_is_induction",
+      "thread": "Thread: sorry probably a stupid question\n\nFinn: this might be obvious but — people keep saying 'by induction' and I sort of know what it means but not really. is it just 'show the first one, then show that if it works for n it works for n+1'? what does the 'then it works for all n' bit actually rest on?\n\nEilidh: not a stupid question at all, and I think this might be one of the more interesting ones — the bit it rests on is genuinely subtle and most textbooks fudge it.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_dice_writeup",
+      "thread": "Thread: Daniyal's dice-fairness argument — writeup draft\n\nNiamh: I've written up Daniyal's argument from two weeks ago that the dice game is fair. There's one step I can't reconstruct from the chat log: the bit where you said 'by symmetry' on the third roll. Can you spell out which symmetry you meant? I think there are two candidate symmetries here and only one of them gives the conclusion.\n\nDaniyal: oh hm. yeah I think I meant the swap symmetry but actually the rotation one might also work, let me think.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_counterexample_check",
+      "thread": "Thread: wait is this true — sum of three squares\n\nFinn: this might be obvious but — someone in another chat said every positive integer is the sum of three squares. I checked: 7 = 4 + 1 + 1 + 1 needs four. counterexample? or am I missing something about what 'square' means here?\n\nMhairi: 7 is the standard counterexample, you're right. The theorem is for numbers NOT of the form 4^a(8b+7).\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_offtopic_revision",
+      "thread": "Thread: off-topic — anyone else procrastinating homework\n\nFinn: I'm meant to be doing French homework and instead I'm watching a 3blue1brown video about quaternions which is definitely not on the syllabus.\n\nAda: point 1: this is essentially the founding purpose of the group chat. point 2: keep going.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_sceptic_pushback",
+      "thread": "Thread: 'elegance' as an argument\n\nAda: point 1: I keep seeing people in this chat accept arguments because they're 'elegant' or 'natural'. point 2: elegance is not a proof. point 3: half the time the elegant version skips a case and nobody notices because it sounded good.\n\nMhairi: name one elegant argument from this chat that skipped a case.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_foundational_what_is",
+      "thread": "Thread: what even is a function, really\n\nFinn: this might be obvious but — at school we get told a function is 'a rule that takes inputs to outputs', but Eilidh mentioned in passing it's 'a set of ordered pairs', and now I am confused which one is the actual definition.\n\nDaniyal: oh this is a good one. fundamentally the rule version is what you DO with a function, the ordered-pairs version is what a function IS. they're answering different questions.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_compute_first",
+      "thread": "Thread: trying to guess f(n) from small cases\n\nCallum: f(1)..f(6) by hand: 1, 2, 5, 14, 42, 132. these are the Catalan numbers. so f(7) = 429.\n\nNiamh: nice — before you check, what made you suspect Catalan rather than, say, central binomial coefficients? The first few overlap, and I want to be sure we haven't just matched a prefix.\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_alumna_hint",
+      "thread": "Thread: hint requested on an Olympiad problem\n\nMhairi: stuck on Q4 from BMO1 2019. Tried bounding by AM-GM, tried induction, neither lands. Anyone got a hint? I don't want a full solution, just a nudge.\n\nEilidh: I think this might be one where you want to find an invariant before you try to bound. maybe ask: what quantity stays constant when you do the move the problem describes?\n\n[Your turn to post]"
+    },
+    {
+      "id": "thread_joke_proof",
+      "thread": "Thread: serious question hidden in a joke proof\n\nJoseph: ok so I have a beautiful proof that 1=2. let a=b. then a^2=ab. then a^2-b^2=ab-b^2. factor: (a-b)(a+b)=b(a-b). divide by (a-b): a+b=b. set a=b=1: 2=1. QED 🎉\n\nJoseph: BUT — hear me out — there's actually a real question hiding in here about when 'divide both sides by x' is and isn't allowed, and I don't think the school answer ('don't divide by zero') is the whole story.\n\n[Your turn to post]"
+    }
+  ]
+}

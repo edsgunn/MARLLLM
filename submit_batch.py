@@ -325,6 +325,55 @@ export NCCL_SOCKET_IFNAME=hsn             # use Slingshot high-speed NICs
 export FI_CXI_ATS=0                       # disable address translation for CXI
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 
+# Per-job torch.compile / vLLM compile caches. The default location is on
+# shared NFS ($HOME/.cache); when several jobs compile the same model
+# concurrently they race on the artifact files and the reader hits
+# "Bytes object is corrupted, checksum does not match" during vLLM
+# profile_run, killing the job before training starts.
+export VLLM_CACHE_ROOT="/tmp/vllm_cache_${{SLURM_JOB_ID:-$$}}"
+export TORCHINDUCTOR_CACHE_DIR="/tmp/torchinductor_${{SLURM_JOB_ID:-$$}}"
+mkdir -p "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"
+trap 'rm -rf "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"' EXIT
+
+# ── Pre-flight cleanup ────────────────────────────────────────────────────────
+# A previous failed job on this node can leave behind orphaned python/torchrun/
+# vLLM workers that still hold GPU memory and /dev/shm segments. Without this,
+# the next job allocated to the same node OOMs before training even starts.
+echo "--- Pre-flight cleanup ---"
+
+# 1. Kill any stray training/inference processes belonging to this user.
+#    `pkill -9 -u $USER -f <pat>` only matches our own processes, so this is
+#    safe on shared nodes. Patterns cover torchrun, vLLM workers, and our
+#    training entrypoints. `|| true` because pkill exits 1 when nothing matches.
+for pat in "torchrun" "torch.distributed.run" "train_population.py" "train_negotiation.py" "train_concordia.py" "train.py" "vllm" "multiprocessing.spawn" "multiprocessing.resource_tracker"; do
+    pkill -9 -u "$USER" -f "$pat" 2>/dev/null || true
+done
+
+# 2. Clear shared-memory segments left by torch DataLoader / NCCL / vLLM.
+find /dev/shm -maxdepth 1 -user "$USER" -mmin +0 \( -name 'torch_*' -o -name 'nccl-*' -o -name 'cuda.*' -o -name 'vllm*' -o -name 'sem.*' -o -name 'pymp-*' \) -exec rm -rf {{}} + 2>/dev/null || true
+
+# 3. Wait for GPU memory to actually drain. If the kernel still has dying
+#    processes attached to a context, `nvidia-smi --query-gpu=memory.used`
+#    will report non-zero for a few seconds. Abort if it never clears so the
+#    job fails fast instead of OOMing inside torch.cuda.init.
+if command -v nvidia-smi &>/dev/null; then
+    for attempt in $(seq 1 30); do
+        max_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | sort -n | tail -1)
+        # Treat <500 MiB as "clean" — driver itself uses ~0–100 MiB.
+        if [ "${{max_used:-99999}}" -lt 500 ]; then
+            echo "[INFO] GPU memory clean after ${{attempt}}s (max ${{max_used}} MiB used)."
+            break
+        fi
+        if [ "$attempt" -eq 30 ]; then
+            echo "[ERROR] GPU memory still busy after 30s (max ${{max_used}} MiB). Aborting." >&2
+            nvidia-smi
+            exit 1
+        fi
+        sleep 1
+    done
+fi
+echo ""
+
 # ── Python / venv ─────────────────────────────────────────────────────────────
 {activate_block}
 

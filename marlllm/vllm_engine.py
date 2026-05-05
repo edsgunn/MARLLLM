@@ -84,11 +84,21 @@ class VLLMSamplingEngine:
         self._global_id_counter = 0
         self._current_ids: dict[str, int] = {}
         self._current_paths: dict[str, Path] = {}
+        # Parent of each adapter's current `id{N}` dir. Tracked so we can
+        # rm -rf the previous version when a new sync lands; otherwise the
+        # staging dir grows by ~(num_adapters * adapter_size) every step
+        # and eventually fills /dev/shm.
+        self._current_id_dirs: dict[str, Path] = {}
 
         # Prefer /dev/shm for adapter staging (tmpfs → fast write+read).
         if adapter_dir is None:
             shm = Path("/dev/shm")
             base = shm if shm.is_dir() and os.access(shm, os.W_OK) else None
+            # Best-effort sweep of stale staging dirs from prior crashed jobs
+            # on the same node — mkdtemp doesn't clean them up, and a packed
+            # /dev/shm causes the very next save_pretrained to ENOSPC.
+            if base is not None:
+                self._sweep_stale_staging_dirs(base)
             self._adapter_root = Path(
                 tempfile.mkdtemp(prefix="marlllm_lora_", dir=str(base) if base else None)
             )
@@ -170,6 +180,35 @@ class VLLMSamplingEngine:
     # Adapter management                                                  #
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _sweep_stale_staging_dirs(base: Path) -> None:
+        """Remove orphaned ``marlllm_lora_*`` dirs on this node.
+
+        Compute nodes are reused across SLURM jobs; if a previous run
+        crashed mid-training the staging dir leaks (mkdtemp doesn't unlink
+        on exit). On a packed /dev/shm the next job ENOSPCs at startup.
+
+        Only touch directories that are (a) owned by the current uid and
+        (b) untouched for at least an hour — so we never delete a sibling
+        rank's freshly-mkdtemp'd dir or a concurrent job's active state.
+        """
+        import time
+        try:
+            uid = os.getuid()
+            cutoff = time.time() - 3600
+            for entry in base.glob("marlllm_lora_*"):
+                try:
+                    if not entry.is_dir():
+                        continue
+                    st = entry.stat()
+                    if st.st_uid != uid or st.st_mtime > cutoff:
+                        continue
+                    shutil.rmtree(entry, ignore_errors=True)
+                except OSError:
+                    continue
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stale staging dir sweep failed: %s", exc)
+
     def _save_adapter(self, peft_model: Any, name: str) -> Path:
         """Save the named adapter to a fresh path and bump its cache id.
 
@@ -207,8 +246,15 @@ class VLLMSamplingEngine:
                         f"under {path} (checked {path}/ and {actual_path}/). "
                         f"Contents: {list(path.rglob('*'))[:20]}"
                     )
+            prev_id_dir = self._current_id_dirs.get(name)
             self._current_ids[name] = int_id
             self._current_paths[name] = actual_path
+            self._current_id_dirs[name] = path
+            # vLLM caches LoRAs by lora_int_id and we only ever hand it the
+            # newest id, so the previous on-disk copy is unreferenced and
+            # safe to drop. Without this the staging dir grows unbounded.
+            if prev_id_dir is not None and prev_id_dir != path:
+                shutil.rmtree(prev_id_dir, ignore_errors=True)
         finally:
             if prev_active is not None and prev_active != name:
                 try:

@@ -1,10 +1,5 @@
-# Run 6 — 2-agent thinking-tokens variant of run4_2agent_7B (Robotic Athanor).
-# Identical to run4 except `thinking_enabled: true` on the env, which lets
-# the model emit private reasoning between <think>...</think> before the
-# public post.  Public post budget is held at 384 (matching run4 exactly,
-# so what the forum sees is in the same regime).  Total budget (thinking
-# + post combined) is 1408 — the model is told both numbers and learns to
-# split between private reasoning and public post within those limits.
+# Run 6 — 2-agent thinking-tokens variant on the Robotic Athanor scenario.
+# Twin of run7_8agent_7B_robotic_athanor; the only difference is 2 vs 8 agents.
 name: run6_2agent_7B_robotic_athanor
 script: train_population
 slurm:
@@ -14,6 +9,16 @@ model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
+# Memory-tuned for vLLM + DDP co-location on 4 × GH200 (95 GB each):
+#   - lora_modules: q,v only (~5x less LoRA than all-7-projection default)
+#   - use_8bit_adam: bitsandbytes AdamW8bit (halves Adam state)
+#   - vllm_quantization: fp8 (halves vLLM weight memory ~17 GB → ~9 GB)
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
 characters:
 - Silas Varnham
 - Thaddeus 'Aurelius' Thorne
@@ -33,25 +38,25 @@ checkpoint_every: 25
 num_checkpoint_traces: 8
 snapshot_eval_path: eval_contexts/robotic_athanor.json
 snapshot_samples_per_context: 8
-snapshot_max_new_tokens: 1408
-max_episode_tokens: 32768
+snapshot_max_new_tokens: 384
+max_episode_tokens: 24576
 environments:
 - name: robotic_athanor
   type: forum
   scenario: robotic_athanor
-  post_token_budget: 384
-  total_token_budget: 1408
+  post_token_budget: 128
+  total_token_budget: 384
   character_set: canonical_2
-  max_posts: 12
+  max_posts: 16
   post_order: round_robin
   thinking_enabled: true
 output_dir: runs/cultural_emergence/run6_2agent_7B_robotic_athanor
 gradient_checkpointing: true
 
 var_decomp_enabled: false
-var_decomp_n_contexts: 32
-var_decomp_K: 8
-var_decomp_M: 4
-var_decomp_n_eval_early: 5
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
 var_decomp_n_eval_late: 25
 var_decomp_switch_iter: 50

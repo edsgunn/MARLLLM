@@ -811,13 +811,21 @@ class PopulationTrainer:
                 pairings.append(tuple(roles))
 
         # Deep-copy one env per episode from the appropriate spec template.
+        # Use a single shared ``order_seed`` across all parallel episodes so
+        # round-robin turn schedules stay aligned — otherwise per-episode
+        # turn-order shuffling desynchronizes which agent acts at each step
+        # and collapses vLLM batching from N→1 (3× more gen calls, ~2× lower
+        # tokens/s). The order varies across rollout calls (one shuffle per
+        # iteration), which is enough to avoid a fixed opener.
+        order_seed = self._rng_counter
+        self._rng_counter += 1
         envs: list = []
         for k in range(n):
             spec = env_specs[k]
             env_k = copy.deepcopy(spec.env)
             if hasattr(env_k, "_tok"):
                 env_k._tok = spec.env._tok
-            env_k.reset(seed=self._rng_counter)
+            env_k.reset(seed=self._rng_counter, options={"order_seed": order_seed})
             self._rng_counter += 1
             envs.append(env_k)
 
@@ -1214,6 +1222,7 @@ class PopulationTrainer:
             max_new_tokens=self.config.snapshot_max_new_tokens,
             temperature=self.config.temperature,
             eos_token_ids=eos_ids,
+            sampling_engine=self.sampling_engine,
         )
         out = write_snapshot(
             output_dir=Path(self.config.output_dir),
