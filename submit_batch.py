@@ -323,7 +323,7 @@ fi
 export NCCL_DEBUG=WARN
 export NCCL_SOCKET_IFNAME=hsn             # use Slingshot high-speed NICs
 export FI_CXI_ATS=0                       # disable address translation for CXI
-export PYTORCH_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Per-job torch.compile / vLLM compile caches. The default location is on
 # shared NFS ($HOME/.cache); when several jobs compile the same model
@@ -334,6 +334,11 @@ export VLLM_CACHE_ROOT="/tmp/vllm_cache_${{SLURM_JOB_ID:-$$}}"
 export TORCHINDUCTOR_CACHE_DIR="/tmp/torchinductor_${{SLURM_JOB_ID:-$$}}"
 mkdir -p "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"
 trap 'rm -rf "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"' EXIT
+
+# vLLM ZMQ IPC socket directory. If VLLM_RPC_BASE_PATH is unset OR exported
+# empty, vLLM constructs `ipc:///{uuid}` which resolves relative to cwd and
+# litters the project root with UUID-named socket files on every run.
+export VLLM_RPC_BASE_PATH="${{TMPDIR:-/tmp}}"
 
 # ── Pre-flight cleanup ────────────────────────────────────────────────────────
 # A previous failed job on this node can leave behind orphaned python/torchrun/

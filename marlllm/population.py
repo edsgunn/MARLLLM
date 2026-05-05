@@ -558,19 +558,21 @@ class PopulationTrainer:
                         mb_types     = mb_types[:, :actual_len]
                         mb_agents    = mb_agents[:, :actual_len]
 
-                    logits, values = agent.evaluate(mb_input_ids, mb_attn)
-                    ref_logits = agent.evaluate_ref(mb_input_ids, mb_attn)
+                    last_hidden, values = agent.evaluate_hidden(mb_input_ids, mb_attn)
+                    last_hidden_ref = agent.evaluate_hidden_ref(mb_input_ids, mb_attn)
                     agent_idx = self.agent_index[pop_name]
 
                     loss_val, metrics = self.loss.compute_loss(
-                        logits=logits,
+                        last_hidden=last_hidden,
+                        lm_head=agent.lm_head,
                         values=values,
                         input_ids=mb_input_ids,
                         token_type_mask=mb_types,
                         agent_id_mask=mb_agents,
                         target_agent_idx=agent_idx,
                         config=self.config,
-                        ref_logits=ref_logits,
+                        last_hidden_ref=last_hidden_ref,
+                        lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
                     )
 
                     scale = 1.0 / (num_micros * len(self.population))

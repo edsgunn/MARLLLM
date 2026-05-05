@@ -208,3 +208,20 @@ class APIAgent(Agent):
         attention_mask: torch.Tensor,
     ) -> torch.Tensor | None:
         return None
+
+    def evaluate_hidden(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        raise RuntimeError(
+            f"APIAgent {self._agent_id!r} is non-differentiable; it must be "
+            f"listed in TrainingConfig.frozen_agents."
+        )
+
+    def evaluate_hidden_ref(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor | None:
+        return None

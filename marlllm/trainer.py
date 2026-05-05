@@ -200,18 +200,20 @@ class Trainer:
                         mb_token_type     = mb_token_type[:, :actual_len]
                         mb_agent_id       = mb_agent_id[:, :actual_len]
 
-                    logits, values = agent.evaluate(mb_input_ids, mb_attention_mask)
-                    ref_logits = agent.evaluate_ref(mb_input_ids, mb_attention_mask)
+                    last_hidden, values = agent.evaluate_hidden(mb_input_ids, mb_attention_mask)
+                    last_hidden_ref = agent.evaluate_hidden_ref(mb_input_ids, mb_attention_mask)
 
                     loss_val, metrics = self.loss.compute_loss(
-                        logits=logits,
+                        last_hidden=last_hidden,
+                        lm_head=agent.lm_head,
                         values=values,
                         input_ids=mb_input_ids,
                         token_type_mask=mb_token_type,
                         agent_id_mask=mb_agent_id,
                         target_agent_idx=agent_idx,
                         config=self.config,
-                        ref_logits=ref_logits,
+                        last_hidden_ref=last_hidden_ref,
+                        lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
                         perception_source_indices=self._perception_source_indices,
                     )
 

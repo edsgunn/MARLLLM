@@ -907,7 +907,22 @@ function renderForumView(trace) {
   });
   html += '</div>';
   html += '<div class="section-hdr">Forum thread</div>';
-  const thread = (ep.thread||[]).slice().sort((a,b)=>(a.post_index||0)-(b.post_index||0));
+  // Preserve the env's append order. Posts with a numeric ``post_index``
+  // sort by that; pybot/tool-output posts (``post_index: null``) carry the
+  // array index of the post they followed so they stay attached to it
+  // instead of collapsing to the top of the thread.
+  const _raw = (ep.thread||[]);
+  let _lastNumeric = -1;
+  const thread = _raw.map((p, i) => {
+    let key;
+    if (typeof p.post_index === 'number') {
+      _lastNumeric = p.post_index;
+      key = p.post_index * 1000 + i;
+    } else {
+      key = _lastNumeric * 1000 + i;
+    }
+    return {post: p, _key: key};
+  }).sort((a, b) => a._key - b._key).map(x => x.post);
   if (!thread.length) return html + '<div style="color:var(--muted)">No posts.</div>';
   html += '<div id="forum-view">';
   thread.forEach(post => {
@@ -918,9 +933,12 @@ function renderForumView(trace) {
       thinkHtml = '<details class="forum-think"><summary>thinking</summary>'
                 + '<div class="forum-think-body">'+esc(post.thinking)+'</div></details>';
     }
+    const idxChip = (typeof post.post_index === 'number')
+      ? '<span class="post-idx">#'+esc(post.post_index)+'</span>'
+      : (post.kind === 'tool_output' ? '<span class="post-idx">tool</span>' : '');
     html += '<div class="forum-post" style="border-color:'+c.border+'">'
           + '<div class="forum-post-hdr" style="background:'+c.bg+'">'+esc(speaker)
-          + '<span class="post-idx">#'+esc(post.post_index)+'</span></div>'
+          + idxChip+'</div>'
           + thinkHtml
           + '<div class="forum-post-body">'+esc(post.text||'')+'</div></div>';
   });

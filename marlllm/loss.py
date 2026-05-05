@@ -20,12 +20,28 @@ Stop-gradient contract (all enforced here, not in the model):
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Callable
 
 import torch
 import torch.nn.functional as F
 
 from marlllm.config import TrainingConfig
 from marlllm.types import TokenType
+
+
+# Chunk sizes for the lm_head + log-softmax / cross-entropy passes. The
+# (B, T, V) logits tensor is several GiB at long T (Qwen2.5 vocab is 152k);
+# materialising it pushed the 8-agent study_group runs over GPU memory in
+# backward. We never form the full tensor — instead we apply lm_head in
+# chunks and reduce to scalars / (B, T) tensors immediately.
+#
+# T_CHUNK governs the per-token CE pass (drives obs surprises + act log-probs);
+# 2048 keeps a chunk's logits at ~600 MiB in bf16 for B=1.
+# N_ACT_CHUNK governs the per-act-position passes (entropy + KL); these
+# materialise (CHUNK, V) twice and live in fp32 inside log_softmax, so we
+# keep the chunk small.
+_T_CHUNK = 2048
+_N_ACT_CHUNK = 256
 
 
 class Loss(ABC):
@@ -40,15 +56,17 @@ class Loss(ABC):
     @abstractmethod
     def compute_loss(
         self,
-        logits: torch.Tensor,           # (B, T, V)
-        values: torch.Tensor,           # (B, T)
-        input_ids: torch.Tensor,        # (B, T)
-        token_type_mask: torch.Tensor,  # (B, T)
-        agent_id_mask: torch.Tensor,    # (B, T)
+        last_hidden: torch.Tensor,           # (B, T, H)
+        lm_head: Callable[[torch.Tensor], torch.Tensor],
+        values: torch.Tensor,                # (B, T)
+        input_ids: torch.Tensor,             # (B, T)
+        token_type_mask: torch.Tensor,       # (B, T)
+        agent_id_mask: torch.Tensor,         # (B, T)
         target_agent_idx: int,
         config: TrainingConfig,
-        ref_logits: torch.Tensor | None = None,  # (B, T, V) frozen reference, optional
-        perception_source_indices: list[int] | None = None,  # source-agent gating for L_perc
+        last_hidden_ref: torch.Tensor | None = None,    # (B, T, H) frozen reference
+        lm_head_ref: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        perception_source_indices: list[int] | None = None,
     ) -> tuple[torch.Tensor, dict]: ...
 
 
@@ -68,17 +86,26 @@ class CCSMLoss(Loss):
 
     def compute_loss(
         self,
-        logits: torch.Tensor,
+        last_hidden: torch.Tensor,
+        lm_head: Callable[[torch.Tensor], torch.Tensor],
         values: torch.Tensor,
         input_ids: torch.Tensor,
         token_type_mask: torch.Tensor,
         agent_id_mask: torch.Tensor,
         target_agent_idx: int,
         config: TrainingConfig,
-        ref_logits: torch.Tensor | None = None,
+        last_hidden_ref: torch.Tensor | None = None,
+        lm_head_ref: Callable[[torch.Tensor], torch.Tensor] | None = None,
         perception_source_indices: list[int] | None = None,
     ) -> tuple[torch.Tensor, dict]:
-        surprises = _compute_obs_surprises(logits, input_ids, token_type_mask)
+        # Single chunked pass through lm_head produces shifted per-token
+        # log p(input_ids[t+1] | hidden[t]). Both surprises and act log-probs
+        # are derived from this same (B, T-1) tensor, so we never re-run the
+        # head over the same hidden states twice.
+        token_lp = _token_log_probs_shifted_chunked(
+            last_hidden, lm_head, input_ids, _T_CHUNK,
+        )
+        surprises = _surprises_from_token_lp(token_lp, token_type_mask)
         returns = _compute_returns(surprises, token_type_mask, config.gamma)
 
         obs_mask = token_type_mask == int(TokenType.OBS)
@@ -93,15 +120,15 @@ class CCSMLoss(Loss):
         # ---- Perception loss ----
         obs_surprises = surprises[obs_mask]
         if obs_surprises.numel() == 0:
-            l_perc = torch.tensor(0.0, device=logits.device, dtype=logits.dtype, requires_grad=True)
+            l_perc = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype, requires_grad=True)
         else:
             l_perc = obs_surprises.mean()
 
         # ---- Action loss ----
         # act_mask excludes position 0: the Trainer always prepends the character
         # prompt (as OBS or PAD depending on prompt_as_observation), so position 0
-        # is never ACT. _act_log_probs uses the causal shift (logits[:,:-1] →
-        # input_ids[:,1:]), which matches act_mask[:,1:] — both exclude pos 0.
+        # is never ACT. token_lp uses the causal shift (hidden[t] predicts
+        # input_ids[t+1]), which matches act_mask[:,1:] — both exclude pos 0.
         if act_mask.any():
             act_returns = returns[act_mask]  # G_t at act positions
 
@@ -113,12 +140,19 @@ class CCSMLoss(Loss):
             advantages = -(act_returns - act_values_det)
 
             # Log-probs of the sampled action tokens (from the training forward pass)
-            act_log_probs = _act_log_probs(logits, input_ids, act_mask)
+            shifted_act_mask = act_mask[:, 1:]
+            act_log_probs = token_lp[shifted_act_mask]  # flat (N_act,)
 
             policy_loss = -(act_log_probs * advantages.detach()).mean()
 
-            # Entropy bonus: H[p_θ] at action positions (§6.1)
-            entropy = _action_entropy(logits, act_mask)
+            # Entropy bonus: H[p_θ] at action positions (§6.1).
+            # We index hidden states at the act positions first, then push only
+            # those through lm_head in chunks — never materialising the full
+            # (B, T-1, V) entropy tensor.
+            act_hidden_cur = last_hidden[:, :-1, :][shifted_act_mask]  # (N_act, H)
+            entropy = _action_entropy_from_hidden_chunked(
+                act_hidden_cur, lm_head, _N_ACT_CHUNK,
+            )
 
             l_act = policy_loss - config.beta * entropy
 
@@ -132,24 +166,29 @@ class CCSMLoss(Loss):
             act_values = values[act_mask]
             l_val = F.mse_loss(act_values, act_returns.detach())
         else:
-            l_act = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
-            l_val = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
-            advantages = torch.zeros(0, device=logits.device, dtype=logits.dtype)
-            entropy = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
-            act_returns = torch.zeros(0, device=logits.device, dtype=logits.dtype)
+            l_act = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
+            l_val = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
+            advantages = torch.zeros(0, device=last_hidden.device, dtype=last_hidden.dtype)
+            entropy = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
+            act_returns = torch.zeros(0, device=last_hidden.device, dtype=last_hidden.dtype)
+            act_hidden_cur = None
 
         # ---- KL penalty ----
         # KL(π_θ || π_ref) at ACT positions, using the causal shift.
         # Only computed when a reference model was provided and kl_coef > 0.
-        if ref_logits is not None and config.kl_coef > 0.0 and act_mask.any():
+        if (
+            last_hidden_ref is not None
+            and lm_head_ref is not None
+            and config.kl_coef > 0.0
+            and act_mask.any()
+        ):
             shifted_act_mask = act_mask[:, 1:]
-            act_logits_cur = logits[:, :-1, :][shifted_act_mask]       # (N_act, V)
-            act_logits_ref = ref_logits[:, :-1, :][shifted_act_mask]   # (N_act, V)
-            log_p = F.log_softmax(act_logits_cur, dim=-1)
-            log_p_ref = F.log_softmax(act_logits_ref, dim=-1)
-            kl = (log_p.exp() * (log_p - log_p_ref)).sum(dim=-1).mean()
+            act_hidden_ref = last_hidden_ref[:, :-1, :][shifted_act_mask]  # (N_act, H)
+            kl = _kl_at_act_chunked(
+                act_hidden_cur, lm_head, act_hidden_ref, lm_head_ref, _N_ACT_CHUNK,
+            )
         else:
-            kl = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+            kl = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
 
         # Surprise distribution percentiles (Phase A §3.3): cheap to compute and
         # essential for diagnosing dark-room collapse vs healthy compression.
@@ -293,6 +332,95 @@ def _act_log_probs(
     ).reshape(B, T - 1)  # (B, T-1)
 
     return token_lp[shifted_act_mask]  # flat (N_act,)
+
+
+def _token_log_probs_shifted_chunked(
+    last_hidden: torch.Tensor,
+    lm_head: Callable[[torch.Tensor], torch.Tensor],
+    input_ids: torch.Tensor,
+    chunk_t: int,
+) -> torch.Tensor:
+    """Per-token log p(input_ids[t+1] | hidden[t]) for t = 0 .. T-2.
+
+    Applies lm_head in T-axis chunks so the (B, T, V) logits tensor is never
+    materialised. Returns a (B, T-1) tensor in the hidden-state dtype.
+    """
+    B, T, _H = last_hidden.shape
+    targets = input_ids[:, 1:]  # (B, T-1)
+    out = last_hidden.new_empty((B, T - 1))
+    for s in range(0, T - 1, chunk_t):
+        e = min(s + chunk_t, T - 1)
+        logits_chunk = lm_head(last_hidden[:, s:e, :])  # (B, e-s, V)
+        V = logits_chunk.shape[-1]
+        # cross_entropy is fused: never allocates the full log_softmax tensor.
+        nll = F.cross_entropy(
+            logits_chunk.reshape(-1, V),
+            targets[:, s:e].reshape(-1),
+            reduction="none",
+        ).reshape(B, e - s)
+        out[:, s:e] = -nll  # log p
+    return out
+
+
+def _surprises_from_token_lp(
+    token_lp: torch.Tensor,           # (B, T-1) log-probs
+    token_type_mask: torch.Tensor,    # (B, T)
+) -> torch.Tensor:
+    """Negative log-prob at OBS positions, padded to (B, T) with 0 at pos 0."""
+    B, _ = token_lp.shape
+    shifted_types = token_type_mask[:, 1:]
+    obs_mask = shifted_types == int(TokenType.OBS)
+    surprises_shifted = torch.where(
+        obs_mask, -token_lp, torch.zeros_like(token_lp)
+    )
+    return torch.cat(
+        [
+            torch.zeros(B, 1, device=token_lp.device, dtype=token_lp.dtype),
+            surprises_shifted,
+        ],
+        dim=1,
+    )
+
+
+def _action_entropy_from_hidden_chunked(
+    act_hidden: torch.Tensor,                                    # (N_act, H)
+    lm_head: Callable[[torch.Tensor], torch.Tensor],
+    n_chunk: int,
+) -> torch.Tensor:
+    """Mean entropy at the act positions, computing logits in N-axis chunks."""
+    N = act_hidden.shape[0]
+    if N == 0:
+        return act_hidden.new_zeros(())
+    ent_acc = act_hidden.new_zeros(())
+    for start in range(0, N, n_chunk):
+        end = min(start + n_chunk, N)
+        log_p = F.log_softmax(lm_head(act_hidden[start:end]), dim=-1)
+        ent_acc = ent_acc - (log_p.exp() * log_p).sum()
+    return ent_acc / N
+
+
+def _kl_at_act_chunked(
+    act_hidden_cur: torch.Tensor,                                # (N_act, H)
+    lm_head: Callable[[torch.Tensor], torch.Tensor],
+    act_hidden_ref: torch.Tensor,                                # (N_act, H)
+    lm_head_ref: Callable[[torch.Tensor], torch.Tensor],
+    n_chunk: int,
+) -> torch.Tensor:
+    """KL(π_θ || π_ref) averaged over act positions, in N-axis chunks.
+
+    Mathematically identical to a single-shot computation; chunking only
+    changes the order of floating-point summation across positions.
+    """
+    N = act_hidden_cur.shape[0]
+    if N == 0:
+        return act_hidden_cur.new_zeros(())
+    kl_acc = act_hidden_cur.new_zeros(())
+    for start in range(0, N, n_chunk):
+        end = min(start + n_chunk, N)
+        log_p = F.log_softmax(lm_head(act_hidden_cur[start:end]), dim=-1)
+        log_p_ref = F.log_softmax(lm_head_ref(act_hidden_ref[start:end]), dim=-1)
+        kl_acc = kl_acc + (log_p.exp() * (log_p - log_p_ref)).sum(dim=-1).sum()
+    return kl_acc / N
 
 
 def _action_entropy(

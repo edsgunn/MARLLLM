@@ -50,11 +50,54 @@ a preprocessor over it.
 """
 from __future__ import annotations
 
+import ast
+import multiprocessing as _mp
 import random
+import subprocess
+import sys
 from typing import Any, Callable
 
 from pettingzoo import AECEnv
 from transformers import PreTrainedTokenizerBase
+
+
+# ── pybot fast path ──────────────────────────────────────────────────────────
+# A forkserver-backed worker drops per-call cost from a cold subprocess
+# launch (~80–200 ms on ARM Grace) to a fork from a pre-warmed helper
+# (~5–15 ms).  The helper is created lazily on first call and shared by
+# all ``ForumEnv`` instances in the process; each request still spawns
+# a fresh child for hard isolation (no state leakage between calls).
+
+_PYEXEC_CTX: Any = None
+
+
+def _get_pyexec_ctx() -> Any:
+    global _PYEXEC_CTX
+    if _PYEXEC_CTX is None:
+        _PYEXEC_CTX = _mp.get_context("forkserver")
+    return _PYEXEC_CTX
+
+
+def _pyexec_worker(code: str, conn: Any) -> None:
+    """Run ``code`` with stdout/stderr captured; send (out, err, rc) back."""
+    import contextlib
+    import io
+    import traceback
+
+    out_buf, err_buf = io.StringIO(), io.StringIO()
+    rc = 0
+    try:
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            exec(compile(code, "<pybot>", "exec"), {"__name__": "__main__"})
+    except SystemExit as e:
+        rc = e.code if isinstance(e.code, int) else 1
+    except BaseException:
+        traceback.print_exc(file=err_buf)
+        rc = 1
+    try:
+        conn.send((out_buf.getvalue(), err_buf.getvalue(), rc))
+    finally:
+        conn.close()
 
 
 class ForumEnv(AECEnv):
@@ -115,6 +158,13 @@ class ForumEnv(AECEnv):
         thinking_close_tag: str = "</think>",
         post_token_budget: int | None = None,
         total_token_budget: int | None = None,
+        python_tool_enabled: bool = False,
+        python_open_tag: str = "<python>",
+        python_close_tag: str = "</python>",
+        python_bot_name: str = "pybot",
+        python_timeout_seconds: float = 5.0,
+        python_output_max_chars: int = 2000,
+        python_use_forkserver: bool = False,
     ) -> None:
         super().__init__()
 
@@ -173,6 +223,24 @@ class ForumEnv(AECEnv):
         self._thinking_enabled = bool(thinking_enabled)
         self._thinking_open_tag = thinking_open_tag
         self._thinking_close_tag = thinking_close_tag
+
+        # Optional ``pybot`` python-execution tool.  When enabled, any code
+        # the agent puts inside ``<python>...</python>`` tags is stripped
+        # from the public post (like thinking tokens) and executed in a
+        # subprocess; the result is appended to the thread as a separate
+        # post by ``python_bot_name`` (default "pybot") that contains the
+        # original code plus the captured stdout/stderr, attributed to the
+        # submitter.  The bot post is delivered to every agent — including
+        # the submitter — so they can see the result on their next turn.
+        # pybot posts are tool outputs and do NOT count against
+        # ``max_posts`` (only agent turns do).
+        self._python_tool_enabled = bool(python_tool_enabled)
+        self._python_open_tag = python_open_tag
+        self._python_close_tag = python_close_tag
+        self._python_bot_name = python_bot_name
+        self._python_timeout_seconds = float(python_timeout_seconds)
+        self._python_output_max_chars = int(python_output_max_chars)
+        self._python_use_forkserver = bool(python_use_forkserver)
 
         # Optional sentence appended to the initial ctx so the model is told
         # up-front roughly how long a post is allowed to be — small instruct
@@ -235,6 +303,13 @@ class ForumEnv(AECEnv):
             thinking_close_tag=self._thinking_close_tag,
             post_token_budget=self._post_token_budget,
             total_token_budget=self._total_token_budget,
+            python_tool_enabled=self._python_tool_enabled,
+            python_open_tag=self._python_open_tag,
+            python_close_tag=self._python_close_tag,
+            python_bot_name=self._python_bot_name,
+            python_timeout_seconds=self._python_timeout_seconds,
+            python_output_max_chars=self._python_output_max_chars,
+            python_use_forkserver=self._python_use_forkserver,
         )
         memo[id(self)] = new
         return new
@@ -308,6 +383,17 @@ class ForumEnv(AECEnv):
 
         text = self._decode_action(action)
 
+        # Strip ``<python>`` blocks from the public post (the raw
+        # assistant tokens, including the tags, remain in the speaker's
+        # own context — same convention as thinking tokens).  The
+        # extracted code blocks are executed below and surfaced via
+        # separate ``pybot`` posts.
+        if self._python_tool_enabled:
+            text, code_blocks, unclosed = self._extract_python(text)
+        else:
+            code_blocks = []
+            unclosed = False
+
         # Record on canonical thread.
         self._thread.append({
             "post_index": self._post_count,
@@ -320,6 +406,42 @@ class ForumEnv(AECEnv):
         for other in self.agents:
             if other != speaker:
                 self._pending_posts[other].append((speaker, text))
+
+        # Run any python blocks the speaker submitted and emit a pybot
+        # post per block.  pybot posts are tool outputs, not turns, so
+        # they do not advance ``_post_count`` / ``max_posts``.
+        for code in code_blocks:
+            output = self._run_python(code)
+            bot_text = self._format_pybot_post(speaker, code, output)
+            self._thread.append({
+                "post_index": None,
+                "speaker": self._python_bot_name,
+                "text": bot_text,
+                "kind": "tool_output",
+                "submitter": speaker,
+            })
+            for a in self.agents:
+                self._pending_posts[a].append((self._python_bot_name, bot_text))
+
+        # Surface an unclosed ``<python>`` tag as a visible pybot failure
+        # rather than silently dropping the trailing code.  Without this,
+        # an agent who ran out of token budget mid-block sees no reply
+        # and has no signal that the tool didn't fire.
+        if unclosed:
+            err_text = (
+                f"{self._python_bot_name}: {speaker}'s post contained an "
+                f"unclosed {self._python_open_tag} block — no code was "
+                f"executed (likely cut off by the post token budget)."
+            )
+            self._thread.append({
+                "post_index": None,
+                "speaker": self._python_bot_name,
+                "text": err_text,
+                "kind": "tool_output",
+                "submitter": speaker,
+            })
+            for a in self.agents:
+                self._pending_posts[a].append((self._python_bot_name, err_text))
 
         # Termination check.
         if self._post_count >= self._max_posts:
@@ -374,6 +496,169 @@ class ForumEnv(AECEnv):
                 break  # unclosed — drop the rest
             i = k + len(c)
         return "".join(out).strip()
+
+    def _extract_python(self, text: str) -> tuple[str, list[str], bool]:
+        """Pull ``<python>...</python>`` blocks out of a post.
+
+        Returns ``(public_text, code_blocks, unclosed)``.  The tag pair
+        is stripped from the post (along with its contents) so that
+        other agents never see the raw code in the speaker's post —
+        they see it only via the pybot reply that follows.  An open
+        tag without a matching close (typically: agent ran out of
+        token budget mid-block) sets ``unclosed=True`` so the caller
+        can surface a visible failure rather than silently dropping.
+        """
+        o, c = self._python_open_tag, self._python_close_tag
+        out: list[str] = []
+        blocks: list[str] = []
+        unclosed = False
+        i = 0
+        while i < len(text):
+            j = text.find(o, i)
+            if j < 0:
+                out.append(text[i:])
+                break
+            out.append(text[i:j])
+            k = text.find(c, j + len(o))
+            if k < 0:
+                unclosed = True
+                break  # drop the trailing partial code; do not execute
+            blocks.append(text[j + len(o):k])
+            i = k + len(c)
+        return "".join(out).strip(), blocks, unclosed
+
+    @staticmethod
+    def _autoprint_rewrite(code: str) -> str:
+        """If the last top-level statement is a bare expression, wrap it
+        so its value is printed (Jupyter / REPL convention).
+
+        Leaves the code unchanged if it doesn't parse, has no body,
+        ends in a non-expression statement, or the trailing expression
+        is a docstring / None constant / existing ``print(...)`` call.
+        Adds no output for ``None``-valued expressions, matching the
+        Jupyter displayhook.
+        """
+        try:
+            tree = ast.parse(code, mode="exec")
+        except SyntaxError:
+            return code  # let the subprocess surface the SyntaxError
+        if not tree.body:
+            return code
+        last = tree.body[-1]
+        if not isinstance(last, ast.Expr):
+            return code
+        val = last.value
+        # Skip trailing docstrings / bare None / plain string literals.
+        if isinstance(val, ast.Constant) and (
+            val.value is None or isinstance(val.value, (str, bytes))
+        ):
+            return code
+        # Skip if it is already ``print(...)``.
+        if (
+            isinstance(val, ast.Call)
+            and isinstance(val.func, ast.Name)
+            and val.func.id == "print"
+        ):
+            return code
+        # Replace ``<expr>`` with ``__pybot_r__ = <expr>; if __pybot_r__ is
+        # not None: print(repr(__pybot_r__))``.
+        assign = ast.Assign(
+            targets=[ast.Name(id="__pybot_r__", ctx=ast.Store())],
+            value=val,
+        )
+        guarded_print = ast.parse(
+            "if __pybot_r__ is not None:\n    print(repr(__pybot_r__))"
+        ).body[0]
+        new_body = list(tree.body[:-1]) + [assign, guarded_print]
+        new_tree = ast.Module(body=new_body, type_ignores=[])
+        ast.fix_missing_locations(new_tree)
+        try:
+            return ast.unparse(new_tree)
+        except Exception:  # noqa: BLE001
+            return code
+
+    def _run_python(self, code: str) -> str:
+        """Execute one code block in isolation and return formatted output.
+
+        Uses a forkserver-backed worker (fast: ~5–15 ms launch) when
+        ``python_use_forkserver`` is set; falls back to a cold
+        ``subprocess.run`` of ``python -I -c`` otherwise.  Both paths
+        are sandboxed in a fresh process (no state leakage between
+        calls) and honour ``python_timeout_seconds``.
+        """
+        run_code = self._autoprint_rewrite(code)
+        if self._python_use_forkserver:
+            stdout, stderr, rc = self._run_python_forkserver(run_code)
+        else:
+            stdout, stderr, rc = self._run_python_subprocess(run_code)
+
+        if rc == "timeout":
+            return f"[pybot: timed out after {self._python_timeout_seconds:g}s]"
+        if rc == "error":
+            return f"[pybot: execution error: {stderr}]"
+
+        parts: list[str] = []
+        if stdout:
+            parts.append(stdout.rstrip("\n"))
+        if stderr:
+            parts.append("[stderr]\n" + stderr.rstrip("\n"))
+        if isinstance(rc, int) and rc != 0 and not stderr:
+            parts.append(f"[exit code {rc}]")
+        result = "\n".join(parts) if parts else "(no output)"
+        if len(result) > self._python_output_max_chars:
+            result = result[: self._python_output_max_chars] + "\n[... truncated]"
+        return result
+
+    def _run_python_forkserver(self, code: str) -> tuple[str, str, Any]:
+        ctx = _get_pyexec_ctx()
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        try:
+            proc = ctx.Process(target=_pyexec_worker, args=(code, child_conn))
+            proc.start()
+            child_conn.close()  # parent only reads
+            proc.join(self._python_timeout_seconds)
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(0.5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(0.5)
+                return "", "", "timeout"
+            stdout, stderr, rc = "", "", -1
+            try:
+                if parent_conn.poll(0.5):
+                    stdout, stderr, rc = parent_conn.recv()
+            except (EOFError, OSError):
+                pass
+            return stdout, stderr, rc
+        except Exception as e:  # noqa: BLE001
+            return "", str(e), "error"
+        finally:
+            try:
+                parent_conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _run_python_subprocess(self, code: str) -> tuple[str, str, Any]:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-I", "-c", code],
+                capture_output=True,
+                text=True,
+                timeout=self._python_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return "", "", "timeout"
+        except Exception as e:  # noqa: BLE001
+            return "", str(e), "error"
+        return proc.stdout, proc.stderr, proc.returncode
+
+    def _format_pybot_post(self, submitter: str, code: str, output: str) -> str:
+        return (
+            f"Running code submitted by {submitter}:\n"
+            f"{self._python_open_tag}\n{code}\n{self._python_close_tag}\n"
+            f"Output:\n{output}"
+        )
 
     def _render_initial_ctx(self) -> str:
         """First-observation framing each agent sees once."""

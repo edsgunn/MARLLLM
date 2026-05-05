@@ -1,18 +1,19 @@
-# Run 7 — 8-agent thinking-tokens variant on the Study Group scenario.
-# Twin of run6_2agent_7B_study_group; the only difference is 2 vs 8 agents.
-name: run7_8agent_7B_study_group_seed3
+# Run 7 — 8-agent study-group, extension of run7_8agent_7B_study_group by 200
+# more iterations (100 -> 300) starting from the iter_000100 checkpoints.
+#
+# Submit with --extra-args "--resume" so the trainer auto-loads
+# runs/cultural_emergence/run7_8agent_7B_study_group/checkpoints/latest
+# (a copy of iter_000100). It then continues into iter 101..300, writing
+# into the same run dir so curves/snapshots/metrics extend the original.
+name: run7_8agent_7B_study_group_extend300
 script: train_population
 slurm:
   gpus_per_node: 4
-  time: "12:00:00"
+  time: "24:00:00"
 model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0
 attn_impl: sdpa
-# Memory-tuned for vLLM + DDP co-location on 4 × GH200 (95 GB each):
-#   - lora_modules: q,v only (~5x less LoRA than all-7-projection default)
-#   - use_8bit_adam: bitsandbytes AdamW8bit (halves Adam state)
-#   - vllm_quantization: fp8 (halves vLLM weight memory ~17 GB → ~9 GB)
 use_vllm: true
 vllm_gpu_mem_util: 0.30
 vllm_max_num_seqs: 8
@@ -32,13 +33,13 @@ lora_shared_base: true
 lora_r: 64
 lora_alpha: 128
 pairing_strategy: random_no_self
-iters: 100
+iters: 300
 rollouts: 16
 lr: 5e-6
 kl_coef: 0.05
 beta: 0.01
 grad_accum: 16
-seed: 625
+seed: 1
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
@@ -56,7 +57,7 @@ environments:
   max_posts: 16
   post_order: round_robin
   thinking_enabled: true
-output_dir: runs/cultural_emergence/run7_8agent_7B_study_group_seed3
+output_dir: runs/cultural_emergence/run7_8agent_7B_study_group
 gradient_checkpointing: true
 
 var_decomp_enabled: false

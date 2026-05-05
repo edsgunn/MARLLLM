@@ -228,6 +228,34 @@ class Agent(ABC):
         """
         ...
 
+    def evaluate_hidden(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass returning (last_hidden (B, T, H), values (B, T)).
+
+        Skips the lm_head pass so the (B, T, V) logits tensor is never
+        materialised — callers reconstruct logits chunk-wise via lm_head().
+        """
+        raise NotImplementedError
+
+    def evaluate_hidden_ref(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """Hidden-state reference pass. Returns last_hidden (B, T, H) or None."""
+        return None
+
+    def lm_head(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Apply the (LoRA-active) lm_head to a hidden-state slice."""
+        raise NotImplementedError
+
+    def lm_head_ref(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Apply the lm_head used for the KL reference (adapters disabled)."""
+        raise NotImplementedError
+
     @abstractmethod
     def parameters(self) -> Iterable[nn.Parameter]: ...
 
@@ -553,6 +581,28 @@ class IndependentAgent(Agent):
         values = self._value_head(last_hidden.detach())  # (B, T) — detached
         return logits, values
 
+    def evaluate_hidden(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        # logits_to_keep=1 makes the HF lm_head pass produce only (B, 1, V)
+        # instead of (B, T, V); the full logits tensor is several GiB at long T.
+        # We discard that 1-position slice and apply lm_head ourselves chunk-wise
+        # in the loss path.
+        out = self._backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+            logits_to_keep=1,
+        )
+        last_hidden = out.hidden_states[-1]              # (B, T, H)
+        values = self._value_head(last_hidden.detach())  # (B, T)
+        return last_hidden, values
+
     @torch.no_grad()
     def evaluate_ref(
         self,
@@ -569,6 +619,33 @@ class IndependentAgent(Agent):
             torch.cuda.set_device(self.device.index or 0)
         out = self._ref_backbone(input_ids=input_ids, attention_mask=attention_mask)
         return out.logits
+
+    @torch.no_grad()
+    def evaluate_hidden_ref(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor | None:
+        if self._ref_backbone is None:
+            return None
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        out = self._ref_backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+            logits_to_keep=1,
+        )
+        return out.hidden_states[-1]
+
+    def lm_head(self, hidden: torch.Tensor) -> torch.Tensor:
+        return self._backbone.get_output_embeddings()(hidden)
+
+    def lm_head_ref(self, hidden: torch.Tensor) -> torch.Tensor:
+        if self._ref_backbone is None:
+            raise RuntimeError("No reference model loaded; lm_head_ref unavailable.")
+        return self._ref_backbone.get_output_embeddings()(hidden)
 
 
 # ============================================================================ #
@@ -771,6 +848,25 @@ class LoRASharedBaseAgent(Agent):
         values = self._value_head(last_hidden.detach())
         return logits, values
 
+    def evaluate_hidden(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self._activate()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        out = self._backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+            logits_to_keep=1,
+        )
+        last_hidden = out.hidden_states[-1]
+        values = self._value_head(last_hidden.detach())
+        return last_hidden, values
+
     @torch.no_grad()
     def evaluate_ref(
         self,
@@ -786,3 +882,34 @@ class LoRASharedBaseAgent(Agent):
         with self._backbone.disable_adapter():
             out = self._backbone(input_ids=input_ids, attention_mask=attention_mask)
         return out.logits
+
+    @torch.no_grad()
+    def evaluate_hidden_ref(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor | None:
+        if not self._keep_ref_model:
+            return None
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        with self._backbone.disable_adapter():
+            out = self._backbone(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                use_cache=False,
+                logits_to_keep=1,
+            )
+        return out.hidden_states[-1]
+
+    def lm_head(self, hidden: torch.Tensor) -> torch.Tensor:
+        # Adapter activation only affects LoRA-wrapped modules; lm_head is
+        # untouched by LoRA in our configs (target_modules = q/v/etc.), so a
+        # bare call is correct regardless of which adapter is active.
+        return self._backbone.get_output_embeddings()(hidden)
+
+    def lm_head_ref(self, hidden: torch.Tensor) -> torch.Tensor:
+        # Reference path uses the same lm_head (adapters never touch it).
+        with self._backbone.disable_adapter():
+            return self._backbone.get_output_embeddings()(hidden)
