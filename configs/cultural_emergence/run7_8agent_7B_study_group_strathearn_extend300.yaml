@@ -1,0 +1,74 @@
+# Run 7 — 8-agent Strathearn study-group, extension of
+# run7_8agent_7B_study_group_strathearn from its latest checkpoint
+# (iter_000075, after the prior 100-iter run failed at iter ~94 due to an
+# HF rate-limit on resume).
+#
+# Submit with --extra-args "--resume" so the trainer auto-loads
+# runs/cultural_emergence/run7_8agent_7B_study_group_strathearn/checkpoints/latest
+# (currently → iter_000075). It then continues into iter 76..300, writing
+# into the same run dir so curves/snapshots/metrics extend the original.
+#
+# The iter 100→150 slice of this extension serves as the within-population
+# control for the Strathearn-side migration experiments.
+name: run7_8agent_7B_study_group_strathearn_extend300
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Mhairi Buchanan
+- Callum Reid
+- Niamh Donnelly
+- Daniyal Khan
+- Eilidh MacGregor
+- Joseph Akingbola
+- Ada Whitfield
+- Finn Nakamura
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+snapshot_eval_path: eval_contexts/study_group_strathearn.json
+snapshot_samples_per_context: 8
+snapshot_max_new_tokens: 384
+max_episode_tokens: 24576
+environments:
+- name: study_group_strathearn
+  type: forum
+  scenario: study_group_strathearn
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+  thinking_enabled: true
+output_dir: runs/cultural_emergence/run7_8agent_7B_study_group_strathearn
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

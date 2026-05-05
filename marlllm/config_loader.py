@@ -50,7 +50,7 @@ from pathlib import Path
 
 
 # Keys that are metadata / slurm directives — not passed to the training script.
-_SKIP_KEYS = {"name", "description", "script", "slurm"}
+_SKIP_KEYS = {"name", "description", "script", "slurm", "migration"}
 
 
 def load_yaml(path: str) -> dict:

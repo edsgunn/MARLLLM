@@ -184,8 +184,8 @@ def _build_forum_env(cfg: dict, tokenizer: Any) -> Any:
         seed=int(spec.get("seed", 0)),
         post_length_note=spec.get("post_length_note"),
         thinking_enabled=bool(spec.get("thinking_enabled", False)),
-        thinking_open_tag=spec.get("thinking_open_tag", "<think>"),
-        thinking_close_tag=spec.get("thinking_close_tag", "</think>"),
+        post_open_tag=spec.get("post_open_tag", "<post>"),
+        post_close_tag=spec.get("post_close_tag", "</post>"),
         post_token_budget=spec.get("post_token_budget"),
         total_token_budget=spec.get("total_token_budget"),
     ), spec, personas

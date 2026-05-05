@@ -141,6 +141,7 @@ class Trainer:
             episode_correct_counts: list[int] = []
             trace_episodes: list[tuple] = []  # (ctx_snapshot, ep_info, env_trace) for trace saving
             per_agent_trajs: dict[str, list] = {aid: [] for aid in self.agents}
+            tool_totals: dict[str, float] = {}
 
             for agent_traj_dict, ep_info, ctx_snapshot, env_trace_k in self._collect_episodes_batched(
                 self.config.episodes_per_iter
@@ -153,6 +154,9 @@ class Trainer:
                     episode_results.append(ep_info["result"])
                 if "correct_count" in ep_info:
                     episode_correct_counts.append(ep_info["correct_count"])
+                for k, v in ep_info.items():
+                    if isinstance(k, str) and k.startswith("tool/"):
+                        tool_totals[k] = tool_totals.get(k, 0.0) + float(v)
 
             # 2. Per-agent forward pass + losses with gradient accumulation.
             # Each agent trains on its own N trajectories (the episodes it
@@ -242,6 +246,11 @@ class Trainer:
                 all_metrics["wrong_rate"] = episode_results.count("wrong") / n_eps
             if episode_correct_counts:
                 all_metrics["mean_correct"] = sum(episode_correct_counts) / len(episode_correct_counts)
+            if tool_totals:
+                denom = max(1, n_eps)
+                for k, total in tool_totals.items():
+                    all_metrics[f"{k}_total"] = total
+                    all_metrics[f"{k}_per_ep"] = total / denom
 
             if iteration % self.config.log_every == 0:
                 self._log_metrics(iteration, all_metrics)

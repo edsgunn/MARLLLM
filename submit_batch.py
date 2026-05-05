@@ -208,7 +208,15 @@ def make_job_script(
     # Default: project storage on Isambard AI (/lus/lfs1aip2 is not quota-limited).
     # Override with --hf-home if running elsewhere.
     _default_hf_home = "/lus/lfs1aip2/projects/a5l/egunn/hf_cache"
-    hf_home_line = f'export HF_HOME="{hf_home or _default_hf_home}"'
+    # HF_HUB_OFFLINE=1: prevent vLLM/transformers from hitting api.huggingface.co
+    # at startup. The model weights/tokenizer/config are already in HF_HOME, so
+    # there is nothing to fetch. Without this, many jobs starting concurrently
+    # trip the IP-level 429 ("Too Many Requests") and crash before training.
+    hf_home_line = (
+        f'export HF_HOME="{hf_home or _default_hf_home}"\n'
+        f'export HF_HUB_OFFLINE=1\n'
+        f'export TRANSFORMERS_OFFLINE=1'
+    )
 
     # ── Venv / uv activation ──────────────────────────────────────────────
     # When gpus_per_node > 1 we launch via torchrun for data-parallel training.
@@ -336,7 +344,7 @@ mkdir -p "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"
 trap 'rm -rf "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"' EXIT
 
 # vLLM ZMQ IPC socket directory. If VLLM_RPC_BASE_PATH is unset OR exported
-# empty, vLLM constructs `ipc:///{uuid}` which resolves relative to cwd and
+# empty, vLLM constructs `ipc:///{{uuid}}` which resolves relative to cwd and
 # litters the project root with UUID-named socket files on every run.
 export VLLM_RPC_BASE_PATH="${{TMPDIR:-/tmp}}"
 

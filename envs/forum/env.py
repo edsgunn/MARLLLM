@@ -51,10 +51,16 @@ a preprocessor over it.
 from __future__ import annotations
 
 import ast
+import json
 import multiprocessing as _mp
+import os
 import random
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
+from pathlib import Path
 from typing import Any, Callable
 
 from pettingzoo import AECEnv
@@ -78,11 +84,46 @@ def _get_pyexec_ctx() -> Any:
     return _PYEXEC_CTX
 
 
-def _pyexec_worker(code: str, conn: Any) -> None:
+_PYBOT_RLIMITS = {
+    # Address space cap. Matplotlib + numpy can be hungry; 1.5 GB is comfortable.
+    "AS": 1_500 * 1024 * 1024,
+    # Max single-file write. Big enough for plots, small enough that
+    # accidental "write 100M zeros" stops fast.
+    "FSIZE": 64 * 1024 * 1024,
+    # Cap forked children so a fork-bomb can't escape the timeout.
+    "NPROC": 64,
+}
+
+
+def _apply_pybot_sandbox(cwd: str, env: dict[str, str]) -> None:
+    """Chdir, replace env, and apply rlimits. Called inside the child."""
+    os.chdir(cwd)
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        import resource
+
+        for name, lim in _PYBOT_RLIMITS.items():
+            r = getattr(resource, f"RLIMIT_{name}", None)
+            if r is None:
+                continue
+            try:
+                soft, hard = resource.getrlimit(r)
+                new_hard = lim if hard == resource.RLIM_INFINITY else min(lim, hard)
+                resource.setrlimit(r, (min(lim, new_hard), new_hard))
+            except (ValueError, OSError):
+                pass
+    except ImportError:
+        pass
+
+
+def _pyexec_worker(code: str, conn: Any, cwd: str, env: dict[str, str]) -> None:
     """Run ``code`` with stdout/stderr captured; send (out, err, rc) back."""
     import contextlib
     import io
     import traceback
+
+    _apply_pybot_sandbox(cwd, env)
 
     out_buf, err_buf = io.StringIO(), io.StringIO()
     rc = 0
@@ -98,6 +139,27 @@ def _pyexec_worker(code: str, conn: Any) -> None:
         conn.send((out_buf.getvalue(), err_buf.getvalue(), rc))
     finally:
         conn.close()
+
+
+def _pybot_minimal_env(scratch: str) -> dict[str, str]:
+    """Minimal env for pybot children: enough to import numpy/matplotlib/etc."""
+    parent = os.environ
+    env = {
+        "PATH": parent.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "HOME": scratch,
+        "TMPDIR": scratch,
+        "PWD": scratch,
+        "LANG": parent.get("LANG", "C.UTF-8"),
+        "LC_ALL": parent.get("LC_ALL", "C.UTF-8"),
+        # Headless matplotlib so plt.savefig works without a display.
+        "MPLBACKEND": "Agg",
+        # Keep the user's Python environment importable.
+        "PYTHONPATH": parent.get("PYTHONPATH", ""),
+    }
+    for k in ("LD_LIBRARY_PATH", "LD_PRELOAD", "VIRTUAL_ENV", "CONDA_PREFIX"):
+        if k in parent:
+            env[k] = parent[k]
+    return env
 
 
 class ForumEnv(AECEnv):
@@ -154,8 +216,10 @@ class ForumEnv(AECEnv):
         reward_fn: Callable[[Any, str], float] | None = None,
         post_length_note: str | None = None,
         thinking_enabled: bool = False,
-        thinking_open_tag: str = "<think>",
-        thinking_close_tag: str = "</think>",
+        thinking_open_tag: str | None = None,  # deprecated; ignored
+        thinking_close_tag: str | None = None,  # deprecated; ignored
+        post_open_tag: str = "<post>",
+        post_close_tag: str = "</post>",
         post_token_budget: int | None = None,
         total_token_budget: int | None = None,
         python_tool_enabled: bool = False,
@@ -165,6 +229,8 @@ class ForumEnv(AECEnv):
         python_timeout_seconds: float = 5.0,
         python_output_max_chars: int = 2000,
         python_use_forkserver: bool = False,
+        pybot_scratch_root: str | None = None,
+        pybot_archive_dir: str | None = None,
     ) -> None:
         super().__init__()
 
@@ -214,15 +280,27 @@ class ForumEnv(AECEnv):
         self._rng = random.Random(seed)
         self._reward_fn = reward_fn if reward_fn is not None else (lambda _s, _a: 0.0)
 
-        # Optional "thinking tokens" toggle.  When enabled the model is told
-        # it may write private reasoning between ``<think>`` and ``</think>``
-        # before its final post.  The agent's own context keeps the raw
-        # action tokens (the trainer's append-only path is unchanged), but
-        # the env strips the tagged regions before recording the post on the
-        # canonical thread or delivering it to other agents.
+        # Tag-extraction format toggle.  When enabled, the env treats the
+        # generated text as a structured stream of three regions:
+        #
+        #   * ``<post>...</post>``      — the public utterance posted to the
+        #                                  thread (extracted, joined, sent to
+        #                                  every other agent).
+        #   * ``<python>...</python>``  — code submitted to the pybot tool
+        #                                  (extracted, executed, surfaced as
+        #                                  a separate pybot post).  Only
+        #                                  active when ``python_tool_enabled``.
+        #   * everything else           — private thinking; never shown to
+        #                                  other agents and never recorded
+        #                                  on the canonical thread.
+        #
+        # The agent's own context keeps the raw action tokens (the trainer's
+        # append-only path is unchanged); only the public output is filtered.
+        # When ``thinking_enabled=False`` the whole generation is treated as
+        # the post (legacy behaviour) — useful for plain-text baselines.
         self._thinking_enabled = bool(thinking_enabled)
-        self._thinking_open_tag = thinking_open_tag
-        self._thinking_close_tag = thinking_close_tag
+        self._post_open_tag = post_open_tag
+        self._post_close_tag = post_close_tag
 
         # Optional ``pybot`` python-execution tool.  When enabled, any code
         # the agent puts inside ``<python>...</python>`` tags is stripped
@@ -241,6 +319,26 @@ class ForumEnv(AECEnv):
         self._python_timeout_seconds = float(python_timeout_seconds)
         self._python_output_max_chars = int(python_output_max_chars)
         self._python_use_forkserver = bool(python_use_forkserver)
+
+        # Per-call scratch dir for pybot. Defaults to a fresh dir under TMPDIR.
+        # Without this, code like ``plt.savefig("foo.png")`` lands wherever the
+        # trainer was launched from (usually the repo root).
+        self._pybot_scratch_root = (
+            Path(pybot_scratch_root) if pybot_scratch_root is not None
+            else Path(tempfile.gettempdir()) / f"pybot_scratch_{os.getpid()}"
+        )
+        self._pybot_scratch_root.mkdir(parents=True, exist_ok=True)
+        # Optional archive: when set, any pybot call that produced files has
+        # its scratch dir moved here, with ``code.py`` and ``meta.json``
+        # alongside, keyed by ``ep{N}/post{P}_{speaker}_call{C}``.
+        self._pybot_archive_dir = (
+            Path(pybot_archive_dir) if pybot_archive_dir is not None else None
+        )
+        if self._pybot_archive_dir is not None:
+            self._pybot_archive_dir.mkdir(parents=True, exist_ok=True)
+        self._pybot_run_id = f"{os.getpid()}_{int(time.time())}"
+        self._episode_idx = -1
+        self._pybot_call_idx = 0
 
         # Optional sentence appended to the initial ctx so the model is told
         # up-front roughly how long a post is allowed to be — small instruct
@@ -271,6 +369,12 @@ class ForumEnv(AECEnv):
         self._infos: dict[str, dict] = {}
         self._final_state: Any = None
         self._next_idx: int = 0
+        # Per-episode tool-use counters. ``python_*`` outcomes are mutually
+        # exclusive per call: every call lands in exactly one of success /
+        # runtime_error / timeout / launch_error. ``python_unclosed`` counts
+        # tagged blocks that were dropped (cut off mid-tag) and so never ran.
+        self._tool_counts: dict[str, int] = {}
+        self._tool_counts_per_agent: dict[str, dict[str, int]] = {}
 
     # ------------------------------------------------------------------ #
     # Trainer plumbing                                                    #
@@ -299,8 +403,8 @@ class ForumEnv(AECEnv):
             reward_fn=self._reward_fn,
             post_length_note=self._post_length_note,
             thinking_enabled=self._thinking_enabled,
-            thinking_open_tag=self._thinking_open_tag,
-            thinking_close_tag=self._thinking_close_tag,
+            post_open_tag=self._post_open_tag,
+            post_close_tag=self._post_close_tag,
             post_token_budget=self._post_token_budget,
             total_token_budget=self._total_token_budget,
             python_tool_enabled=self._python_tool_enabled,
@@ -310,6 +414,10 @@ class ForumEnv(AECEnv):
             python_timeout_seconds=self._python_timeout_seconds,
             python_output_max_chars=self._python_output_max_chars,
             python_use_forkserver=self._python_use_forkserver,
+            pybot_scratch_root=str(self._pybot_scratch_root),
+            pybot_archive_dir=(
+                str(self._pybot_archive_dir) if self._pybot_archive_dir else None
+            ),
         )
         memo[id(self)] = new
         return new
@@ -336,6 +444,31 @@ class ForumEnv(AECEnv):
         self._initial_delivered = {a: False for a in self.agents}
         self._post_count = 0
         self._thread = []
+        self._episode_idx += 1
+        self._pybot_call_idx = 0
+        self._tool_counts = {
+            "python_calls": 0,
+            "python_success": 0,
+            "python_runtime_error": 0,
+            "python_timeout": 0,
+            "python_launch_error": 0,
+            "python_unclosed": 0,
+            # Per-turn post-tag outcomes (one bucket per agent turn).
+            # Mutually exclusive: every turn lands in exactly one of
+            # post_success / post_missing / post_unclosed / post_empty.
+            # ``post_blocks`` counts the total number of closed <post>
+            # blocks emitted across the episode (so multi-block turns
+            # show up).
+            "post_turns": 0,
+            "post_success": 0,
+            "post_missing": 0,
+            "post_unclosed": 0,
+            "post_empty": 0,
+            "post_blocks": 0,
+        }
+        self._tool_counts_per_agent = {
+            a: dict.fromkeys(self._tool_counts, 0) for a in self.agents
+        }
         self._cumulative_rewards = {a: 0.0 for a in self.agents}
         self._terminations = {a: False for a in self.agents}
         self._truncations = {a: False for a in self.agents}
@@ -381,18 +514,41 @@ class ForumEnv(AECEnv):
             self._was_dead_step(action)
             return
 
-        text = self._decode_action(action)
+        raw = self._decode_action(action)
 
-        # Strip ``<python>`` blocks from the public post (the raw
-        # assistant tokens, including the tags, remain in the speaker's
-        # own context — same convention as thinking tokens).  The
-        # extracted code blocks are executed below and surfaced via
-        # separate ``pybot`` posts.
-        if self._python_tool_enabled:
-            text, code_blocks, unclosed = self._extract_python(text)
+        # Extraction model:
+        #   * thinking_enabled=True  → the generation is a structured
+        #     stream; pull <post> and <python> blocks out, treat the
+        #     gaps as private thinking (discarded for the public post).
+        #   * thinking_enabled=False → legacy mode: the entire decoded
+        #     text is the post; <python> blocks are still extracted if
+        #     the python tool is enabled.
+        if self._thinking_enabled:
+            text, code_blocks, post_unclosed, py_unclosed, n_post_blocks = (
+                self._extract_tagged(raw)
+            )
+            self._record_tool_event(speaker, "post_turns")
+            if n_post_blocks > 0:
+                self._record_tool_event(speaker, "post_blocks")
+                # Count multi-block turns proportionally.
+                for _ in range(n_post_blocks - 1):
+                    self._record_tool_event(speaker, "post_blocks")
+            if post_unclosed:
+                self._record_tool_event(speaker, "post_unclosed")
+            elif n_post_blocks == 0:
+                self._record_tool_event(speaker, "post_missing")
+            elif not text:
+                self._record_tool_event(speaker, "post_empty")
+            else:
+                self._record_tool_event(speaker, "post_success")
+            unclosed = py_unclosed
         else:
-            code_blocks = []
-            unclosed = False
+            text = raw
+            if self._python_tool_enabled:
+                text, code_blocks, unclosed = self._extract_python_legacy(text)
+            else:
+                code_blocks = []
+                unclosed = False
 
         # Record on canonical thread.
         self._thread.append({
@@ -410,15 +566,19 @@ class ForumEnv(AECEnv):
         # Run any python blocks the speaker submitted and emit a pybot
         # post per block.  pybot posts are tool outputs, not turns, so
         # they do not advance ``_post_count`` / ``max_posts``.
+        submitter_post_idx = self._post_count - 1
         for code in code_blocks:
-            output = self._run_python(code)
-            bot_text = self._format_pybot_post(speaker, code, output)
+            output, status = self._run_python(code, speaker, submitter_post_idx)
+            self._record_tool_event(speaker, "python_calls")
+            self._record_tool_event(speaker, f"python_{status}")
+            bot_text = self._format_pybot_post(speaker, code, output, status)
             self._thread.append({
                 "post_index": None,
                 "speaker": self._python_bot_name,
                 "text": bot_text,
                 "kind": "tool_output",
                 "submitter": speaker,
+                "status": status,
             })
             for a in self.agents:
                 self._pending_posts[a].append((self._python_bot_name, bot_text))
@@ -428,6 +588,7 @@ class ForumEnv(AECEnv):
         # an agent who ran out of token budget mid-block sees no reply
         # and has no signal that the tool didn't fire.
         if unclosed:
+            self._record_tool_event(speaker, "python_unclosed")
             err_text = (
                 f"{self._python_bot_name}: {speaker}'s post contained an "
                 f"unclosed {self._python_open_tag} block — no code was "
@@ -439,6 +600,7 @@ class ForumEnv(AECEnv):
                 "text": err_text,
                 "kind": "tool_output",
                 "submitter": speaker,
+                "status": "unclosed",
             })
             for a in self.agents:
                 self._pending_posts[a].append((self._python_bot_name, err_text))
@@ -446,9 +608,11 @@ class ForumEnv(AECEnv):
         # Termination check.
         if self._post_count >= self._max_posts:
             self._final_state = {"thread": list(self._thread)}
+            tool_info = self._build_tool_info()
             for a in self.possible_agents:
                 self._terminations[a] = True
                 self._cumulative_rewards[a] = self._reward_fn(self._final_state, a)
+                self._infos[a] = {**self._infos.get(a, {}), **tool_info}
             return
 
         # Advance.
@@ -464,49 +628,71 @@ class ForumEnv(AECEnv):
         try:
             ids = list(action)
         except TypeError:
-            text = str(action)
-        else:
-            if not ids:
-                return ""
-            text = self._tok.decode(ids, skip_special_tokens=True)
-        if self._thinking_enabled:
-            text = self._strip_thinking(text)
-        return text
+            return str(action)
+        if not ids:
+            return ""
+        return self._tok.decode(ids, skip_special_tokens=True)
 
-    def _strip_thinking(self, text: str) -> str:
-        """Remove ``<think>...</think>`` regions from a generated post.
+    def _extract_tagged(
+        self, text: str
+    ) -> tuple[str, list[str], bool, bool, int]:
+        """Partition ``text`` into post / python / thinking regions.
 
-        Only the public post is forwarded to the canonical thread and to
-        other agents.  Unclosed thinking blocks (e.g. when the agent ran
-        out of token budget mid-reasoning) are dropped from the close tag
-        on, which is the right behaviour: the partial reasoning shouldn't
-        leak into the public thread.
+        Walks the string left-to-right.  At each position, finds the
+        nearest ``<post>`` or ``<python>`` open tag and extracts up to
+        its matching close tag.  Anything between blocks is treated as
+        private thinking and discarded.
+
+        Returns ``(public_post, code_blocks, post_unclosed, python_unclosed,
+        n_post_blocks)``:
+
+        * ``public_post`` — closed ``<post>`` block contents joined with
+          a blank line, plus any trailing partial-post content if the
+          last open ``<post>`` was unclosed (best-effort surface so a
+          turn that ran out of budget mid-post still shows what it
+          managed to write).
+        * ``code_blocks`` — closed ``<python>`` blocks, in order.
+          Unclosed python blocks are dropped (we will not run partial
+          code) but counted via ``python_unclosed=True``.
         """
-        o, c = self._thinking_open_tag, self._thinking_close_tag
-        out: list[str] = []
+        po, pc = self._post_open_tag, self._post_close_tag
+        yo, yc = self._python_open_tag, self._python_close_tag
+        py_active = self._python_tool_enabled
+        posts: list[str] = []
+        codes: list[str] = []
+        post_unclosed = False
+        python_unclosed = False
+        n_closed_posts = 0
         i = 0
         while i < len(text):
-            j = text.find(o, i)
-            if j < 0:
-                out.append(text[i:])
+            jp = text.find(po, i) if po else -1
+            jy = text.find(yo, i) if (yo and py_active) else -1
+            if jp < 0 and jy < 0:
                 break
-            out.append(text[i:j])
-            k = text.find(c, j + len(o))
-            if k < 0:
-                break  # unclosed — drop the rest
-            i = k + len(c)
-        return "".join(out).strip()
+            if jp >= 0 and (jy < 0 or jp < jy):
+                k = text.find(pc, jp + len(po))
+                if k < 0:
+                    post_unclosed = True
+                    posts.append(text[jp + len(po):])
+                    break
+                posts.append(text[jp + len(po):k])
+                n_closed_posts += 1
+                i = k + len(pc)
+            else:
+                k = text.find(yc, jy + len(yo))
+                if k < 0:
+                    python_unclosed = True
+                    break
+                codes.append(text[jy + len(yo):k])
+                i = k + len(yc)
+        public = "\n\n".join(p.strip() for p in posts).strip()
+        return public, codes, post_unclosed, python_unclosed, n_closed_posts
 
-    def _extract_python(self, text: str) -> tuple[str, list[str], bool]:
-        """Pull ``<python>...</python>`` blocks out of a post.
+    def _extract_python_legacy(self, text: str) -> tuple[str, list[str], bool]:
+        """Strip ``<python>`` blocks out of plain (non-thinking) posts.
 
-        Returns ``(public_text, code_blocks, unclosed)``.  The tag pair
-        is stripped from the post (along with its contents) so that
-        other agents never see the raw code in the speaker's post —
-        they see it only via the pybot reply that follows.  An open
-        tag without a matching close (typically: agent ran out of
-        token budget mid-block) sets ``unclosed=True`` so the caller
-        can surface a visible failure rather than silently dropping.
+        Used when ``thinking_enabled=False``: the rest of the text is
+        the public post and tagged code is pulled out for pybot.
         """
         o, c = self._python_open_tag, self._python_close_tag
         out: list[str] = []
@@ -522,7 +708,7 @@ class ForumEnv(AECEnv):
             k = text.find(c, j + len(o))
             if k < 0:
                 unclosed = True
-                break  # drop the trailing partial code; do not execute
+                break
             blocks.append(text[j + len(o):k])
             i = k + len(c)
         return "".join(out).strip(), blocks, unclosed
@@ -577,7 +763,12 @@ class ForumEnv(AECEnv):
         except Exception:  # noqa: BLE001
             return code
 
-    def _run_python(self, code: str) -> str:
+    def _run_python(
+        self,
+        code: str,
+        submitter: str = "?",
+        submitter_post_idx: int = -1,
+    ) -> tuple[str, str]:
         """Execute one code block in isolation and return formatted output.
 
         Uses a forkserver-backed worker (fast: ~5–15 ms launch) when
@@ -585,17 +776,41 @@ class ForumEnv(AECEnv):
         ``subprocess.run`` of ``python -I -c`` otherwise.  Both paths
         are sandboxed in a fresh process (no state leakage between
         calls) and honour ``python_timeout_seconds``.
+
+        Each call runs in a fresh per-call scratch dir under
+        ``pybot_scratch_root``; the dir is deleted afterwards unless
+        ``pybot_archive_dir`` is set, in which case any non-empty scratch
+        is moved into the archive alongside ``code.py`` and ``meta.json``.
         """
         run_code = self._autoprint_rewrite(code)
-        if self._python_use_forkserver:
-            stdout, stderr, rc = self._run_python_forkserver(run_code)
-        else:
-            stdout, stderr, rc = self._run_python_subprocess(run_code)
+        call_idx = self._pybot_call_idx
+        self._pybot_call_idx += 1
+        scratch = Path(tempfile.mkdtemp(
+            prefix=f"ep{self._episode_idx}_post{submitter_post_idx}_call{call_idx}_",
+            dir=str(self._pybot_scratch_root),
+        ))
+        env = _pybot_minimal_env(str(scratch))
+        try:
+            if self._python_use_forkserver:
+                stdout, stderr, rc = self._run_python_forkserver(
+                    run_code, str(scratch), env
+                )
+            else:
+                stdout, stderr, rc = self._run_python_subprocess(
+                    run_code, str(scratch), env
+                )
+        finally:
+            self._archive_or_clean_scratch(
+                scratch, code, submitter, submitter_post_idx, call_idx
+            )
 
         if rc == "timeout":
-            return f"[pybot: timed out after {self._python_timeout_seconds:g}s]"
+            return (
+                f"[pybot: timed out after {self._python_timeout_seconds:g}s]",
+                "timeout",
+            )
         if rc == "error":
-            return f"[pybot: execution error: {stderr}]"
+            return f"[pybot: execution error: {stderr}]", "launch_error"
 
         parts: list[str] = []
         if stdout:
@@ -607,13 +822,18 @@ class ForumEnv(AECEnv):
         result = "\n".join(parts) if parts else "(no output)"
         if len(result) > self._python_output_max_chars:
             result = result[: self._python_output_max_chars] + "\n[... truncated]"
-        return result
+        status = "success" if (isinstance(rc, int) and rc == 0) else "runtime_error"
+        return result, status
 
-    def _run_python_forkserver(self, code: str) -> tuple[str, str, Any]:
+    def _run_python_forkserver(
+        self, code: str, cwd: str, env: dict[str, str]
+    ) -> tuple[str, str, Any]:
         ctx = _get_pyexec_ctx()
         parent_conn, child_conn = ctx.Pipe(duplex=False)
         try:
-            proc = ctx.Process(target=_pyexec_worker, args=(code, child_conn))
+            proc = ctx.Process(
+                target=_pyexec_worker, args=(code, child_conn, cwd, env)
+            )
             proc.start()
             child_conn.close()  # parent only reads
             proc.join(self._python_timeout_seconds)
@@ -639,13 +859,37 @@ class ForumEnv(AECEnv):
             except Exception:  # noqa: BLE001
                 pass
 
-    def _run_python_subprocess(self, code: str) -> tuple[str, str, Any]:
+    def _run_python_subprocess(
+        self, code: str, cwd: str, env: dict[str, str]
+    ) -> tuple[str, str, Any]:
+        def _preexec() -> None:  # runs in the child after fork, before exec
+            try:
+                import resource
+
+                for name, lim in _PYBOT_RLIMITS.items():
+                    r = getattr(resource, f"RLIMIT_{name}", None)
+                    if r is None:
+                        continue
+                    try:
+                        soft, hard = resource.getrlimit(r)
+                        new_hard = (
+                            lim if hard == resource.RLIM_INFINITY else min(lim, hard)
+                        )
+                        resource.setrlimit(r, (min(lim, new_hard), new_hard))
+                    except (ValueError, OSError):
+                        pass
+            except ImportError:
+                pass
+
         try:
             proc = subprocess.run(
                 [sys.executable, "-I", "-c", code],
                 capture_output=True,
                 text=True,
                 timeout=self._python_timeout_seconds,
+                cwd=cwd,
+                env=env,
+                preexec_fn=_preexec,
             )
         except subprocess.TimeoutExpired:
             return "", "", "timeout"
@@ -653,12 +897,74 @@ class ForumEnv(AECEnv):
             return "", str(e), "error"
         return proc.stdout, proc.stderr, proc.returncode
 
-    def _format_pybot_post(self, submitter: str, code: str, output: str) -> str:
+    def _archive_or_clean_scratch(
+        self,
+        scratch: Path,
+        code: str,
+        submitter: str,
+        submitter_post_idx: int,
+        call_idx: int,
+    ) -> None:
+        try:
+            entries = list(scratch.iterdir())
+        except OSError:
+            entries = []
+
+        if not entries or self._pybot_archive_dir is None:
+            shutil.rmtree(scratch, ignore_errors=True)
+            return
+
+        safe_speaker = "".join(
+            c if c.isalnum() or c in "-_" else "_" for c in submitter
+        )
+        dest = self._pybot_archive_dir / (
+            f"{self._pybot_run_id}/ep{self._episode_idx}/"
+            f"post{submitter_post_idx}_{safe_speaker}_call{call_idx}"
+        )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.move(str(scratch), str(dest))
+        except OSError:
+            shutil.rmtree(scratch, ignore_errors=True)
+            return
+
+        try:
+            (dest / "code.py").write_text(code)
+            meta = {
+                "run_id": self._pybot_run_id,
+                "pid": os.getpid(),
+                "wall_time": time.time(),
+                "episode_idx": self._episode_idx,
+                "submitter": submitter,
+                "submitter_post_idx": submitter_post_idx,
+                "call_idx": call_idx,
+            }
+            (dest / "meta.json").write_text(json.dumps(meta, indent=2))
+        except OSError:
+            pass
+
+    def _format_pybot_post(
+        self, submitter: str, code: str, output: str, status: str
+    ) -> str:
+        status_label = {
+            "success": "success",
+            "runtime_error": "failed (runtime error)",
+            "timeout": "failed (timeout)",
+            "launch_error": "failed (launch error)",
+        }.get(status, status)
         return (
-            f"Running code submitted by {submitter}:\n"
+            f"Running code submitted by {submitter} [{status_label}]:\n"
             f"{self._python_open_tag}\n{code}\n{self._python_close_tag}\n"
             f"Output:\n{output}"
         )
+
+    def _record_tool_event(self, speaker: str, key: str) -> None:
+        if key in self._tool_counts:
+            self._tool_counts[key] += 1
+        per_agent = self._tool_counts_per_agent.setdefault(
+            speaker, dict.fromkeys(self._tool_counts, 0)
+        )
+        per_agent[key] = per_agent.get(key, 0) + 1
 
     def _render_initial_ctx(self) -> str:
         """First-observation framing each agent sees once."""
@@ -668,21 +974,28 @@ class ForumEnv(AECEnv):
         if self._thinking_enabled:
             post_words = max(1, int(self._post_token_budget * 0.7))
             total_words = max(1, int(self._total_token_budget * 0.7))
+            po, pc = self._post_open_tag, self._post_close_tag
+            yo, yc = self._python_open_tag, self._python_close_tag
+            tool_line = ""
+            if self._python_tool_enabled:
+                tool_line = (
+                    f" You can also call the python tool by writing code "
+                    f"inside {yo}...{yc}; the code runs and the result is "
+                    f"shared with everyone as a separate post by "
+                    f"'{self._python_bot_name}'. "
+                )
             parts.append(
-                f"Before each post you may write private reasoning between "
-                f"{self._thinking_open_tag} and {self._thinking_close_tag}. "
-                f"Anything inside those tags stays in your own private notes "
-                f"and is not shown to other forum members; only the text "
-                f"outside the tags is posted. Two limits: the public post "
-                f"itself must stay under about {self._post_token_budget} "
-                f"tokens (~{post_words} words), and the total of thinking + "
-                f"post combined must stay under about "
+                f"Each turn, write your reply inside {po}...{pc} tags — "
+                f"that is the text other forum members see.{tool_line}"
+                f"Anything outside {po} and {yo} tags is private "
+                f"reasoning: it stays in your own notes and is never shown "
+                f"to anyone else. Two limits: the {po} content itself must "
+                f"stay under about {self._post_token_budget} tokens "
+                f"(~{post_words} words), and the total of thinking + post "
+                f"+ tool calls combined must stay under about "
                 f"{self._total_token_budget} tokens (~{total_words} words) "
-                f"— anything past the total is cut off mid-sentence. Within "
-                f"those two limits you can spend as much or as little as "
-                f"you like on private reasoning. Always close "
-                f"{self._thinking_close_tag} before you start writing the "
-                f"post."
+                f"— anything past the total is cut off mid-sentence. "
+                f"Always close {pc} before you stop writing."
             )
         return "\n\n".join(p for p in parts if p)
 
@@ -733,7 +1046,23 @@ class ForumEnv(AECEnv):
             "post_order": self._post_order,
             "max_posts": self._max_posts,
             "completed_posts": self._post_count,
+            "tool_counts": dict(self._tool_counts),
+            "tool_counts_per_agent": {
+                a: dict(c) for a, c in self._tool_counts_per_agent.items()
+            },
         }
+
+    def _build_tool_info(self) -> dict:
+        """Tool-use counters destined for ``infos`` (and thus ``metrics.jsonl``).
+
+        Episode-totals are emitted with a ``tool/`` prefix so the trainer's
+        metrics aggregator can forward them by key match without knowing the
+        specific names.
+        """
+        out: dict[str, int] = {}
+        for k, v in self._tool_counts.items():
+            out[f"tool/{k}"] = int(v)
+        return out
 
     # ------------------------------------------------------------------ #
     # PettingZoo required properties                                      #

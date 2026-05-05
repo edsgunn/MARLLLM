@@ -93,6 +93,7 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
         "agents",        # already-stacked aggregates (don't re-discover)
         "gen",           # per-env generation-token diagnostics
         "eval",          # var-decomp diagnostics
+        "tool",          # env tool-use counters
     }
     entity_metrics: dict[str, set[str]] = {}  # prefix -> set of metric names
     for k in keys:
@@ -157,6 +158,10 @@ def plot_experiment(exp_dir: Path) -> Path | None:
         pass
     try:
         plot_generation_usage(exp_dir, data)
+    except Exception:
+        pass
+    try:
+        plot_tool_usage(exp_dir, data)
     except Exception:
         pass
     return out
@@ -632,6 +637,87 @@ def plot_generation_usage(exp_dir: Path, data: dict[str, np.ndarray]) -> Path | 
 
 
 # ---------------------------------------------------------------------------
+# Per-experiment: env tool use
+# ---------------------------------------------------------------------------
+
+def plot_tool_usage(exp_dir: Path, data: dict[str, np.ndarray]) -> Path | None:
+    """Forum python-tool usage per iteration.
+
+    Three panels:
+      - calls per episode (total + outcome breakdown)
+      - outcome composition (% of completed calls)
+      - unclosed-tag rate per episode (drop, never executed)
+
+    Returns None if the run logged no ``tool/...`` keys.
+    """
+    if "tool/python_calls_per_ep" not in data:
+        return None
+
+    iters = data.get("iteration", np.arange(len(data["total_loss"])))
+    outcomes = [
+        ("python_success",       "success",       "#55A868"),
+        ("python_runtime_error", "runtime error", "#E64B35"),
+        ("python_timeout",       "timeout",       "#F39B7F"),
+        ("python_launch_error",  "launch error",  "#8172B2"),
+    ]
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), squeeze=False)
+    fig.suptitle(f"{exp_dir.name} — python tool usage",
+                 fontsize=11, fontweight="bold")
+
+    # ── col 0: calls per episode (total + per-outcome) ────────────────
+    ax = axes[0, 0]
+    if "tool/python_calls_per_ep" in data:
+        ax.plot(iters, smooth(data["tool/python_calls_per_ep"]),
+                color="#222222", linewidth=1.6, label="calls (total)")
+    for key, label, color in outcomes:
+        k = f"tool/{key}_per_ep"
+        if k in data:
+            ax.plot(iters, smooth(data[k]), color=color,
+                    linewidth=1.2, label=label)
+    ax.set_title("calls per episode")
+    ax.set_ylabel("calls / episode")
+    ax.set_ylim(bottom=0)
+    ax.legend(loc="best", fontsize=7, frameon=False)
+
+    # ── col 1: outcome composition (% of completed calls) ─────────────
+    ax = axes[0, 1]
+    calls = data.get("tool/python_calls_per_ep")
+    if calls is not None:
+        denom = np.where(calls > 0, calls, np.nan)
+        for key, label, color in outcomes:
+            k = f"tool/{key}_per_ep"
+            if k in data:
+                pct = 100.0 * data[k] / denom
+                ax.plot(iters, smooth(pct), color=color,
+                        linewidth=1.3, label=label)
+    ax.set_title("outcome composition")
+    ax.set_ylabel("% of calls")
+    ax.set_ylim(0, 100)
+    ax.legend(loc="best", fontsize=7, frameon=False)
+
+    # ── col 2: unclosed-tag rate (per episode) ────────────────────────
+    ax = axes[0, 2]
+    if "tool/python_unclosed_per_ep" in data:
+        ax.plot(iters, smooth(data["tool/python_unclosed_per_ep"]),
+                color="#C44E52", linewidth=1.4, label="unclosed <python>")
+    ax.set_title("unclosed tag (dropped, not executed)")
+    ax.set_ylabel("count / episode")
+    ax.set_ylim(bottom=0)
+    ax.legend(loc="best", fontsize=7, frameon=False)
+
+    for ax in axes[-1]:
+        ax.set_xlabel("iteration")
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    out = exp_dir / "tool_usage.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Suite-level: comparison bar chart
 # ---------------------------------------------------------------------------
 
@@ -789,6 +875,9 @@ def main() -> None:
             if out is not None:
                 print(f"  {out.relative_to(suite_dir.parent)}")
             out = plot_generation_usage(exp_dir, all_data[exp_dir.name])
+            if out is not None:
+                print(f"  {out.relative_to(suite_dir.parent)}")
+            out = plot_tool_usage(exp_dir, all_data[exp_dir.name])
             if out is not None:
                 print(f"  {out.relative_to(suite_dir.parent)}")
 

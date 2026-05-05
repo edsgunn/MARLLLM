@@ -36,15 +36,17 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 _ASSISTANT_TURN_RE = re.compile(r"<\|im_start\|>assistant\n(.*?)<\|im_end\|>", re.DOTALL)
-_THINK_RE = re.compile(r"\s*<think>(.*?)</think>", re.DOTALL)
 
 
-def _extract_thinkings(context_text: str) -> list[str]:
-    out: list[str] = []
-    for turn in _ASSISTANT_TURN_RE.findall(context_text or ""):
-        m = _THINK_RE.match(turn)
-        out.append(m.group(1).strip() if m else "")
-    return out
+def _extract_assistant_turns(context_text: str) -> list[str]:
+    """Return the full raw assistant output for each turn in this agent's context.
+
+    With the new ``<post>``/``<python>`` format, anything outside the tagged
+    blocks is private thinking — but rather than try to slice it out, we
+    surface the entire generated turn so reviewers can see exactly what the
+    model wrote (thinking, post, code, and any malformed/cut-off output).
+    """
+    return [t.strip() for t in _ASSISTANT_TURN_RE.findall(context_text or "")]
 
 
 def _convert_forum_records(records: list, label: str) -> dict:
@@ -59,20 +61,23 @@ def _convert_forum_records(records: list, label: str) -> dict:
             if a not in all_agents:
                 all_agents.append(a)
         contexts: dict[str, str] = {}
-        thinkings_by_agent: dict[str, list[str]] = {}
+        turns_by_agent: dict[str, list[str]] = {}
         for aid, at in agents_raw.items():
             ctx_text = at.get("context_text", "") if isinstance(at, dict) else str(at)
             contexts[aid] = ctx_text
-            thinkings_by_agent[aid] = _extract_thinkings(ctx_text)
+            turns_by_agent[aid] = _extract_assistant_turns(ctx_text)
         thread = list(env_t.get("thread") or [])
         speaker_post_counts: dict[str, int] = {}
         for post in thread:
+            # pybot/tool-output posts aren't agent turns — skip the lookup.
+            if post.get("kind") == "tool_output":
+                continue
             speaker = post.get("speaker")
             n = speaker_post_counts.get(speaker, 0)
             speaker_post_counts[speaker] = n + 1
-            thinks = thinkings_by_agent.get(speaker, [])
-            if n < len(thinks) and thinks[n]:
-                post["thinking"] = thinks[n]
+            turns = turns_by_agent.get(speaker, [])
+            if n < len(turns) and turns[n]:
+                post["raw_turn"] = turns[n]
         ep_meta = {k: v for k, v in env_t.items() if k not in ("thread", "agents")}
         episodes.append({
             "episode": rec.get("episode", 0),
@@ -929,9 +934,11 @@ function renderForumView(trace) {
     const speaker = post.speaker || '(unknown)';
     const c = agentColor(speaker, agents);
     let thinkHtml = '';
-    if (post.thinking) {
-      thinkHtml = '<details class="forum-think"><summary>thinking</summary>'
-                + '<div class="forum-think-body">'+esc(post.thinking)+'</div></details>';
+    const rawTurn = post.raw_turn || post.thinking;
+    if (rawTurn) {
+      const label = post.raw_turn ? 'full output' : 'thinking';
+      thinkHtml = '<details class="forum-think"><summary>'+label+'</summary>'
+                + '<div class="forum-think-body">'+esc(rawTurn)+'</div></details>';
     }
     const idxChip = (typeof post.post_index === 'number')
       ? '<span class="post-idx">#'+esc(post.post_index)+'</span>'

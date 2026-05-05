@@ -339,7 +339,12 @@ class PopulationTrainer:
                             "unique_pairings", "env_episodes/")
         keys = sorted(metrics.keys())
         # Pack into one tensor per reduction op for efficiency.
-        sum_keys = [k for k in keys if any(k.startswith(p) for p in SUM_KEYS_PREFIX)]
+        def _is_sum_key(k: str) -> bool:
+            if any(k.startswith(p) for p in SUM_KEYS_PREFIX):
+                return True
+            # Tool-use raw counts sum across ranks; per-episode rates average.
+            return k.startswith("tool/") and k.endswith("_total")
+        sum_keys = [k for k in keys if _is_sum_key(k)]
         avg_keys = [k for k in keys if k not in sum_keys and isinstance(metrics[k], (int, float))]
         if sum_keys:
             t = torch.tensor([float(metrics[k]) for k in sum_keys], device="cuda")
@@ -644,6 +649,18 @@ class PopulationTrainer:
             all_metrics["n_episodes"]  = n_eps
             if n_eps:
                 all_metrics["success_rate"] = episode_results.count("success") / n_eps
+
+            tool_totals: dict[str, float] = {}
+            for ep in raw_episodes:
+                ep_info = ep[1] or {}
+                for k, v in ep_info.items():
+                    if isinstance(k, str) and k.startswith("tool/"):
+                        tool_totals[k] = tool_totals.get(k, 0.0) + float(v)
+            if tool_totals:
+                denom = max(1, n_eps)
+                for k, total in tool_totals.items():
+                    all_metrics[f"{k}_total"] = total
+                    all_metrics[f"{k}_per_ep"] = total / denom
 
             pairings = [ep[2] for ep in raw_episodes]
             all_metrics["unique_pairings"] = len(set(pairings))
