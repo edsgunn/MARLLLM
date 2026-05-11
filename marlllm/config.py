@@ -111,3 +111,29 @@ class TrainingConfig:
     var_decomp_n_eval_early: int = 5             # cadence while iter <= switch
     var_decomp_n_eval_late: int = 25             # cadence after the switch
     var_decomp_switch_iter: int = 50             # iter at which cadence relaxes
+
+    # ------------------------------------------------------------------
+    # Live regime tracking. Stamps a five-way regime label on each
+    # metrics.jsonl record using the (kl, perc_loss, entropy) thresholds
+    # calibrated in scripts/plot_population_regime_figures.py, plus
+    # population aggregates, slope-based early warnings, and live PNG
+    # visualisations under <output_dir>/regime/. See marlllm/regime_tracking.py
+    # for the implementation and the calibration rationale.
+    # ------------------------------------------------------------------
+    regime_tracking_enabled: bool = True
+    regime_kl_threshold: float = 1.0
+    regime_perc_coherent: float = 1.7
+    regime_perc_degen: float = 2.0
+    regime_ent_low: float = 0.2
+    regime_ent_high: float = 1.8
+    regime_slope_window: int = 5
+    # Render the live regime composition + per-agent strip plots every N iters.
+    regime_viz_every: int = 25
+    # Compute Tier-3 token-level signals (tail_loop_rate, non_ascii_rate,
+    # top_token_frac) from rollout traces. Off by default since it touches
+    # the rollout hot path; enable for debugging suspected collapses.
+    regime_token_signals: bool = False
+    # If True, copy the most recent on-disk checkpoint into
+    # checkpoints/pre_collapse_iter_<N>/ when any agent first enters
+    # text_degenerate. Useful for keeping the snapshot just before collapse.
+    regime_pre_collapse_checkpoint: bool = True

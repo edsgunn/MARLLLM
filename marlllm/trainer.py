@@ -120,6 +120,24 @@ class Trainer:
         self._logger = self._setup_logging()
         self._metrics_path = Path(config.output_dir) / "metrics.jsonl"
 
+        # Live regime tracker. Pure-Python; no GPU work in here. See
+        # marlllm/regime_tracking.py for the calibration rationale.
+        if getattr(self.config, "regime_tracking_enabled", True):
+            from marlllm.regime_tracking import RegimeTracker, RegimeThresholds
+            self._regime_tracker = RegimeTracker(
+                thresholds=RegimeThresholds(
+                    kl_threshold=self.config.regime_kl_threshold,
+                    perc_coherent=self.config.regime_perc_coherent,
+                    perc_degen=self.config.regime_perc_degen,
+                    ent_low=self.config.regime_ent_low,
+                    ent_high=self.config.regime_ent_high,
+                ),
+                window=self.config.regime_slope_window,
+            )
+            (Path(self.config.output_dir) / "regime").mkdir(exist_ok=True)
+        else:
+            self._regime_tracker = None
+
     # ------------------------------------------------------------------ #
     # Main training loop                                                   #
     # ------------------------------------------------------------------ #
@@ -252,13 +270,70 @@ class Trainer:
                     all_metrics[f"{k}_total"] = total
                     all_metrics[f"{k}_per_ep"] = total / denom
 
+            # Optional Tier-3 token-level signals from the rollouts.
+            if (self._regime_tracker is not None
+                    and getattr(self.config, "regime_token_signals", False)
+                    and trace_episodes):
+                try:
+                    from marlllm.regime_token_signals import (
+                        compute_per_agent_token_signals,
+                    )
+                    tok = list(self.agents.values())[0].tokenizer
+                    # The trace_episodes list is the same _RawEpisode tuple
+                    # shape population.py uses; pass it straight through.
+                    sigs = compute_per_agent_token_signals(trace_episodes, tok)
+                    all_metrics.update(sigs)
+                except Exception as exc:  # pragma: no cover - defensive
+                    self._logger.warning("token-signal computation failed: %s", exc)
+
+            # Regime classification — must run BEFORE writing the jsonl so the
+            # regime/* fields land in the same record.
+            if self._regime_tracker is not None:
+                additions, alerts = self._regime_tracker.update(
+                    iteration, all_metrics
+                )
+                all_metrics.update(additions)
+                for a in alerts:
+                    self._logger.warning("regime: %s", a)
+                # Pre-collapse checkpoint copy.
+                if (additions.get("regime/pre_collapse_trigger")
+                        and getattr(self.config, "regime_pre_collapse_checkpoint", True)):
+                    from marlllm.regime_tracking import copy_pre_collapse_checkpoint
+                    dst = copy_pre_collapse_checkpoint(
+                        Path(self.config.output_dir) / "checkpoints",
+                        iteration,
+                        prev_iteration=iteration - 1,
+                    )
+                    if dst is not None:
+                        self._logger.warning(
+                            "regime: saved pre-collapse snapshot to %s", dst
+                        )
+
             if iteration % self.config.log_every == 0:
                 self._log_metrics(iteration, all_metrics)
+                if self._regime_tracker is not None:
+                    self._logger.info(
+                        self._regime_tracker.summary_line(iteration, all_metrics)
+                    )
                 if trace_episodes:
                     ctx_snapshot0, info0, env_trace0 = trace_episodes[0]
                     self._write_trace(iteration, ctx_snapshot0, info0, env_trace0)
 
             self._write_metrics_jsonl(all_metrics)
+
+            # Live regime plots — periodic, cheap.
+            if (self._regime_tracker is not None
+                    and iteration % self.config.regime_viz_every == 0):
+                regime_dir = Path(self.config.output_dir) / "regime"
+                try:
+                    self._regime_tracker.render_population_plot(
+                        regime_dir / "regime_trajectory.png"
+                    )
+                    self._regime_tracker.render_agent_strip(
+                        regime_dir / "agent_regime_strip.png"
+                    )
+                except Exception as exc:  # pragma: no cover
+                    self._logger.warning("regime viz failed: %s", exc)
 
             if iteration % self.config.checkpoint_every == 0:
                 self.save_checkpoint(iteration)
@@ -266,6 +341,20 @@ class Trainer:
 
         self.save_checkpoint(self.config.num_iterations, tag="final")
         self._write_checkpoint_traces(self.config.num_iterations, trace_episodes)
+        if self._regime_tracker is not None:
+            regime_dir = Path(self.config.output_dir) / "regime"
+            try:
+                self._regime_tracker.render_population_plot(
+                    regime_dir / "regime_trajectory.png"
+                )
+                self._regime_tracker.render_agent_strip(
+                    regime_dir / "agent_regime_strip.png"
+                )
+                self._regime_tracker.write_summary_md(
+                    regime_dir / "regime_summary.md"
+                )
+            except Exception as exc:  # pragma: no cover
+                self._logger.warning("end-of-run regime artefacts failed: %s", exc)
         self._logger.info("Training complete.")
 
     # ------------------------------------------------------------------ #
