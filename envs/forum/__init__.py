@@ -4,15 +4,31 @@ Forum environment package.
 Public API:
 
   * :class:`ForumEnv` — append-only multi-agent forum env (PettingZoo AEC).
-  * :class:`JsonPersonaScenario` — loader for JSON-described scenarios at
-    ``envs/forum/scenarios/<name>.json``.
-  * :func:`load_scenario` — convenience wrapper around the loader.
+  * :class:`CharacterPack` — roster of characters plus named subsets,
+    loaded from ``envs/forum/characters/<pack>.json``.
+  * :class:`EnvironmentPrompt` — forum description, invitation, and
+    persona-template scaffold, loaded from
+    ``envs/forum/environments/<env>.json``.
+  * :func:`load_characters`, :func:`load_environment`, :func:`build_personas`
+    — convenience wrappers and composition helper.
 
-Each scenario JSON describes a forum: its description, default invitation,
-character rosters, persona descriptions, and the system-prompt template
-that ``ForumEnv`` installs as each agent's system message.
+Characters and environments are stored separately so any character pack
+can be dropped into any environment.
 """
 from envs.forum.env import ForumEnv
-from envs.forum.personas import JsonPersonaScenario, load_scenario
+from envs.forum.personas import (
+    CharacterPack,
+    EnvironmentPrompt,
+    build_personas,
+    load_characters,
+    load_environment,
+)
 
-__all__ = ["ForumEnv", "JsonPersonaScenario", "load_scenario"]
+__all__ = [
+    "ForumEnv",
+    "CharacterPack",
+    "EnvironmentPrompt",
+    "build_personas",
+    "load_characters",
+    "load_environment",
+]

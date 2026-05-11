@@ -46,7 +46,8 @@ max_episode_tokens: 24576
 environments:
 - name: inner_loop
   type: forum
-  scenario: inner_loop
+  characters: inner_loop
+  environment: inner_loop
   post_token_budget: 128
   total_token_budget: 384
   character_set: canonical_2

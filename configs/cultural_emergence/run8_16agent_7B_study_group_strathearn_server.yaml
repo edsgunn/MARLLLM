@@ -1,0 +1,71 @@
+# Run 8 — 16-agent variant of run7_8agent_7B_study_group_strathearn_server.
+# Uses the new `extended_16` Strathearn roster (8 original + 8 new chars).
+# 300-iter fresh run from scratch.
+name: run8_16agent_7B_study_group_strathearn_server
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Mhairi Buchanan
+- Callum Reid
+- Niamh Donnelly
+- Daniyal Khan
+- Eilidh MacGregor
+- Joseph Akingbola
+- Ada Whitfield
+- Finn Nakamura
+- Fraser MacAulay
+- Roisin Doherty
+- Hamish Tait
+- Sumi Tanaka
+- Greer Lindsay
+- Tariq Iqbal
+- Beatrix Munro
+- Iain Cameron
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 32768
+environments:
+- name: study_group_strathearn_server
+  type: forum
+  characters: study_group_strathearn
+  environment: study_group_strathearn_server
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_16
+  max_posts: 16
+  post_order: round_robin
+  thinking_enabled: true
+output_dir: runs/cultural_emergence/run8_16agent_7B_study_group_strathearn_server
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

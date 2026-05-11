@@ -40,6 +40,8 @@ max_episode_tokens: 24576
 environments:
 - name: robotic_athanor
   type: forum
+  characters: robotic_athanor
+  environment: robotic_athanor
   token_budget: 128
   character_set: extended_8
   max_posts: 16

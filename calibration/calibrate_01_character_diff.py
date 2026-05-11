@@ -63,13 +63,13 @@ def parse_args() -> argparse.Namespace:
 def _build_character_persona() -> dict[str, list[str]]:
     """Resolve canonical character memories from the shared persona source.
 
-    Loads the Robotic Athanor scenario from
-    ``envs/forum/scenarios/robotic_athanor.json`` so the calibration
+    Loads the Robotic Athanor character pack from
+    ``envs/forum/characters/robotic_athanor.json`` so the calibration
     check sees the exact memory bullets used by ForumEnv during training.
     """
-    from envs.forum import load_scenario
-    sc = load_scenario("robotic_athanor")
-    return {name: sc.get_memories(name) for name in sc.get_character_set("canonical_4")}
+    from envs.forum import load_characters
+    pack = load_characters("robotic_athanor")
+    return {name: pack.get_memories(name) for name in pack.get_character_set("canonical_4")}
 
 
 def main() -> None:

@@ -1,0 +1,62 @@
+# Run 10 — 4-agent variant of run8_16agent_7B_margin_notes.
+# Uses the `canonical_4` inner_loop roster.
+# 300-iter fresh run from scratch with the <post>/<python> tag format
+# and the pybot tool enabled.
+name: run10_4agent_7B_margin_notes
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.20
+vllm_max_num_seqs: 4
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Renata Solberg
+- Kai Dempsey
+- Mei-Lin Park
+- Devon Aguirre
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+environments:
+- name: margin_notes
+  type: forum
+  characters: inner_loop
+  environment: margin_notes
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: canonical_4
+  max_posts: 16
+  post_order: round_robin
+  python_tool_enabled: true
+  python_timeout_seconds: 5.0
+  python_output_max_chars: 2000
+output_dir: runs/cultural_emergence/run10_4agent_7B_margin_notes
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

@@ -22,6 +22,7 @@ class TrainingConfig:
     alpha_val: float = 1.0    # weight on L_val  (set to 0 for perception-only ablation)
     normalise_returns: bool = True  # standardise G_t within batch (§9.3)
     kl_coef: float = 0.0      # KL penalty weight: λ * KL(π_θ || π_ref) at ACT positions
+    always_log_kl: bool = False  # If True, compute & log KL each step even when kl_coef == 0 (no gradient applied; requires keep_ref_model=True on agents).
 
     # Asymmetric multi-agent training (§2.4 of Phase A spec).
     # IDs in this list participate in rollouts but receive NO gradient updates.
@@ -72,6 +73,16 @@ class TrainingConfig:
     # Distribution / memory
     grad_accum_steps: int = 1          # split each batch into N micro-batches, accumulate grads
     gradient_checkpointing: bool = False  # recompute activations during backward to save VRAM
+    # Sequence-dim chunked loss step. When set, the per-episode forward+backward
+    # is split into chunks of this many tokens along the sequence axis and
+    # backward runs once per chunk. Reduces peak activation memory roughly by
+    # T / seq_chunk_size at the cost of running a full no-grad forward first
+    # to compute global returns, plus per-chunk re-forwards. Cross-chunk
+    # attention gradients are dropped (each chunk's autograd graph attends
+    # over a detached KV cache from prior chunks); this is an approximation,
+    # exact within a chunk. Set to None to disable (default; uses the original
+    # single-shot path).
+    seq_chunk_size: int | None = None
 
     # LoRA (PEFT) — set lora_r > 0 to enable; requires `peft` package
     lora_r: int = 0                    # LoRA rank; 0 = full fine-tuning

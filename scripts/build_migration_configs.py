@@ -34,42 +34,49 @@ CONFIG_DIR = PROJECT_DIR / 'configs' / 'migration_experiments'
 SLURM_DIR = PROJECT_DIR / 'slurm_scripts'
 RUNS_DIR_REL = 'runs/migration_experiments'
 
-ASHBOURNE = {
-    'name': 'ashbourne',
+# Reformulated migration experiments on the new <post>-tag env format.
+# Source/target are the *_server (Strathearn) and *_gc (Ashbourne) cultural-
+# emergence runs — same agent rosters as the original Strathearn / Ashbourne
+# runs, but framed by the new "the server" / "the gc" environment prompts
+# and trained without thinking_enabled (the env now always extracts <post>).
+ASHBOURNE_GC = {
+    'name': 'ashbourne_gc',
     'characters': [
         'Priya Shah', 'Tom Whitaker', 'Hana Yilmaz', 'Olu Adeyemi',
         'Beatrice Okafor', 'Sam Pritchard', 'Imogen Carter', 'Marcus Webb',
     ],
-    'scenario_json': 'envs/forum/scenarios/study_group.json',
-    'scenario_name': 'study_group',
-    'snapshot_eval': 'eval_contexts/study_group.json',
-    'iter100_ckpt': 'runs/cultural_emergence/run7_8agent_7B_study_group/checkpoints/iter_000100',
+    'character_pack_json': 'envs/forum/characters/study_group_ashbourne.json',
+    'environment_json': 'envs/forum/environments/study_group_ashbourne_gc.json',
+    'character_pack_name': 'study_group_ashbourne',
+    'environment_name': 'study_group_ashbourne_gc',
+    'iter100_ckpt': 'runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc/checkpoints/iter_000100',
 }
-STRATHEARN = {
-    'name': 'strathearn',
+STRATHEARN_SERVER = {
+    'name': 'strathearn_server',
     'characters': [
         'Mhairi Buchanan', 'Callum Reid', 'Niamh Donnelly', 'Daniyal Khan',
         'Eilidh MacGregor', 'Joseph Akingbola', 'Ada Whitfield', 'Finn Nakamura',
     ],
-    'scenario_json': 'envs/forum/scenarios/study_group_strathearn.json',
-    'scenario_name': 'study_group_strathearn',
-    'snapshot_eval': 'eval_contexts/study_group_strathearn.json',
-    'iter100_ckpt': 'runs/cultural_emergence/run7_8agent_7B_study_group_strathearn/checkpoints/iter_000100',
+    'character_pack_json': 'envs/forum/characters/study_group_strathearn.json',
+    'environment_json': 'envs/forum/environments/study_group_strathearn_server.json',
+    'character_pack_name': 'study_group_strathearn',
+    'environment_name': 'study_group_strathearn_server',
+    'iter100_ckpt': 'runs/cultural_emergence/run7_8agent_7B_study_group_strathearn_server/checkpoints/iter_000100',
 }
 
 # (migrant_name, source_pop, target_pop, role_matched_target_slot, priority_tier)
 # Priority tier 1 = convenor + newcomer (run first); tier 2 = checker + pattern-spotter.
 MIGRATIONS = [
-    # Direction A: Ashbourne -> Strathearn
-    ('Priya Shah',   ASHBOURNE,  STRATHEARN, 'Mhairi Buchanan',   1),
-    ('Marcus Webb',  ASHBOURNE,  STRATHEARN, 'Finn Nakamura',     1),
-    ('Tom Whitaker', ASHBOURNE,  STRATHEARN, 'Ada Whitfield',     2),
-    ('Hana Yilmaz',  ASHBOURNE,  STRATHEARN, 'Callum Reid',       2),
-    # Direction B: Strathearn -> Ashbourne
-    ('Mhairi Buchanan', STRATHEARN, ASHBOURNE, 'Priya Shah',       1),
-    ('Finn Nakamura',   STRATHEARN, ASHBOURNE, 'Marcus Webb',      1),
-    ('Ada Whitfield',   STRATHEARN, ASHBOURNE, 'Tom Whitaker',     2),
-    ('Callum Reid',     STRATHEARN, ASHBOURNE, 'Hana Yilmaz',      2),
+    # Direction A: Ashbourne (gc) -> Strathearn (server)
+    ('Priya Shah',   ASHBOURNE_GC,      STRATHEARN_SERVER, 'Mhairi Buchanan', 1),
+    ('Marcus Webb',  ASHBOURNE_GC,      STRATHEARN_SERVER, 'Finn Nakamura',   1),
+    ('Tom Whitaker', ASHBOURNE_GC,      STRATHEARN_SERVER, 'Ada Whitfield',   2),
+    ('Hana Yilmaz',  ASHBOURNE_GC,      STRATHEARN_SERVER, 'Callum Reid',     2),
+    # Direction B: Strathearn (server) -> Ashbourne (gc)
+    ('Mhairi Buchanan', STRATHEARN_SERVER, ASHBOURNE_GC, 'Priya Shah',     1),
+    ('Finn Nakamura',   STRATHEARN_SERVER, ASHBOURNE_GC, 'Marcus Webb',    1),
+    ('Ada Whitfield',   STRATHEARN_SERVER, ASHBOURNE_GC, 'Tom Whitaker',   2),
+    ('Callum Reid',     STRATHEARN_SERVER, ASHBOURNE_GC, 'Hana Yilmaz',    2),
 ]
 
 
@@ -78,20 +85,16 @@ def _short(name: str) -> str:
     return name.split()[0].lower()
 
 
-def _load_template(scenario_json_path: Path) -> str:
-    return json.loads(scenario_json_path.read_text())['system_prompt_template']
+def _load_template(environment_json_path: Path) -> str:
+    return json.loads(environment_json_path.read_text())['system_prompt_template']
 
 
-def _load_bullets(scenario_json_path: Path, character_name: str) -> list[str]:
-    data = json.loads(scenario_json_path.read_text())
+def _load_bullets(character_pack_json_path: Path, character_name: str) -> list[str]:
+    data = json.loads(character_pack_json_path.read_text())
     chars = data.get('characters', {})
-    flat: dict[str, dict] = {}
-    for group in chars.values():
-        if isinstance(group, dict):
-            flat.update(group)
-    if character_name not in flat:
-        sys.exit(f'{character_name!r} not found in {scenario_json_path}')
-    return list(flat[character_name]['description'])
+    if character_name not in chars:
+        sys.exit(f'{character_name!r} not found in {character_pack_json_path}')
+    return list(chars[character_name]['description'])
 
 
 def _render_persona(template: str, character_name: str, bullets: list[str]) -> str:
@@ -132,16 +135,17 @@ def build_config(
     #     host environment description as the framing of their system prompt
     #     ("the maths club at <host school>"). This matches the conversation
     #     they are actually in.
-    #   - 7 host natives use their own bio bullets (host scenario JSON).
+    #   - 7 host natives use their own bio bullets (host character pack).
     #   - The migrant uses their *source* bio bullets — i.e. their personal
     #     history follows them, but the description of the room they're in
     #     is the host room.
-    host_json = PROJECT_DIR / target_pop['scenario_json']
-    src_json = PROJECT_DIR / source_pop['scenario_json']
-    host_template = _load_template(host_json)
+    host_env_json = PROJECT_DIR / target_pop['environment_json']
+    host_chars_json = PROJECT_DIR / target_pop['character_pack_json']
+    src_chars_json = PROJECT_DIR / source_pop['character_pack_json']
+    host_template = _load_template(host_env_json)
     personas: dict[str, str] = {}
     for ch in new_chars:
-        bullets_json = src_json if ch == migrant else host_json
+        bullets_json = src_chars_json if ch == migrant else host_chars_json
         bullets = _load_bullets(bullets_json, ch)
         personas[ch] = _render_persona(host_template, ch, bullets)
 
@@ -204,21 +208,17 @@ seed: 1
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
-snapshot_eval_path: {target_pop['snapshot_eval']}
-snapshot_samples_per_context: 8
-snapshot_max_new_tokens: 384
 max_episode_tokens: 24576
 environments:
-- name: {target_pop['scenario_name']}
+- name: {target_pop['environment_name']}
   type: forum
-  scenario: {target_pop['scenario_name']}
+  environment: {target_pop['environment_name']}
   post_token_budget: 128
   total_token_budget: 384
   personas:
 {personas_block}
   max_posts: 16
   post_order: round_robin
-  thinking_enabled: true
 output_dir: {output_dir}
 gradient_checkpointing: true
 

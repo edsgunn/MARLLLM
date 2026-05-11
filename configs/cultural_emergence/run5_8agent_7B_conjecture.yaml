@@ -41,7 +41,8 @@ max_episode_tokens: 24576
 environments:
 - name: conjecture_inn
   type: forum
-  scenario: conjecture_inn
+  characters: conjecture_inn
+  environment: conjecture_inn
   token_budget: 128
   character_set: extended_8
   max_posts: 16

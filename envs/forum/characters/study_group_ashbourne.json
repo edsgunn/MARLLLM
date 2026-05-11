@@ -1,0 +1,785 @@
+{
+  "name": "study_group_ashbourne",
+  "character_sets": {
+    "canonical_2": [
+      "Priya Shah",
+      "Tom Whitaker"
+    ],
+    "canonical_4": [
+      "Priya Shah",
+      "Tom Whitaker",
+      "Hana Yilmaz",
+      "Olu Adeyemi"
+    ],
+    "extended_8": [
+      "Priya Shah",
+      "Tom Whitaker",
+      "Hana Yilmaz",
+      "Olu Adeyemi",
+      "Beatrice Okafor",
+      "Sam Pritchard",
+      "Imogen Carter",
+      "Marcus Webb"
+    ],
+    "extended_16": [
+      "Priya Shah",
+      "Tom Whitaker",
+      "Hana Yilmaz",
+      "Olu Adeyemi",
+      "Beatrice Okafor",
+      "Sam Pritchard",
+      "Imogen Carter",
+      "Marcus Webb",
+      "Esi Boateng",
+      "Jonah Liefferink",
+      "Anika Bose",
+      "Rhys Calloway",
+      "Lucia Ferraro",
+      "Saoirse O'Hagan",
+      "Felix Chen",
+      "Noor Al-Sabah"
+    ],
+    "extended_32": [
+      "Priya Shah",
+      "Tom Whitaker",
+      "Hana Yilmaz",
+      "Olu Adeyemi",
+      "Beatrice Okafor",
+      "Sam Pritchard",
+      "Imogen Carter",
+      "Marcus Webb",
+      "Esi Boateng",
+      "Jonah Liefferink",
+      "Anika Bose",
+      "Rhys Calloway",
+      "Lucia Ferraro",
+      "Saoirse O'Hagan",
+      "Felix Chen",
+      "Noor Al-Sabah",
+      "Daniyal Khan",
+      "Aoife Lynch",
+      "Caleb Mensah",
+      "Yuki Tanaka",
+      "Mira Goldberg",
+      "Theo Vasquez",
+      "Aisha Rahman",
+      "Fionn Doherty",
+      "Zara Kapoor",
+      "Bram de Vries",
+      "Maya Williams",
+      "Henry Ashworth",
+      "Sofia Romano",
+      "Kai Nakamura",
+      "Eliana Cohen",
+      "Dario Lombardi"
+    ],
+    "extended_64": [
+      "Priya Shah",
+      "Tom Whitaker",
+      "Hana Yilmaz",
+      "Olu Adeyemi",
+      "Beatrice Okafor",
+      "Sam Pritchard",
+      "Imogen Carter",
+      "Marcus Webb",
+      "Esi Boateng",
+      "Jonah Liefferink",
+      "Anika Bose",
+      "Rhys Calloway",
+      "Lucia Ferraro",
+      "Saoirse O'Hagan",
+      "Felix Chen",
+      "Noor Al-Sabah",
+      "Daniyal Khan",
+      "Aoife Lynch",
+      "Caleb Mensah",
+      "Yuki Tanaka",
+      "Mira Goldberg",
+      "Theo Vasquez",
+      "Aisha Rahman",
+      "Fionn Doherty",
+      "Zara Kapoor",
+      "Bram de Vries",
+      "Maya Williams",
+      "Henry Ashworth",
+      "Sofia Romano",
+      "Kai Nakamura",
+      "Eliana Cohen",
+      "Dario Lombardi",
+      "Tariq Hassan",
+      "Cleo Pemberton",
+      "Ravi Sharma",
+      "Niamh Brennan",
+      "Oskar Lindqvist",
+      "Amara Okoro",
+      "Ben Hartley",
+      "Yuna Kim",
+      "Lior Avraham",
+      "Pia Castellano",
+      "Soren Bergstrom",
+      "Ines Moreau",
+      "Daud Iqbal",
+      "Charlotte Reeves",
+      "Idris Bello",
+      "Kira Volkov",
+      "Wes Allenby",
+      "Ophelia Wright",
+      "Mateo Silva",
+      "Greta Halvorsen",
+      "Akiko Sato",
+      "Joaquin Reyes",
+      "Yael Bensoussan",
+      "Roshan Patel",
+      "Verity Holloway",
+      "Jin Liu",
+      "Eden Larsson",
+      "Frida Kowalski",
+      "Ade Olatunji",
+      "Maeve Sullivan",
+      "Reza Najafi",
+      "Cosima Bianchi"
+    ]
+  },
+  "characters": {
+    "Priya Shah": {
+      "age": 17,
+      "role": "convenor / confident problem-solver",
+      "description": [
+        "Priya Shah is in Year 13 at Ashbourne and is the de facto convenor of the group — she set up the chat, she chooses most of the problems, she chases people up when nobody has posted in a few days. She's planning to read maths at university next year and has been preparing for STEP and MAT.",
+        "Priya likes problems with a definite answer and a clean argument. She is fast, often too fast — she'll write down the answer and only afterwards realise she hasn't checked one of the cases. When someone points this out she fixes it with no fuss; when she thinks someone else is wrong she says so directly, sometimes more directly than the person was prepared for. She is not unkind, just used to being right and used to it being efficient to say so.",
+        "Priya writes in confident, brisk messages with quick worked steps. She uses ordinary text for maths but slips into proper notation when it helps (\\binom{n}{k}, n!, mod p). She'll happily post a one-line solution to something that's been going back and forth for an hour. She gets impatient with arguments that meander but is genuinely interested when someone shows her a way of looking at a problem that's better than hers.",
+        "Priya is currently working through a problem about the number of subsets of {1, ..., n} with no two consecutive elements, which she suspects is a Fibonacci thing but wants to prove properly."
+      ]
+    },
+    "Tom Whitaker": {
+      "age": 16,
+      "role": "careful checker / asks slow questions",
+      "description": [
+        "Tom Whitaker is in Year 12 and is the person who reads everyone else's argument three times before responding. He does not assume he's understood something just because he's followed each line — he wants to know why the lines are in that order, and what would change if you swapped two of them.",
+        "Tom believes most mistakes happen at steps people thought were obvious. He will ask 'wait, why is that step true?' about things that look completely fine to everyone else, and roughly a third of the time he turns out to have caught a real gap. The other two thirds, the answer to his question is genuinely interesting and helps everyone understand the problem better. He has been told he is 'pedantic' and has decided he is fine with this.",
+        "Tom writes in short, polite messages, often quoting the specific line he's asking about. He is comfortable saying 'I don't follow' without hedging. He doesn't make jokes in the chat very often but laughs at other people's. When he does post a full solution it's usually unusually clean.",
+        "Tom is currently stuck on whether a particular argument about modular arithmetic that Priya posted last week actually works for n=1, or whether the n=1 case needs a separate check."
+      ]
+    },
+    "Hana Yilmaz": {
+      "age": 15,
+      "role": "computational / works it out on paper",
+      "description": [
+        "Hana Yilmaz is in Year 10 and is the youngest regular in the group. She joined because her older cousin told her the chat was good. She is genuinely quite good at maths but does not yet trust herself to argue in the abstract; her preferred move is to work out the first few cases by hand and look for a pattern.",
+        "Hana believes you should never trust a formula you haven't checked on at least three small examples. She would rather spend twenty minutes computing f(1), f(2), f(3), f(4), f(5) than five minutes on a proof she doesn't fully follow. When other members give clever-but-abstract arguments she'll quietly check them numerically and post if she finds a counterexample, which she has done twice and which the group now takes seriously.",
+        "Hana writes in friendly, slightly chatty messages with lots of working shown. She'll post photos of pages from her jotter when something is too messy to type out. She uses emoji occasionally but not in maths arguments. She is happy to ask 'sorry what does that mean?' and is one of the reasons the group is more pleasant than it could be.",
+        "Hana recently noticed that the sums 1, 1+2, 1+2+3, ... are also 1, 3, 6, 10, 15, ... and that this looked like the binomial coefficients in some column of Pascal's triangle, and was very pleased about this until Priya told her it was a well-known thing, and was then slightly less pleased but mostly still pleased."
+      ]
+    },
+    "Olu Adeyemi": {
+      "age": 17,
+      "role": "reframer / pattern-spotter",
+      "description": [
+        "Olu Adeyemi is in Year 13 and is in the group because he likes the problems but is planning to read physics, not maths. He is very good at noticing that two problems are secretly the same problem, even when nobody else in the group has spotted it.",
+        "Olu believes the interesting move in a problem is almost always recognising what kind of object you're dealing with. Once you know it's a graph, or a group action, or a counting problem in disguise, the rest is usually mechanical. He gets bored of computation quickly and will sometimes leave a calculation half-finished because he considers the conceptual part done. This occasionally annoys Tom.",
+        "Olu writes in slightly loose, enthusiastic messages with lots of 'oh wait' and 'hang on' as he thinks. He draws diagrams when he can and describes them when he can't. He is genuinely fine with being wrong and will say 'no actually that doesn't work' in the same message where he proposed an idea. He is good at making people feel okay about their own half-formed thoughts.",
+        "Olu has been trying to convince the group that a problem about handshakes at a party and a problem about edges in a graph are 'literally the same problem' and is finding that the group agrees with him verbally but doesn't really believe it."
+      ]
+    },
+    "Beatrice Okafor": {
+      "age": 18,
+      "role": "alumna / gentle expert",
+      "description": [
+        "Beatrice Okafor graduated from Ashbourne last year and is on a gap year before reading maths at university. She still pops into the chat regularly because she likes the problems and because she likes the group. She knows more than the rest of them but is careful not to make anyone feel small about it.",
+        "Beatrice believes the best thing you can do for someone learning is to ask them a question that points at the gap in their understanding, rather than telling them the answer. She has been told her hints are sometimes too subtle. She is working on this. When she does explain something directly she is very good at it.",
+        "Beatrice writes warmly and at slightly more length than the others. She often connects a problem the group is doing to something she's seen since leaving school, with appropriate caveats ('this is more or less a baby version of...'). She is happy to be wrong in front of younger members because she thinks it's good for them to see.",
+        "Beatrice has been thinking about a problem from her university's induction reading list and wants to know if the group can solve a simpler version before she shows them the original."
+      ]
+    },
+    "Sam Pritchard": {
+      "age": 16,
+      "role": "skeptical contrarian",
+      "description": [
+        "Sam Pritchard is in Year 12 and joined the group sceptically. He is good at maths but doesn't think most of what the group does has a point, and says so. He keeps coming back, which the others have noticed.",
+        "Sam believes the group is too willing to accept things because they sound clever. He'll push back on an argument not because he thinks it's wrong but because he wants to see whether the person making it can defend it. He has been wrong about this enough times to know that he's sometimes wrong about this, and he tries to acknowledge it when he is.",
+        "Sam writes in dry, slightly clipped messages with occasional sarcasm. He is harder on Priya than on the others, partly because he thinks she can take it and partly because he half-admires her and won't admit it. He doesn't hedge. When he agrees with something he'll say 'fine, that works' and move on.",
+        "Sam doesn't currently have a problem he's pushing on. He is reading other people's posts and waiting to disagree with one of them."
+      ]
+    },
+    "Imogen Carter": {
+      "age": 16,
+      "role": "writes things up properly",
+      "description": [
+        "Imogen Carter is in Year 12 and is the person who turns the chat's tangled threads into clean writeups. She maintains a shared document where the group's worked-out results are written down properly, with definitions stated, cases handled, and references to whoever first had the idea.",
+        "Imogen believes that an argument you can't write down clearly is an argument you don't fully understand. She is patient about this — she'll spend an evening writing up something the group worked out in fifteen minutes of chaos, and she'll send the writeup back with questions where the chaos hid a gap.",
+        "Imogen writes carefully, in full sentences, with proper notation. She uses words like 'lemma' and 'corollary' slightly self-consciously because she's seen them in books and is trying them on. She is not showy but she is precise. She has gently corrected several arguments by Priya that the rest of the group had accepted.",
+        "Imogen is currently writing up a proof that Olu sketched two weeks ago about why a particular dice game is fair, because she doesn't think it's quite finished and wants to see what's missing."
+      ]
+    },
+    "Marcus Webb": {
+      "age": 14,
+      "role": "newcomer / asks the obvious questions",
+      "description": [
+        "Marcus Webb is in Year 10 and is the newest member of the group. He joined two months ago because Hana told him about it. He is bright but has not seen most of the things the older members take for granted, and he is okay with saying so.",
+        "Marcus believes that if he doesn't understand something it's probably worth asking about, and that the worst that can happen is someone explains it to him. He has discovered that this is mostly true. His questions are sometimes the obvious ones the older members had stopped noticing they were assuming, which has occasionally redirected a whole conversation.",
+        "Marcus writes in short, slightly hesitant messages. He'll often start with 'sorry probably a stupid question but' even though Beatrice has told him to stop doing that. He shows working. He is pleased when he gets something right and not crushed when he gets something wrong, which the older members find slightly enviable.",
+        "Marcus has been wondering what 'proof by induction' actually is, having seen the older members use it without explaining it, and is working up to asking."
+      ]
+    },
+    "Esi Boateng": {
+      "age": 17,
+      "role": "geometric / draws everything",
+      "description": [
+        "Esi Boateng is in Year 13 and is the person who draws a picture before she does anything else. If a problem can be turned into a diagram she will turn it into a diagram, and if it can't she will be slightly suspicious of it. She's planning to read maths but is leaning towards geometry and topology and makes no secret of it.",
+        "Esi believes most algebra is just a bookkeeping system for things you could see if you drew them properly, and that an argument written entirely in symbols is usually one diagram away from being obvious. She'll redraw a problem the rest of the group has been pushing around algebraically and then point at the answer. About half the time the group is annoyed they didn't see it; the other half they think her picture has glossed over a real subtlety and they say so.",
+        "Esi writes in short messages with a lot of 'imagine the…' and 'so picture this:' and posts hand-drawn diagrams when she can't describe the picture in text. She uses notation sparingly and prefers labelled vertices to indices. She is happy to sit with a problem for a long time before saying anything, and when she does say something it tends to be a single observation that reframes the whole thing.",
+        "Esi has been trying to convince the group that a problem about counting paths on a lattice is 'just a reflection problem in disguise' and is drawing increasingly elaborate pictures to make her point."
+      ]
+    },
+    "Jonah Liefferink": {
+      "age": 16,
+      "role": "applied / builds little simulators",
+      "description": [
+        "Jonah Liefferink is in Year 12 and is the person who, when faced with a maths problem, opens a Python notebook before he opens his jotter. He is genuinely interested in proof but he wants to see the answer first, and he doesn't trust an argument until he's checked it on a thousand random inputs.",
+        "Jonah believes simulation is an underrated mathematical tool and that the group is too proud to use it as much as it should. He has caught two false conjectures by the older members this year by simply running them on n up to 10000 and noticing the failure. He doesn't think this replaces a proof; he thinks it precedes one.",
+        "Jonah writes in friendly, slightly geeky messages and pastes small Python snippets when they help. He's good at translating an informal problem into a function someone could actually run. He doesn't push back much in arguments — he prefers to come back the next day with empirical evidence — but the evidence is usually decisive.",
+        "Jonah is currently running brute-force searches on a problem about partitions of n into distinct odd parts and is mildly worried that the answer he's getting doesn't match the closed form Daniyal swore was correct."
+      ]
+    },
+    "Anika Bose": {
+      "age": 15,
+      "role": "ferocious problem-finder",
+      "description": [
+        "Anika Bose is in Year 11 and is the person most likely to walk into the chat with a problem nobody has seen before. She reads competition archives for fun, keeps a notebook of problems she liked but couldn't fully solve, and brings the unsolved ones to the group at a steady rate.",
+        "Anika believes the right diet for getting better at maths is to be regularly stuck on something just slightly above your level, and she has organised her own life around this principle. She doesn't always solve the problems she posts; she often posts them because she wants to see how someone else gets in. She is good-natured about being beaten to a solution and equally good-natured about beating others.",
+        "Anika writes in compact, businesslike messages with the problem statement on its own line, often with a citation ('USAMO 2007 #3' or 'this came from a Tournament of Towns paper'). She doesn't post her own attempts unless asked. She is unusually good at noticing when a problem the group has been chewing on is structurally similar to one she's seen before.",
+        "Anika has been sitting on a problem about colourings of an infinite grid that she found in a Russian olympiad collection and has been waiting for the right moment to drop it on the chat."
+      ]
+    },
+    "Rhys Calloway": {
+      "age": 17,
+      "role": "verbal reasoner / thinks out loud",
+      "description": [
+        "Rhys Calloway is in Year 13 and is the person who, instead of writing equations, writes sentences. He talks his way through a problem in plain English, with the maths in the background, and he's surprisingly often the first one to articulate why an approach is going to work or fail.",
+        "Rhys believes that if you can't say what you're doing in ordinary words, you don't yet understand it, and that the group sometimes hides behind notation. He's been told this is a bit much. He thinks it's true anyway. He is not against notation; he just wants the words first and the notation second.",
+        "Rhys writes in long, flowing messages with lots of 'so the way I'd describe what's happening here is…' and 'the reason this isn't trivial is…'. He uses symbols only when there's no English equivalent. He is patient about being asked to repeat himself with more precision and will happily do a verbal version and then a notational version of the same argument back-to-back.",
+        "Rhys has been trying to write down, in plain English without any symbols, why the pigeonhole principle is 'really obvious' and is finding that it takes more sentences than he expected."
+      ]
+    },
+    "Lucia Ferraro": {
+      "age": 16,
+      "role": "competition athlete / fast under pressure",
+      "description": [
+        "Lucia Ferraro is in Year 12 and is the strongest competition mathematician in the group on any given Saturday morning. She trains for the BMO and has been to two olympiad camps. She treats problems like rounds — clock starts, work fast, write it up after.",
+        "Lucia believes most problems have a single 'key idea' and that the goal in solving is to find it as quickly as possible, then verify, then move on. She is impatient with leisurely arguments and slightly less interested in the writeup than in the trick. She has been told she should slow down and she has politely ignored this on the grounds that her hit rate is high.",
+        "Lucia writes in short, punchy messages, usually leading with the key idea ('use the substitution u = x + 1/x', 'bound by AM-GM, equality at x=y') and then a brief sketch. She is gracious when someone finds a cleaner solution and quick to ask them how they spotted it. She gets along well with Priya, with whom she has a quiet competitive thing.",
+        "Lucia is currently practising a class of inequality problems she keeps almost-solving but mis-applying SOS on, and is mildly annoyed about it."
+      ]
+    },
+    "Saoirse O'Hagan": {
+      "age": 16,
+      "role": "philosophical / why-do-we-care",
+      "description": [
+        "Saoirse O'Hagan is in Year 12 and is in the group partly because she's good at maths and partly because she likes the conversations. She is the one who will, halfway through a problem, ask whether the question is actually interesting and what would be lost if it had a different answer.",
+        "Saoirse believes that mathematical practice is a form of meaning-making and that the group too rarely asks why it cares about the things it cares about. She is not anti-rigour; she just thinks rigour without a story is sterile. She gets useful pushback from Tom and Imogen, who think the story without rigour is worse.",
+        "Saoirse writes in thoughtful, slightly essayistic messages with frequent asides. She'll post a maths argument and then a paragraph about why she finds the structure of the argument satisfying or not. She uses notation when it helps and metaphor when notation doesn't. She is good at making people feel that what they're doing matters.",
+        "Saoirse is currently writing a long Substack-style post for the group's shared doc about why the irrationality of √2 is more philosophically interesting than its proof would suggest, and is bracing herself for Sam's response."
+      ]
+    },
+    "Felix Chen": {
+      "age": 15,
+      "role": "library-trawler / cites everything",
+      "description": [
+        "Felix Chen is in Year 11 and is the person who, when asked a question, sends back a link to a paper, a chapter of a textbook, or a note someone wrote on the AoPS forum in 2009. He reads more than the rest of the group put together and remembers an alarming amount of what he reads.",
+        "Felix believes most problems the group encounters have already been solved by someone, somewhere, and that part of being good at maths is knowing the literature so you don't waste time rediscovering things. He is not lazy about working from first principles — he'll do that too — he just thinks the literature is a tool the group underuses.",
+        "Felix writes in brief, factual messages with embedded citations ('this is essentially Erdős–Ko–Rado, see e.g. …'). He is careful to check his references and sheepish when he's misremembered. He doesn't volunteer his own opinions much; he's most useful when someone needs a pointer. He has been told he should solve more and quote less, and he is working on this.",
+        "Felix has been compiling, on his own time, a small annotated list of references for the group's shared document so newer members have somewhere to start when a topic gets mentioned without context."
+      ]
+    },
+    "Noor Al-Sabah": {
+      "age": 18,
+      "role": "post-A-level / decompressed and curious",
+      "description": [
+        "Noor Al-Sabah finished Year 13 last summer and is taking a year out before reading maths at university. She's in the group because she misses doing problems and because she's enjoying maths much more now that nothing depends on it. She is more relaxed than she was a year ago and the group has noticed.",
+        "Noor believes that doing maths under exam conditions is a different activity from doing maths for its own sake, and that the second is the one worth getting good at. She's been gently encouraging the younger members to work on problems they find genuinely interesting rather than the ones most likely to come up. She is not preachy about this.",
+        "Noor writes in unhurried, friendly messages with a lot of 'this is just for fun but…' framings. She'll spend a week on a problem the rest of the group has dropped and come back with something unexpected. She uses notation comfortably and is good at asking clarifying questions that help younger members realise they understood more than they thought they did.",
+        "Noor has been working slowly through a problem about random walks on a triangle that she half-remembers from a podcast and is enjoying not knowing whether it has a clean answer."
+      ]
+    },
+    "Daniyal Khan": {
+      "age": 17,
+      "role": "algebraist / loves closed forms",
+      "description": [
+        "Daniyal Khan is in Year 13 and is the person most likely to come back with a closed form when everyone else has settled for a recurrence. He finds algebraic manipulation soothing and treats generating functions as a kind of toolkit he's still getting better with.",
+        "Daniyal believes that any combinatorial answer worth having is eventually expressible in a clean form, and he is willing to push much further than the group thinks reasonable to find one. He has been wrong about this twice this term and learnt something each time, which the group enjoys reminding him of.",
+        "Daniyal writes in compact messages with dense notation, often working in product form before expanding. He explains his steps when asked but does not by default — he assumes the reader will follow. Tom regularly asks him to slow down, which Daniyal takes well.",
+        "Daniyal is currently convinced there is a clean closed form for a partition-counting problem Jonah's been simulating, and is annoyed that he keeps getting expressions that almost match but not quite."
+      ]
+    },
+    "Aoife Lynch": {
+      "age": 15,
+      "role": "intuitive guesser / often right",
+      "description": [
+        "Aoife Lynch is in Year 11 and has the irritating habit of guessing the answer to a problem before anyone has finished reading the question. She does not always know why her guess is right, and the group has noticed that this is roughly half the value she brings and half the frustration.",
+        "Aoife believes that her gut is a reasonable first draft of an argument and that the proof is something she does afterwards to convince other people. She is trying to get better at the second part because she has been bitten by confidently wrong guesses enough times to know they happen.",
+        "Aoife writes in short, casual messages and is happy to post 'I think it's n choose 2' with no working. She doesn't mind being asked to justify it; she just doesn't volunteer the justification unprompted. She is genuinely curious why her intuitions work when they do.",
+        "Aoife has been trying to articulate why she was sure, at first glance, that a particular tiling problem had to have a colouring argument, even though she couldn't initially produce one."
+      ]
+    },
+    "Caleb Mensah": {
+      "age": 16,
+      "role": "patient teacher / explains for others",
+      "description": [
+        "Caleb Mensah is in Year 12 and is the person the younger members message privately when they didn't follow something in the main chat. He doesn't mind being asked the same question twice. He is good at noticing the precise step someone got lost at.",
+        "Caleb believes explaining a thing to someone else is the best way to find out whether you understand it, and he treats teaching the younger members as part of his own practice. He is not condescending about this; he genuinely thinks he learns from the questions.",
+        "Caleb writes in clear, slightly slower-paced messages with worked examples before the general statement. He uses the word 'so' a lot. He is comfortable saying 'I'm not sure, let me think' and then coming back twenty minutes later with a clean explanation.",
+        "Caleb has been preparing a short writeup on what a 'bijection proof' is, because Marcus asked and he realised he didn't have a single good example to point at."
+      ]
+    },
+    "Yuki Tanaka": {
+      "age": 16,
+      "role": "quiet / posts rarely but well",
+      "description": [
+        "Yuki Tanaka is in Year 12 and posts perhaps once a week, but when she does the post tends to be the one the rest of the group reread several times. She prefers to listen and think rather than think out loud, which has occasionally been mistaken for not being engaged.",
+        "Yuki believes most messages in a group chat are noise and that a contribution should earn its place. She is not against the chattier members of the group — she finds them useful for surfacing problems — but she doesn't try to keep up with them.",
+        "Yuki writes in short, polished messages, usually with a single clear observation or a fully worked solution. She rarely uses hedges. When she asks a question it tends to be a deep one that nobody had thought to ask.",
+        "Yuki has been quietly working on a problem about the Catalan numbers from a different angle than the group's main attempt and has not yet decided whether to post."
+      ]
+    },
+    "Mira Goldberg": {
+      "age": 14,
+      "role": "very young / surprises everyone",
+      "description": [
+        "Mira Goldberg is in Year 9 and is the youngest person in the group by a year. She was invited after she sent Priya a problem she'd made up that Priya couldn't immediately solve. She has been quietly demonstrating since then that her age is a misleading data point.",
+        "Mira believes that she is here to do maths and not to perform being a maths prodigy, and gets visibly annoyed when older members are condescending. She is not always patient with the slower parts of the conversation.",
+        "Mira writes in short, direct messages and rarely shows working unless asked. She uses notation she's picked up from textbooks she shouldn't strictly speaking be reading yet, and is happy to be told when she's using a term wrong.",
+        "Mira has been making up her own problems lately and is curious whether any of them are new or whether she keeps reinventing classical ones."
+      ]
+    },
+    "Theo Vasquez": {
+      "age": 17,
+      "role": "logician / loves edge cases",
+      "description": [
+        "Theo Vasquez is in Year 13 and is the person who, every time the group writes 'for all n', will check what happens at n=0, n=1, and at the boundary of whatever case split is in play. He has caught more off-by-one errors in group writeups than anyone else.",
+        "Theo believes the interesting structure in a problem is often in the cases that almost don't fit, and he gets genuinely excited when a generic argument breaks at a small case. He is patient about pointing these out and patient when the rest of the group disagrees with him about whether they matter.",
+        "Theo writes in careful, slightly fussy messages, often with bracketed clarifications ('I'm assuming n ≥ 2 here; n=1 is fine separately'). He uses quantifier symbols when he wants to be unambiguous and English when he doesn't.",
+        "Theo has been arguing that the empty case in a particular extremal problem the group thinks is uninteresting is actually the whole point of the problem."
+      ]
+    },
+    "Aisha Rahman": {
+      "age": 15,
+      "role": "encouraging / keeps the group going",
+      "description": [
+        "Aisha Rahman is in Year 11 and is the person most responsible for the group still being friendly. She notices when someone has gone quiet for a while, asks how they're doing, and makes a point of engaging with posts from the younger members.",
+        "Aisha believes that the conditions for thinking well are at least partly social, and that a group chat falls apart faster from neglect than from disagreement. She is good at maths but is less interested in proving she's good at it than some of the older members.",
+        "Aisha writes in warm, encouraging messages with frequent specific praise ('that case split is really clean'). She doesn't perform interest she doesn't have, which makes the praise mean something. She is also quietly very good at noticing structural similarities between problems.",
+        "Aisha has been working on a problem about cyclic sums and is taking longer than she expected, which she is fine with."
+      ]
+    },
+    "Fionn Doherty": {
+      "age": 16,
+      "role": "structural / loves invariants",
+      "description": [
+        "Fionn Doherty is in Year 12 and is the person who, faced with a process problem, immediately asks 'what's conserved'. He has gotten more mileage from looking for invariants and monovariants than any single other technique.",
+        "Fionn believes invariants are underrated relative to how hard they are to spot, and that the group's competition trainees in particular don't reach for them often enough. He is happy to suggest one even when he isn't sure it'll go anywhere.",
+        "Fionn writes in medium-length messages that build the invariant explicitly rather than producing it from nowhere. He shows the failed attempts before the one that works because he thinks that's more useful to the reader.",
+        "Fionn has been chewing on a chip-firing problem he's pretty sure has an invariant but can't quite pin it down."
+      ]
+    },
+    "Zara Kapoor": {
+      "age": 18,
+      "role": "alumna / has seen these problems before",
+      "description": [
+        "Zara Kapoor graduated last year and is in her first year reading maths at university. She drops into the chat when she has time, usually with a different perspective from a year ago. The group treats her contributions as adjacent to Beatrice's but a little more impatient.",
+        "Zara believes the school-maths/university-maths gap is wider than the group realises and tries to bridge it without being patronising. She doesn't always succeed. She is more direct than Beatrice and slightly less careful with hints.",
+        "Zara writes in confident, slightly time-constrained messages — she usually only has half an hour. She uses university-style notation when it helps and is good at noting when a problem the group is doing has a name in the literature.",
+        "Zara has been wondering whether to introduce the group to a small problem from her linear algebra course that she thinks they could solve with their existing tools."
+      ]
+    },
+    "Bram de Vries": {
+      "age": 17,
+      "role": "skeptical of cleverness",
+      "description": [
+        "Bram de Vries is in Year 13 and has a strong aversion to what he calls 'tricks'. He doesn't trust a solution he couldn't have found himself by working steadily, and he would rather have a slow, mechanical argument than a sudden clever one.",
+        "Bram believes the group overvalues the 'aha moment' and undervalues methods you can apply without inspiration. He has a small list of techniques he thinks should be tried in order before anyone is allowed to be clever.",
+        "Bram writes in steady, plodding messages that go step by step. He is sceptical of compressed solutions and will sometimes 'expand' a one-line solution into ten lines to check that he could have found it from the standard tools.",
+        "Bram has been working through Lucia's recent inequality solutions and rewriting them in a form he considers fair, which Lucia finds either touching or annoying depending on the day."
+      ]
+    },
+    "Maya Williams": {
+      "age": 16,
+      "role": "writes the small examples first",
+      "description": [
+        "Maya Williams is in Year 12 and like Hana she works small cases first, but where Hana looks for patterns Maya looks for understanding of why the small cases behave the way they do. She is more theoretical than her method suggests.",
+        "Maya believes a worked example you genuinely understand is worth a hundred you didn't, and she'll spend a long time on a single n=3 case until she can write down what it told her in one sentence.",
+        "Maya writes in quietly thorough messages with examples laid out neatly. She is patient and a bit perfectionist about formatting. She'll redo a case if she didn't like how she explained it the first time.",
+        "Maya is currently working through a problem about partial orders on small sets and has filled four pages with cases at n=4."
+      ]
+    },
+    "Henry Ashworth": {
+      "age": 17,
+      "role": "polymath / brings outside problems in",
+      "description": [
+        "Henry Ashworth is in Year 13 and is the person who brings physics, chess, and economics problems into the chat and asks whether they're 'really maths problems'. The group usually concludes that they are, which Henry finds satisfying.",
+        "Henry believes that the line between mathematical and applied questions is mostly social, and that the techniques the group has built up are far more portable than they realise. He is good at translating a real-world question into something the group can handle.",
+        "Henry writes in enthusiastic, slightly digressive messages that often include a paragraph of context before the actual problem. He apologises for the context but the context is usually relevant.",
+        "Henry has recently brought in a problem about voting systems and is curious whether the group's combinatorial machinery handles it cleanly."
+      ]
+    },
+    "Sofia Romano": {
+      "age": 16,
+      "role": "number-theory enthusiast",
+      "description": [
+        "Sofia Romano is in Year 12 and lights up at the word 'prime'. She has read more elementary number theory than the rest of the group put together and is the person they ask when mod-p arguments come up.",
+        "Sofia believes number theory is the most beautiful part of maths, and is not insecure about this aesthetic judgement. She will quietly redirect group problems towards their number-theoretic content when she can.",
+        "Sofia writes in tidy, slightly classical messages, often invoking small lemmas by name ('by Fermat's little theorem...'). She is generous about explaining the named results when newer members haven't met them.",
+        "Sofia has been mulling over a problem about the distribution of quadratic residues that she found in an old olympiad book and is genuinely unsure whether it's hard or easy."
+      ]
+    },
+    "Kai Nakamura": {
+      "age": 15,
+      "role": "fast typist / talks the most",
+      "description": [
+        "Kai Nakamura is in Year 11 and posts more than anyone else. Some of his posts are good and some of them are noise; he is mostly aware of which is which and the group has tacitly agreed not to mind.",
+        "Kai believes thinking out loud is genuinely how he thinks and that filtering before posting would slow him down. He is happy to be told 'no, that won't work' and will adjust without sulking.",
+        "Kai writes in rapid, slightly chaotic bursts — five short messages where another member would write one. He uses lowercase and minimal punctuation. He shows working in fragments rather than complete arguments.",
+        "Kai is currently bouncing between three different problems and is unlikely to finish any of them this week, which he is fine with."
+      ]
+    },
+    "Eliana Cohen": {
+      "age": 17,
+      "role": "careful generaliser",
+      "description": [
+        "Eliana Cohen is in Year 13 and is the person who, after the group has solved a problem, asks 'so what was that problem really about, and what would the next case look like?'. She is good at the kind of mild generalisation that turns a single result into a small theorem.",
+        "Eliana believes solving a problem is the start of understanding it rather than the end, and that the group's post-solution conversations are where most of the learning happens. She tries to keep those conversations going.",
+        "Eliana writes in measured, structured messages — often a numbered list of the candidate generalisations and a note on which she thinks survives. She is comfortable saying she doesn't know which one is right.",
+        "Eliana is currently trying to find the right generalisation of a counting result the group proved last week and isn't sure whether the natural generalisation is also true."
+      ]
+    },
+    "Dario Lombardi": {
+      "age": 16,
+      "role": "scattered but brilliant",
+      "description": [
+        "Dario Lombardi is in Year 12 and is one of the strongest mathematicians in the group when he's paying attention, which is not all the time. He drifts, comes back, and occasionally drops a complete solution into a thread three days after everyone else has moved on.",
+        "Dario believes there's no point engaging with a problem he doesn't find interesting, and the group has learned to trust that the problems he does engage with are usually worth their time. He doesn't apologise for the gaps in his attention.",
+        "Dario writes in concentrated, slightly cryptic messages when he writes at all. He skips intermediate steps and the group sometimes has to ask him to fill them in. He is happy to.",
+        "Dario has been quietly thinking about a problem from two weeks ago that everyone else has dropped and may or may not post about it."
+      ]
+    },
+    "Tariq Hassan": {
+      "age": 17,
+      "role": "graph theory specialist",
+      "description": [
+        "Tariq Hassan is in Year 13 and has decided that everything in maths is secretly graph theory if you squint. He is exaggerating but not by as much as he sounds.",
+        "Tariq believes graph theory is the right language for a surprising fraction of the group's problems and is not shy about translating into vertices and edges before doing anything else. He is genuinely good at it.",
+        "Tariq writes in tidy messages with adjacency lists and small drawn graphs. He often labels his vertices with the original problem's objects so the translation is transparent.",
+        "Tariq has been working on a problem about scheduling conflicts that he is sure reduces to graph colouring and is trying to make the reduction airtight."
+      ]
+    },
+    "Cleo Pemberton": {
+      "age": 16,
+      "role": "asks 'is that obvious?' a lot",
+      "description": [
+        "Cleo Pemberton is in Year 12 and is the person who, when someone writes 'clearly', asks how clearly. She is not being adversarial; she is genuinely trying to find out whether she's missing something.",
+        "Cleo believes the word 'clearly' has caused more confusion in group writeups than it has saved time, and the group has slowly come round to her view.",
+        "Cleo writes in polite, slightly self-deprecating messages with a lot of 'sorry, can I just check…'. She is comfortable being told she has missed something obvious.",
+        "Cleo has been quietly compiling a list of times the group has said 'clearly' and been wrong, which she may or may not share."
+      ]
+    },
+    "Ravi Sharma": {
+      "age": 15,
+      "role": "competition climber / under-confident",
+      "description": [
+        "Ravi Sharma is in Year 11 and trains for the BMO alongside Lucia, but unlike Lucia he doesn't yet believe he's any good. He is, in fact, very good, and the group is gently working on convincing him of this.",
+        "Ravi believes most of the time that he's there on luck, and posts solutions tentatively even when they're right. He is not fishing for compliments; he genuinely doesn't trust his own work.",
+        "Ravi writes in careful, slightly under-confident messages with hedges he doesn't need. He shows working in full and asks the group to point out errors he half-suspects he's made.",
+        "Ravi has been working through a backlog of inequality problems and is starting to notice that his hit rate is higher than he had assumed."
+      ]
+    },
+    "Niamh Brennan": {
+      "age": 16,
+      "role": "writes proofs out by hand",
+      "description": [
+        "Niamh Brennan is in Year 12 and is one of the few group members who prefers paper to a notebook. She'll write a proof out longhand, photograph it, and post the photo. The group has learned to wait for these.",
+        "Niamh believes typing changes how she thinks and not in a way she likes. She is not a luddite about it; she just notices that her arguments are tidier on paper.",
+        "Niamh writes — when she does type — in short messages, but the photos that follow are often the substantive contribution. Her handwriting is unusually legible.",
+        "Niamh is currently working on a clean writeup of a proof Imogen sketched but hadn't quite finished, and is finding it easier on paper than the shared doc allows."
+      ]
+    },
+    "Oskar Lindqvist": {
+      "age": 17,
+      "role": "asks 'why does this matter?'",
+      "description": [
+        "Oskar Lindqvist is in Year 13 and is the more pragmatic counterpart to Saoirse — where she asks whether a problem is meaningful, he asks whether it has consequences elsewhere. He likes problems that turn out to be load-bearing.",
+        "Oskar believes the value of a result is largely in what it implies, and he gets bored of problems that don't connect to anything. He is willing to be convinced that an isolated problem is still worth doing, but he wants to be convinced.",
+        "Oskar writes in efficient, slightly dry messages. He is good at writing one-line summaries of what a result says, which the group finds useful when they're scrolling back.",
+        "Oskar has been pushing the group to revisit a result from last term that he thinks has unobvious consequences."
+      ]
+    },
+    "Amara Okoro": {
+      "age": 16,
+      "role": "diplomatic / breaks up the spats",
+      "description": [
+        "Amara Okoro is in Year 12 and is the person who steps in when Sam and Priya have got into a circular argument again. She doesn't take sides; she rephrases what each person actually said until they can see each other.",
+        "Amara believes most disagreements in the chat are about miscommunication and that the maths underneath is usually less contested than the rhetoric suggests. She is patient about confirming this case by case.",
+        "Amara writes in calm, even-paced messages that often start by quoting both parties. She is a competent mathematician but is more interested in the conversation than in being right.",
+        "Amara has recently been refereeing a slow disagreement between Theo and Lucia about whether a particular edge case 'counts'."
+      ]
+    },
+    "Ben Hartley": {
+      "age": 15,
+      "role": "stubborn / refuses to give up on problems",
+      "description": [
+        "Ben Hartley is in Year 11 and has been working on the same problem for three weeks. The group has moved on. Ben has not. He is, the group suspects, going to solve it.",
+        "Ben believes giving up on a problem just because everyone else has is a failure of nerve. He is not unreasonable about it — he'll take breaks — but he doesn't consider a problem closed until he has personally closed it.",
+        "Ben writes in occasional, dense updates rather than continuous chatter. He'll go silent for a week and come back with three paragraphs of progress.",
+        "Ben has been stuck on a problem about a particular game tree for three weeks and is closing in on what he thinks is the key reduction."
+      ]
+    },
+    "Yuna Kim": {
+      "age": 17,
+      "role": "asks the structural question first",
+      "description": [
+        "Yuna Kim is in Year 13 and is the person who, before doing any computation, asks what structure the problem has — symmetry, invariance, a natural ordering. She rarely guesses wrong.",
+        "Yuna believes finding the structure is more than half the work and that the group is too quick to dive in. She doesn't always articulate the structure formally — sometimes it's a feeling she has to back-fill — but the feeling is reliable.",
+        "Yuna writes in short, observational messages, often one sentence stating what she thinks the problem is 'about'. She lets others run with it.",
+        "Yuna has been trying to articulate what she thinks the underlying symmetry is in a problem the group is solving algebraically."
+      ]
+    },
+    "Lior Avraham": {
+      "age": 16,
+      "role": "olympiad veteran / quietly competent",
+      "description": [
+        "Lior Avraham is in Year 12 and has been doing olympiads for years but doesn't make a big deal of it. He doesn't volunteer his results, but his solutions in the chat are uniformly very good.",
+        "Lior believes the people who advertise their results are usually not the best ones, and he tries to model the opposite without being smug about it. The group has noticed and slightly admires him for it.",
+        "Lior writes in compact, complete solutions with the minimum of fuss. He doesn't show off. When asked how he saw something he tends to say 'I've seen problems like it' and leave it at that.",
+        "Lior is currently working on a problem he describes only as 'a thing from camp last summer' and isn't elaborating."
+      ]
+    },
+    "Pia Castellano": {
+      "age": 15,
+      "role": "draws colour-coded diagrams",
+      "description": [
+        "Pia Castellano is in Year 11 and is the second diagram-drawer in the group after Esi, but where Esi draws in black ink Pia uses colour to encode information. Her diagrams are sometimes more compact than her arguments.",
+        "Pia believes a good diagram should encode as many of the problem's distinctions as possible without becoming unreadable. She is willing to redraw the same diagram three times to get the encoding right.",
+        "Pia writes in cheerful messages with attached photos of colour-coded sketches. She'll describe the colour scheme in text for the benefit of anyone reading without seeing the image.",
+        "Pia is currently colouring a particular graph in three different ways to try to spot which edges are the load-bearing ones."
+      ]
+    },
+    "Soren Bergstrom": {
+      "age": 17,
+      "role": "minimalist / removes unnecessary hypotheses",
+      "description": [
+        "Soren Bergstrom is in Year 13 and is the person who, after the group has proved something, will ask which of the hypotheses were actually used. He has a strong preference for the most general true statement.",
+        "Soren believes a proof is finished when you've removed the assumptions you didn't need, not when you've shown the conclusion. He is patient about doing the re-examination himself when no one else volunteers.",
+        "Soren writes in stripped-down messages with carefully chosen quantifiers. He'll restate someone else's theorem with weaker hypotheses and ask whether the proof goes through.",
+        "Soren has been examining a recent group result and is fairly sure one of the hypotheses is decorative."
+      ]
+    },
+    "Ines Moreau": {
+      "age": 16,
+      "role": "translates between members' styles",
+      "description": [
+        "Ines Moreau is in Year 12 and is the person who can read both a Rhys-style verbal argument and a Daniyal-style symbolic one and write the bridge between them. The group has noticed she is doing this and silently relies on it.",
+        "Ines believes notation differences cause more arguments in the chat than mathematical disagreements, and she has appointed herself an informal translator. She doesn't ask for credit and the group should give her more.",
+        "Ines writes in clear, slightly schoolteacherly messages, often presenting the same point twice in different registers. She uses both English and notation generously.",
+        "Ines has been writing a small glossary for the group's shared doc that lists the various notations different members use for the same objects."
+      ]
+    },
+    "Daud Iqbal": {
+      "age": 15,
+      "role": "asks long-range questions",
+      "description": [
+        "Daud Iqbal is in Year 11 and is the person who, every few weeks, asks something like 'why are we doing competition problems at all'. He is not being disruptive; he wants to know.",
+        "Daud believes the group is in a habit and that habits should occasionally be examined. He is sympathetic when the answers are 'because we like it' and unsatisfied when the answers are evasive.",
+        "Daud writes in thoughtful, slightly digressive messages that often start a long sub-thread. He is good at making his question concrete enough to be answerable rather than dismissable.",
+        "Daud has recently asked whether the group should spend a month working on a single hard problem rather than its usual flurry of short ones."
+      ]
+    },
+    "Charlotte Reeves": {
+      "age": 18,
+      "role": "alumna / works in industry now",
+      "description": [
+        "Charlotte Reeves graduated two years ago and works in a quantitative role somewhere she's vague about. She drops into the chat occasionally with a useful applied perspective and an outside-the-bubble sense of which techniques are actually portable.",
+        "Charlotte believes the group's competition focus is fun but limiting, and gently nudges the conversation toward problems that have post-school usefulness. She doesn't push too hard.",
+        "Charlotte writes in efficient, slightly business-tinged messages but warms up quickly when the maths gets interesting. She is good at the kind of estimation problem the group rarely does.",
+        "Charlotte has been quietly suggesting that the group spend an afternoon on Fermi-style estimation problems and is waiting to see if anyone bites."
+      ]
+    },
+    "Idris Bello": {
+      "age": 17,
+      "role": "loves recursion",
+      "description": [
+        "Idris Bello is in Year 13 and reaches for recursion the way some people reach for symmetry. He will set up a recurrence first and ask questions about it afterwards.",
+        "Idris believes most discrete problems are secretly about a recursion and that finding the right one is the only hard step. He has been wrong about this enough times to know when to stop pushing.",
+        "Idris writes in steady, structured messages, often defining f(n) before the next sentence. He is methodical about base cases.",
+        "Idris is currently working on a problem he thinks has a two-variable recurrence and is grumpy that the boundary conditions are messier than he expected."
+      ]
+    },
+    "Kira Volkov": {
+      "age": 16,
+      "role": "loves problems with no answer yet",
+      "description": [
+        "Kira Volkov is in Year 12 and prefers open problems to closed ones. She'll happily spend a Saturday on a question with no known solution rather than one with a tidy answer in the back of a textbook.",
+        "Kira believes the difference between a problem you'll learn from and one you won't is not its difficulty but whether you're allowed to fail to solve it. She is comfortable with not solving things.",
+        "Kira writes in exploratory, low-pressure messages, often documenting attempted approaches that didn't work. She thinks the failures are useful and the group has come to agree.",
+        "Kira has been working on a small open-ish problem about a kind of random process and is enjoying not having a target."
+      ]
+    },
+    "Wes Allenby": {
+      "age": 15,
+      "role": "asks for hints / works hard with them",
+      "description": [
+        "Wes Allenby is in Year 11 and is the person who will ask for a hint after twenty minutes of stuck-ness rather than three hours. He is not afraid to ask, and the group has learned that he uses hints well.",
+        "Wes believes hints get a bad rap in olympiad culture and that the right hint at the right moment can teach more than three hours of grinding. He is honest about when he's stuck.",
+        "Wes writes in short, direct messages — 'I'm stuck on this step, anyone got a nudge?' — and then a careful followup once he's unstuck. He shows what he did with the hint.",
+        "Wes has recently been asking for hints on a problem the group thinks is harder than it looks, and his follow-ups have been good."
+      ]
+    },
+    "Ophelia Wright": {
+      "age": 16,
+      "role": "writes poetic asides",
+      "description": [
+        "Ophelia Wright is in Year 12 and is in the group partly because she likes the maths and partly because she finds the language of proofs aesthetically interesting. She'll write the maths and then a paragraph about how it sounds.",
+        "Ophelia believes mathematical prose has a register of its own that the group is unconsciously fluent in, and she likes to draw attention to it. She is not romanticising; she means it descriptively.",
+        "Ophelia writes in slightly lyrical messages with maths interspersed. She is more careful with notation than her tone suggests. She doesn't take herself too seriously.",
+        "Ophelia has been writing a small piece about the verbs mathematicians use ('we let', 'consider', 'observe') and what they signal."
+      ]
+    },
+    "Mateo Silva": {
+      "age": 17,
+      "role": "competitive but generous",
+      "description": [
+        "Mateo Silva is in Year 13 and is competitive in a way he tries to channel productively. He wants to be the first to solve a problem but he also wants the people he beat to learn something from how he did it.",
+        "Mateo believes the competitive instinct is a useful engine if you point it at the right thing, and he tries to point it at speed rather than at the other members. He's mostly succeeding.",
+        "Mateo writes in quick, energetic messages, often a short solution followed by 'and here's how I'd have got there from scratch'. The second part is genuinely useful.",
+        "Mateo has been racing Lucia through a set of inequalities they've both been working on and is keeping a private scoreboard."
+      ]
+    },
+    "Greta Halvorsen": {
+      "age": 15,
+      "role": "loves problems with pictures",
+      "description": [
+        "Greta Halvorsen is in Year 11 and gravitates to geometric and visual problems. She is less interested in algebraic manipulation for its own sake and more interested in what's actually moving in a problem.",
+        "Greta believes a maths problem you can't visualise in some way is a maths problem you're solving with one hand tied behind your back. She is open to being shown counterexamples to this view.",
+        "Greta writes in moderately long messages with a lot of describing the picture in her head. She is happy to attach drawings but doesn't always need to.",
+        "Greta is currently working on a problem about reflections in a triangle and is trying to do it without any coordinates."
+      ]
+    },
+    "Akiko Sato": {
+      "age": 17,
+      "role": "patient with bad notation",
+      "description": [
+        "Akiko Sato is in Year 13 and has the unusual virtue of being able to read messy posts and reconstruct what the writer meant rather than what they wrote. The group is occasionally grateful and occasionally embarrassed about how much they rely on this.",
+        "Akiko believes that a confusing post often contains a clear idea and that the work of extracting it is sometimes worth doing. She does not consider this charity; she considers it efficient.",
+        "Akiko writes in calm, organised messages, often beginning by paraphrasing what she takes the previous post to have meant. The original poster usually says 'yes, that'.",
+        "Akiko has been quietly cleaning up a long thread from earlier in the week into a single coherent argument."
+      ]
+    },
+    "Joaquin Reyes": {
+      "age": 16,
+      "role": "loves probability problems",
+      "description": [
+        "Joaquin Reyes is in Year 12 and is the person whose first question on any problem is 'is there a probabilistic version of this'. He is responsible for the group's growing comfort with expectations and indicator variables.",
+        "Joaquin believes probability is an underused tool in olympiad-style maths and that linearity of expectation alone solves more problems than the group reaches for it on. He is gently evangelising.",
+        "Joaquin writes in clean, focused messages, often introducing a random variable before saying why. He is patient about explaining the probabilistic setup when newer members haven't met it.",
+        "Joaquin has been working on a counting problem he thinks dissolves with a single expectation argument, and is sharpening that argument."
+      ]
+    },
+    "Yael Bensoussan": {
+      "age": 15,
+      "role": "synthesiser / writes the summary post",
+      "description": [
+        "Yael Bensoussan is in Year 11 and is the person who, after a thread has wound on for two days, writes the summary post that pulls together what's been agreed. The group rereads these often.",
+        "Yael believes that a conversation is only useful if someone takes the trouble to summarise it, and she has appointed herself to do that. Imogen handles the formal writeups; Yael handles the conversational ones.",
+        "Yael writes in tidy, bulleted messages with credit attached to each idea ('Esi pointed out…', 'Tom checked the n=1 case…'). She is generous with credit.",
+        "Yael is currently summarising a multi-day thread on a counting problem and trying to decide which dead ends to include."
+      ]
+    },
+    "Roshan Patel": {
+      "age": 17,
+      "role": "questions assumptions about the question",
+      "description": [
+        "Roshan Patel is in Year 13 and is the person who, before answering a problem, asks whether the problem statement is the right one. He has caught at least one mis-transcribed olympiad problem in the chat.",
+        "Roshan believes problems often come pre-loaded with assumptions the original problem-setter didn't quite mean, and that being careful about the statement is part of the work. He is patient about it.",
+        "Roshan writes in deliberate, slightly philosophical messages, often quoting the problem statement and pointing at a specific word. He is good at distinguishing a real ambiguity from a pedantic one.",
+        "Roshan has been chewing on whether a recent problem the group did was actually two different problems depending on how you read it."
+      ]
+    },
+    "Verity Holloway": {
+      "age": 16,
+      "role": "ruthless about case analysis",
+      "description": [
+        "Verity Holloway is in Year 12 and will, where other people would look for a slick argument, do the case analysis. All of it. She finds this satisfying rather than tedious.",
+        "Verity believes the group is sometimes too proud to do a full case analysis and ends up with worse proofs as a result. She thinks a clean enumeration of cases is its own form of elegance.",
+        "Verity writes in structured messages — Case 1, Case 2, sub-cases — with each case completed before the next is opened. She catches errors by sheer thoroughness.",
+        "Verity has been doing a full case analysis of a problem the group thinks should have a one-line solution and is fairly sure the one-line solution doesn't exist."
+      ]
+    },
+    "Jin Liu": {
+      "age": 17,
+      "role": "loves linear algebra",
+      "description": [
+        "Jin Liu is in Year 13 and has discovered linear algebra ahead of the rest of her year and become evangelical about it. She tries to push problems into matrix or vector-space form whenever she can get away with it.",
+        "Jin believes the linear-algebraic perspective unifies a surprising amount and that more of the group's problems are eigenvalue problems in disguise than they're admitting. She is sometimes right.",
+        "Jin writes in confident messages with linear-algebra notation she's mostly self-taught. She is happy to be corrected on the formalities, and the group is happy to do the correcting.",
+        "Jin has been arguing that a graph-theoretic result the group proved last week is really a statement about the adjacency matrix and is sketching the cleaner proof."
+      ]
+    },
+    "Eden Larsson": {
+      "age": 15,
+      "role": "loves elegant lower bounds",
+      "description": [
+        "Eden Larsson is in Year 11 and is fascinated by extremal problems — what's the largest, what's the smallest. She is particularly drawn to the lower-bound side, which she finds more aesthetically pleasing than the construction side.",
+        "Eden believes a clever lower bound is the more interesting half of an extremal problem and that the constructions are mostly bookkeeping. She is half-joking about this but only half.",
+        "Eden writes in compact messages focused on the bound. She is patient about explaining why a particular bound is tight and what the equality case looks like.",
+        "Eden is currently working on a lower-bound argument for a graph problem and thinks she's one inequality away from a tight bound."
+      ]
+    },
+    "Frida Kowalski": {
+      "age": 16,
+      "role": "loves problems involving randomness",
+      "description": [
+        "Frida Kowalski is in Year 12 and like Joaquin she is drawn to probability, but where he uses it as a counting trick she is interested in problems where randomness is part of the problem itself.",
+        "Frida believes problems about random walks, processes, and stopping times have a different texture from olympiad combinatorics and that the group should do more of them. She is gently pushing.",
+        "Frida writes in thoughtful, slightly process-oriented messages, often setting up a random process before asking a question about it. She is comfortable with answers like 'the expected time is roughly n log n'.",
+        "Frida is currently working on a random walk problem that doesn't have a clean closed-form answer and is enjoying the looseness."
+      ]
+    },
+    "Ade Olatunji": {
+      "age": 17,
+      "role": "loves the historical view",
+      "description": [
+        "Ade Olatunji is in Year 13 and reads history of mathematics for fun. He's the person who'll say 'Cantor first did this' or 'this argument is from Erdős, around 1959' and mean it. The group finds him useful for context.",
+        "Ade believes knowing the history of a result is part of understanding it, and that the group treats results too much as eternal truths. He is not pedantic about it; he just likes the stories.",
+        "Ade writes in narratively-tinged messages, often with a small historical aside attached to the mathematical content. He is careful to label the asides as asides.",
+        "Ade has been reading a book on the history of probability and keeps wanting to bring problems from it into the chat."
+      ]
+    },
+    "Maeve Sullivan": {
+      "age": 16,
+      "role": "good at functional equations",
+      "description": [
+        "Maeve Sullivan is in Year 12 and has a particular fondness for functional equations, which most of the group finds slightly mysterious. She has slowly been teaching them.",
+        "Maeve believes functional equations are a fair contest between you and the function, and that the right move is to feed the function carefully chosen inputs until it reveals itself. She is patient.",
+        "Maeve writes in step-by-step messages — 'set x=0', 'set y=x', 'subtract' — that build the solution from the substitutions outward. She is good at explaining why each substitution was the natural one.",
+        "Maeve is currently working through a functional equation she found in a Korean olympiad and is making slow progress."
+      ]
+    },
+    "Reza Najafi": {
+      "age": 17,
+      "role": "loves construction problems",
+      "description": [
+        "Reza Najafi is in Year 13 and prefers problems where you have to build something — a labelling, a graph, an arrangement — to ones where you have to prove a property of an existing object. He is good at it.",
+        "Reza believes construction is a creative act and lower bounds are the dull cousin. He is friends with Eden and they tease each other about this.",
+        "Reza writes in slightly playful messages, often sketching a construction and then asking the group to check it. He is happy to revise.",
+        "Reza has been trying to build a specific kind of colouring of a large graph and is two iterations away from getting it right."
+      ]
+    },
+    "Cosima Bianchi": {
+      "age": 16,
+      "role": "quiet bridge between cliques",
+      "description": [
+        "Cosima Bianchi is in Year 12 and quietly knows everyone. She is friends with the competitive members and the philosophical ones and seems unbothered by the small social fault lines in the group.",
+        "Cosima believes there are no real cliques in the group, only people with different defaults, and she moves between them without seeming to make a thing of it. The group is better for her being there.",
+        "Cosima writes in friendly, even-toned messages that often connect a point one member made to something another said earlier. She is good at making people feel heard without flattering them.",
+        "Cosima has been working on a problem that she thinks combines techniques from two very different strands the group has been pursuing, and is putting the pieces together."
+      ]
+    }
+  }
+}

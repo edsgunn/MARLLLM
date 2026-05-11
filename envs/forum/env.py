@@ -215,9 +215,6 @@ class ForumEnv(AECEnv):
         seed: int | None = None,
         reward_fn: Callable[[Any, str], float] | None = None,
         post_length_note: str | None = None,
-        thinking_enabled: bool = False,
-        thinking_open_tag: str | None = None,  # deprecated; ignored
-        thinking_close_tag: str | None = None,  # deprecated; ignored
         post_open_tag: str = "<post>",
         post_close_tag: str = "</post>",
         post_token_budget: int | None = None,
@@ -280,8 +277,8 @@ class ForumEnv(AECEnv):
         self._rng = random.Random(seed)
         self._reward_fn = reward_fn if reward_fn is not None else (lambda _s, _a: 0.0)
 
-        # Tag-extraction format toggle.  When enabled, the env treats the
-        # generated text as a structured stream of three regions:
+        # Tag-extraction format.  The env treats every generation as a
+        # structured stream of three regions:
         #
         #   * ``<post>...</post>``      — the public utterance posted to the
         #                                  thread (extracted, joined, sent to
@@ -296,9 +293,6 @@ class ForumEnv(AECEnv):
         #
         # The agent's own context keeps the raw action tokens (the trainer's
         # append-only path is unchanged); only the public output is filtered.
-        # When ``thinking_enabled=False`` the whole generation is treated as
-        # the post (legacy behaviour) — useful for plain-text baselines.
-        self._thinking_enabled = bool(thinking_enabled)
         self._post_open_tag = post_open_tag
         self._post_close_tag = post_close_tag
 
@@ -402,7 +396,6 @@ class ForumEnv(AECEnv):
             seed=self._seed,
             reward_fn=self._reward_fn,
             post_length_note=self._post_length_note,
-            thinking_enabled=self._thinking_enabled,
             post_open_tag=self._post_open_tag,
             post_close_tag=self._post_close_tag,
             post_token_budget=self._post_token_budget,
@@ -469,6 +462,11 @@ class ForumEnv(AECEnv):
         self._tool_counts_per_agent = {
             a: dict.fromkeys(self._tool_counts, 0) for a in self.agents
         }
+        # Per-episode diagnostic event log: a chronological list of
+        # noteworthy things that happened (parser anomalies, pybot errors,
+        # truncations, etc.) with enough context to debug a broken run.
+        # Surfaced in episode_trace() so the trace viewer can render them.
+        self._events: list[dict] = []
         self._cumulative_rewards = {a: 0.0 for a in self.agents}
         self._terminations = {a: False for a in self.agents}
         self._truncations = {a: False for a in self.agents}
@@ -516,39 +514,49 @@ class ForumEnv(AECEnv):
 
         raw = self._decode_action(action)
 
-        # Extraction model:
-        #   * thinking_enabled=True  → the generation is a structured
-        #     stream; pull <post> and <python> blocks out, treat the
-        #     gaps as private thinking (discarded for the public post).
-        #   * thinking_enabled=False → legacy mode: the entire decoded
-        #     text is the post; <python> blocks are still extracted if
-        #     the python tool is enabled.
-        if self._thinking_enabled:
-            text, code_blocks, post_unclosed, py_unclosed, n_post_blocks = (
-                self._extract_tagged(raw)
+        # Tag extraction: pull <post> and <python> blocks out of the
+        # generation; everything between them is private thinking and
+        # is discarded for the public stream.
+        text, code_blocks, post_unclosed, unclosed, n_post_blocks = (
+            self._extract_tagged(raw)
+        )
+        self._record_tool_event(speaker, "post_turns")
+        for _ in range(n_post_blocks):
+            self._record_tool_event(speaker, "post_blocks")
+        if post_unclosed:
+            self._record_tool_event(speaker, "post_unclosed")
+            self._log_event(
+                kind="post_unclosed",
+                severity="warn",
+                speaker=speaker,
+                message=(
+                    f"{speaker} emitted an unclosed <post> block "
+                    f"(likely cut off by the post token budget)."
+                ),
+                raw_tail=raw[-200:],
             )
-            self._record_tool_event(speaker, "post_turns")
-            if n_post_blocks > 0:
-                self._record_tool_event(speaker, "post_blocks")
-                # Count multi-block turns proportionally.
-                for _ in range(n_post_blocks - 1):
-                    self._record_tool_event(speaker, "post_blocks")
-            if post_unclosed:
-                self._record_tool_event(speaker, "post_unclosed")
-            elif n_post_blocks == 0:
-                self._record_tool_event(speaker, "post_missing")
-            elif not text:
-                self._record_tool_event(speaker, "post_empty")
-            else:
-                self._record_tool_event(speaker, "post_success")
-            unclosed = py_unclosed
+        elif n_post_blocks == 0:
+            self._record_tool_event(speaker, "post_missing")
+            self._log_event(
+                kind="post_missing",
+                severity="warn",
+                speaker=speaker,
+                message=(
+                    f"{speaker} produced no <post> block — turn was "
+                    f"all thinking / no public output."
+                ),
+                raw_len=len(raw),
+            )
+        elif not text:
+            self._record_tool_event(speaker, "post_empty")
+            self._log_event(
+                kind="post_empty",
+                severity="warn",
+                speaker=speaker,
+                message=f"{speaker} emitted an empty <post> block.",
+            )
         else:
-            text = raw
-            if self._python_tool_enabled:
-                text, code_blocks, unclosed = self._extract_python_legacy(text)
-            else:
-                code_blocks = []
-                unclosed = False
+            self._record_tool_event(speaker, "post_success")
 
         # Record on canonical thread.
         self._thread.append({
@@ -571,6 +579,18 @@ class ForumEnv(AECEnv):
             output, status = self._run_python(code, speaker, submitter_post_idx)
             self._record_tool_event(speaker, "python_calls")
             self._record_tool_event(speaker, f"python_{status}")
+            if status != "success":
+                self._log_event(
+                    kind=f"python_{status}",
+                    severity="error" if status in ("launch_error",) else "warn",
+                    speaker=speaker,
+                    message=(
+                        f"{speaker} pybot call #{self._pybot_call_idx} "
+                        f"finished with status={status}."
+                    ),
+                    code=code[:500],
+                    output=output[:500],
+                )
             bot_text = self._format_pybot_post(speaker, code, output, status)
             self._thread.append({
                 "post_index": None,
@@ -589,6 +609,15 @@ class ForumEnv(AECEnv):
         # and has no signal that the tool didn't fire.
         if unclosed:
             self._record_tool_event(speaker, "python_unclosed")
+            self._log_event(
+                kind="python_unclosed",
+                severity="warn",
+                speaker=speaker,
+                message=(
+                    f"{speaker} emitted an unclosed "
+                    f"{self._python_open_tag} block — code dropped."
+                ),
+            )
             err_text = (
                 f"{self._python_bot_name}: {speaker}'s post contained an "
                 f"unclosed {self._python_open_tag} block — no code was "
@@ -624,12 +653,24 @@ class ForumEnv(AECEnv):
 
     def _decode_action(self, action: Any) -> str:
         if action is None:
+            self._log_event(
+                kind="action_none",
+                severity="warn",
+                speaker=self.agent_selection,
+                message="Agent submitted None as its action.",
+            )
             return ""
         try:
             ids = list(action)
         except TypeError:
             return str(action)
         if not ids:
+            self._log_event(
+                kind="action_empty",
+                severity="warn",
+                speaker=self.agent_selection,
+                message="Agent submitted an empty token list.",
+            )
             return ""
         return self._tok.decode(ids, skip_special_tokens=True)
 
@@ -687,31 +728,6 @@ class ForumEnv(AECEnv):
                 i = k + len(yc)
         public = "\n\n".join(p.strip() for p in posts).strip()
         return public, codes, post_unclosed, python_unclosed, n_closed_posts
-
-    def _extract_python_legacy(self, text: str) -> tuple[str, list[str], bool]:
-        """Strip ``<python>`` blocks out of plain (non-thinking) posts.
-
-        Used when ``thinking_enabled=False``: the rest of the text is
-        the public post and tagged code is pulled out for pybot.
-        """
-        o, c = self._python_open_tag, self._python_close_tag
-        out: list[str] = []
-        blocks: list[str] = []
-        unclosed = False
-        i = 0
-        while i < len(text):
-            j = text.find(o, i)
-            if j < 0:
-                out.append(text[i:])
-                break
-            out.append(text[i:j])
-            k = text.find(c, j + len(o))
-            if k < 0:
-                unclosed = True
-                break
-            blocks.append(text[j + len(o):k])
-            i = k + len(c)
-        return "".join(out).strip(), blocks, unclosed
 
     @staticmethod
     def _autoprint_rewrite(code: str) -> str:
@@ -966,37 +982,60 @@ class ForumEnv(AECEnv):
         )
         per_agent[key] = per_agent.get(key, 0) + 1
 
+    def _log_event(
+        self,
+        kind: str,
+        severity: str,
+        message: str,
+        speaker: str | None = None,
+        **extra: Any,
+    ) -> None:
+        ev = {
+            "post_index": self._post_count,
+            "speaker": speaker,
+            "kind": kind,
+            "severity": severity,
+            "message": message,
+        }
+        if extra:
+            ev.update(extra)
+        self._events.append(ev)
+
     def _render_initial_ctx(self) -> str:
         """First-observation framing each agent sees once."""
         parts = [self._forum_description, self._initial_invitation]
         if self._post_length_note:
             parts.append(self._post_length_note)
-        if self._thinking_enabled:
-            post_words = max(1, int(self._post_token_budget * 0.7))
-            total_words = max(1, int(self._total_token_budget * 0.7))
-            po, pc = self._post_open_tag, self._post_close_tag
-            yo, yc = self._python_open_tag, self._python_close_tag
-            tool_line = ""
-            if self._python_tool_enabled:
-                tool_line = (
-                    f" You can also call the python tool by writing code "
-                    f"inside {yo}...{yc}; the code runs and the result is "
-                    f"shared with everyone as a separate post by "
-                    f"'{self._python_bot_name}'. "
-                )
-            parts.append(
-                f"Each turn, write your reply inside {po}...{pc} tags — "
-                f"that is the text other forum members see.{tool_line}"
-                f"Anything outside {po} and {yo} tags is private "
-                f"reasoning: it stays in your own notes and is never shown "
-                f"to anyone else. Two limits: the {po} content itself must "
-                f"stay under about {self._post_token_budget} tokens "
-                f"(~{post_words} words), and the total of thinking + post "
-                f"+ tool calls combined must stay under about "
-                f"{self._total_token_budget} tokens (~{total_words} words) "
-                f"— anything past the total is cut off mid-sentence. "
-                f"Always close {pc} before you stop writing."
+        post_words = max(1, int(self._post_token_budget * 0.7))
+        total_words = max(1, int(self._total_token_budget * 0.7))
+        po, pc = self._post_open_tag, self._post_close_tag
+        yo, yc = self._python_open_tag, self._python_close_tag
+        tool_line = ""
+        if self._python_tool_enabled:
+            tool_line = (
+                f" You can also call the python tool by writing code "
+                f"inside {yo}...{yc}; the code runs and the result is "
+                f"shared with everyone as a separate post by "
+                f"'{self._python_bot_name}'. Each {yo} block runs in a "
+                f"fresh interpreter — nothing carries over between calls, "
+                f"so re-do your imports and re-define any functions or "
+                f"variables you need every time. "
             )
+        parts.append(
+            f"Each turn, write your reply inside {po}...{pc} tags — "
+            f"that is the text other forum members see.{tool_line}"
+            f"Anything outside {po} and {yo} tags is private "
+            f"reasoning: it stays in your own notes and is never shown "
+            f"to anyone else. If it helps, jot a quick note to yourself "
+            f"before the {po} — work through a case, check a step, or "
+            f"think about what someone said — then write the post. "
+            f"Two limits: the {po} content itself must stay under about "
+            f"{self._post_token_budget} tokens (~{post_words} words), "
+            f"and the total of thinking + post + tool calls combined "
+            f"must stay under about {self._total_token_budget} tokens "
+            f"(~{total_words} words) — anything past the total is cut "
+            f"off mid-sentence. Always close {pc} before you stop writing."
+        )
         return "\n\n".join(p for p in parts if p)
 
     def _frame_posts(self, posts: list[tuple[str, str]]) -> str:
@@ -1050,6 +1089,7 @@ class ForumEnv(AECEnv):
             "tool_counts_per_agent": {
                 a: dict(c) for a, c in self._tool_counts_per_agent.items()
             },
+            "events": list(self._events),
         }
 
     def _build_tool_info(self) -> dict:

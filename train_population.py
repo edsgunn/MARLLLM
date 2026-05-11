@@ -153,40 +153,70 @@ def _build_env_from_spec(spec_dict: dict, tokenizer: Any, default_seed: int, *, 
 def _build_forum_env(spec_dict: dict, tokenizer: Any, *, default_seed: int) -> Any:
     """Build a ForumEnv from a YAML env-spec dict.
 
-    Required keys (one of):
-      ``character_set``  : ``canonical_2`` | ``canonical_4`` | ``extended_8``
-                           — uses the persona set selected by ``scenario``.
-      ``personas``       : explicit dict of ``name → persona text`` (overrides
-                           character_set if both are present).
+    Required keys:
+      ``environment``    : name of an environment prompt at
+                           ``envs/forum/environments/<environment>.json`` —
+                           supplies forum description, default invitation,
+                           and the system-prompt template scaffold.
+
+    Roster (one of):
+      ``characters``     : name of a character pack at
+                           ``envs/forum/characters/<characters>.json``;
+                           combined with ``character_set`` to pick a roster.
+      ``character_set``  : roster name within the pack
+                           (``canonical_2`` / ``canonical_4`` / ``extended_8``).
+      ``personas``       : explicit dict of ``name → persona text``,
+                           bypassing the character pack entirely.
 
     Optional keys:
-      ``scenario``         : ``robotic_athanor`` (default) or ``conjecture_inn``.
-                             Selects which persona module backs ``character_set``
-                             and supplies the default forum framing.
-      ``max_posts``        : total posts in the episode (default 12).
-      ``post_order``       : ``round_robin`` (default) or ``random``.
-      ``token_budget``     : tokens per agent turn (default 128).
-      ``max_turns``        : ignored — ``max_posts`` is the hard cap.
-      ``forum_preamble``   : custom initial topic prompt.
-      ``seed``             : per-env RNG seed (default ``args.seed``).
+      ``forum_description`` / ``initial_invitation`` : override the
+                           environment-prompt defaults.
+      ``max_posts``      : total posts in the episode (default 12).
+      ``post_order``     : ``round_robin`` (default) or ``random``.
+      ``token_budget``   : tokens per agent turn (default 128).
+      ``seed``           : per-env RNG seed (default ``args.seed``).
     """
-    from envs.forum import ForumEnv, JsonPersonaScenario
-    scenario_name = spec_dict.get('scenario', 'robotic_athanor')
+    from envs.forum import ForumEnv, load_characters, load_environment
+    if 'environment' not in spec_dict:
+        raise ValueError(
+            "Forum env spec must set 'environment: <name>' to select a prompt "
+            "from envs/forum/environments/."
+        )
+    env_name = spec_dict['environment']
     try:
-        scenario = JsonPersonaScenario(scenario_name)
+        environment = load_environment(env_name)
     except FileNotFoundError as exc:
-        raise ValueError(f'Unknown forum scenario {scenario_name!r}: no JSON found at envs/{scenario_name}.json.') from exc
+        raise ValueError(
+            f"Unknown forum environment {env_name!r}: no JSON at "
+            f"envs/forum/environments/{env_name}.json."
+        ) from exc
     seed = int(spec_dict.get('seed', default_seed))
     if 'personas' in spec_dict:
         personas = dict(spec_dict['personas'])
         agent_names = list(personas.keys())
     else:
+        if 'characters' not in spec_dict:
+            raise ValueError(
+                "Forum env spec must set 'characters: <pack>' (with "
+                "'character_set:') or provide an explicit 'personas:' dict."
+            )
+        pack_name = spec_dict['characters']
+        try:
+            characters = load_characters(pack_name)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"Unknown forum character pack {pack_name!r}: no JSON at "
+                f"envs/forum/characters/{pack_name}.json."
+            ) from exc
         cset = spec_dict.get('character_set', 'canonical_4')
-        agent_names = scenario.get_character_set(cset)
-        personas = scenario.get_personas(cset)
-    forum_description = spec_dict.get('forum_description') or scenario.forum_description
-    initial_invitation = spec_dict.get('initial_invitation') or scenario.default_invitation
-    return ForumEnv(agent_names=agent_names, agent_personas=personas, tokenizer=tokenizer, forum_description=forum_description, initial_invitation=initial_invitation, action_token_budget=spec_dict.get('token_budget'), max_posts=int(spec_dict.get('max_posts', 12)), post_order=spec_dict.get('post_order', 'round_robin'), seed=seed, post_length_note=spec_dict.get('post_length_note'), thinking_enabled=bool(spec_dict.get('thinking_enabled', False)), post_open_tag=spec_dict.get('post_open_tag', '<post>'), post_close_tag=spec_dict.get('post_close_tag', '</post>'), post_token_budget=spec_dict.get('post_token_budget'), total_token_budget=spec_dict.get('total_token_budget'), python_tool_enabled=bool(spec_dict.get('python_tool_enabled', False)), python_open_tag=spec_dict.get('python_open_tag', '<python>'), python_close_tag=spec_dict.get('python_close_tag', '</python>'), python_bot_name=spec_dict.get('python_bot_name', 'pybot'), python_timeout_seconds=float(spec_dict.get('python_timeout_seconds', 5.0)), python_output_max_chars=int(spec_dict.get('python_output_max_chars', 2000)), python_use_forkserver=bool(spec_dict.get('python_use_forkserver', False)))
+        agent_names = characters.get_character_set(cset)
+        personas = {
+            name: environment.render_persona(name, characters.get_memories(name))
+            for name in agent_names
+        }
+    forum_description = spec_dict.get('forum_description') or environment.forum_description
+    initial_invitation = spec_dict.get('initial_invitation') or environment.default_invitation
+    return ForumEnv(agent_names=agent_names, agent_personas=personas, tokenizer=tokenizer, forum_description=forum_description, initial_invitation=initial_invitation, action_token_budget=spec_dict.get('token_budget'), max_posts=int(spec_dict.get('max_posts', 12)), post_order=spec_dict.get('post_order', 'round_robin'), seed=seed, post_length_note=spec_dict.get('post_length_note'), post_open_tag=spec_dict.get('post_open_tag', '<post>'), post_close_tag=spec_dict.get('post_close_tag', '</post>'), post_token_budget=spec_dict.get('post_token_budget'), total_token_budget=spec_dict.get('total_token_budget'), python_tool_enabled=bool(spec_dict.get('python_tool_enabled', False)), python_open_tag=spec_dict.get('python_open_tag', '<python>'), python_close_tag=spec_dict.get('python_close_tag', '</python>'), python_bot_name=spec_dict.get('python_bot_name', 'pybot'), python_timeout_seconds=float(spec_dict.get('python_timeout_seconds', 5.0)), python_output_max_chars=int(spec_dict.get('python_output_max_chars', 2000)), python_use_forkserver=bool(spec_dict.get('python_use_forkserver', False)))
 
 def _build_environment_specs(args: argparse.Namespace, tokenizer: Any, *, shared_backbone: Any=None, shared_backbone_device: Any=None) -> list:
     """
@@ -244,9 +274,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--lr', type=float, default=3e-05)
     p.add_argument('--kl-coef', type=float, default=0.0)
     p.add_argument('--beta', type=float, default=0.01, help='Entropy regularisation coefficient (default 0.01). Set to 0.0 to disable the entropy bonus entirely.')
+    p.add_argument('--always-log-kl', action='store_true', help='Keep the frozen reference model in memory and log KL even when kl_coef == 0 (no KL gradient applied; useful for diagnostics).')
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--grad-accum', type=int, default=8)
     p.add_argument('--gradient-checkpointing', action='store_true')
+    p.add_argument('--seq-chunk-size', type=int, default=None, help='Chunk the loss-step forward+backward along the sequence axis into chunks of this many tokens. Reduces peak activation memory ~T/chunk_size. Cross-chunk attention gradients are dropped (each chunk attends over a detached KV cache from prior chunks). None = disabled (single-shot path).')
     p.add_argument('--dialogue-turns', type=int, default=10)
     p.add_argument('--token-budget', type=int, default=64, help='Generation budget per turn (includes thinking tokens).')
     p.add_argument('--env-token-budget', type=int, default=None, help='Communication budget: max tokens passed to the env after thinking tokens are stripped. None = no stripping (default). Should be <= --token-budget.')
@@ -354,7 +386,7 @@ def main() -> None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
         target_modules = lora_modules or _find_lora_target_modules(base_model)
         lora_config = LoraConfig(r=args.lora_r, lora_alpha=args.lora_alpha, target_modules=target_modules, lora_dropout=0.0, bias='none')
-        keep_ref = args.kl_coef > 0.0
+        keep_ref = args.kl_coef > 0.0 or args.always_log_kl
         names = list(character_prompts.keys())
         print(f"Attaching LoRA adapter '{names[0]}' (r={args.lora_r})")
         peft_model = get_peft_model(base_model, lora_config, adapter_name=names[0])
@@ -369,7 +401,7 @@ def main() -> None:
             population[name] = LoRASharedBaseAgent(agent_id=name, character_prompt=prompt_str, shared_backbone=peft_model, adapter_name=name, tokenizer=tokenizer, device=device, keep_ref_model=keep_ref, compile_rollout=args.compile)
         print(f'LoRA shared base: 1 backbone, {len(names)} independent adapters.')
     else:
-        keep_ref = args.kl_coef > 0.0
+        keep_ref = args.kl_coef > 0.0 or args.always_log_kl
         for name, prompt in character_prompts.items():
             prompt_str = prompt[0] if isinstance(prompt, list) else prompt
             print(f"Loading agent '{name}': {args.model}  →  {device}")
@@ -390,7 +422,7 @@ def main() -> None:
             pct = 100 * spec.weight / total_w
             print(f'  {spec.name:30s}  weight={spec.weight:.2f}  ({pct:.0f}%)')
     flat_prompts = {name: p[0] if isinstance(p, list) else p for name, p in character_prompts.items()}
-    config = TrainingConfig(model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, use_8bit_adam=args.use_8bit_adam, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, snapshot_eval_path=args.snapshot_eval_path, snapshot_samples_per_context=args.snapshot_samples_per_context, snapshot_max_new_tokens=args.snapshot_max_new_tokens, var_decomp_enabled=args.var_decomp_enabled, var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path, var_decomp_n_contexts=args.var_decomp_n_contexts, var_decomp_K=args.var_decomp_K, var_decomp_M=args.var_decomp_M, var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps, var_decomp_n_eval_early=args.var_decomp_n_eval_early, var_decomp_n_eval_late=args.var_decomp_n_eval_late, var_decomp_switch_iter=args.var_decomp_switch_iter, output_dir=args.output_dir, device=device, seed=args.seed, kl_coef=args.kl_coef, beta=args.beta, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
+    config = TrainingConfig(model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, use_8bit_adam=args.use_8bit_adam, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, snapshot_eval_path=args.snapshot_eval_path, snapshot_samples_per_context=args.snapshot_samples_per_context, snapshot_max_new_tokens=args.snapshot_max_new_tokens, var_decomp_enabled=args.var_decomp_enabled, var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path, var_decomp_n_contexts=args.var_decomp_n_contexts, var_decomp_K=args.var_decomp_K, var_decomp_M=args.var_decomp_M, var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps, var_decomp_n_eval_early=args.var_decomp_n_eval_early, var_decomp_n_eval_late=args.var_decomp_n_eval_late, var_decomp_switch_iter=args.var_decomp_switch_iter, output_dir=args.output_dir, device=device, seed=args.seed, kl_coef=args.kl_coef, always_log_kl=args.always_log_kl, beta=args.beta, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, seq_chunk_size=args.seq_chunk_size, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
     tokeniser = TextTokeniser(first_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

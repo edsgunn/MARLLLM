@@ -1,0 +1,89 @@
+# Run 12 — 32-agent variant of run8_16agent_7B_study_group_ashbourne_gc.
+# Uses the new `extended_32` Ashbourne roster (16 original + 16 new chars).
+# All other hyperparameters identical to run8. max_posts/max_episode_tokens
+# scaled proportionally to roster size to preserve per-post token budget.
+name: run12_32agent_7B_study_group_ashbourne_gc
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+- Marcus Webb
+- Esi Boateng
+- Jonah Liefferink
+- Anika Bose
+- Rhys Calloway
+- Lucia Ferraro
+- Saoirse O'Hagan
+- Felix Chen
+- Noor Al-Sabah
+- Daniyal Khan
+- Aoife Lynch
+- Caleb Mensah
+- Yuki Tanaka
+- Mira Goldberg
+- Theo Vasquez
+- Aisha Rahman
+- Fionn Doherty
+- Zara Kapoor
+- Bram de Vries
+- Maya Williams
+- Henry Ashworth
+- Sofia Romano
+- Kai Nakamura
+- Eliana Cohen
+- Dario Lombardi
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 65536
+seq_chunk_size: 8192
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_32
+  max_posts: 32
+  post_order: round_robin
+  thinking_enabled: true
+output_dir: runs/cultural_emergence/run12_32agent_7B_study_group_ashbourne_gc
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

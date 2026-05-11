@@ -55,7 +55,8 @@ max_episode_tokens: 24576
 environments:
 - name: study_group_strathearn
   type: forum
-  scenario: study_group_strathearn
+  characters: study_group_strathearn
+  environment: study_group_strathearn
   post_token_budget: 128
   total_token_budget: 384
   character_set: extended_8

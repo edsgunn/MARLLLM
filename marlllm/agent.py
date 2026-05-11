@@ -16,6 +16,28 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase
 
 
+def _detach_kv_cache(cache):
+    """Detach all K/V tensors in an HF cache so the next chunk's autograd
+    graph is independent of prior chunks.
+
+    Handles both the modern ``DynamicCache`` (lists of per-layer tensors)
+    and the legacy tuple-of-tuples format. Returns ``cache`` (mutated in
+    place for DynamicCache; new tuple for the legacy form).
+    """
+    if cache is None:
+        return None
+    if hasattr(cache, "key_cache") and hasattr(cache, "value_cache"):
+        cache.key_cache = [k.detach() if k is not None else k for k in cache.key_cache]
+        cache.value_cache = [v.detach() if v is not None else v for v in cache.value_cache]
+        return cache
+    if isinstance(cache, tuple):
+        return tuple(
+            tuple(x.detach() if isinstance(x, torch.Tensor) else x for x in layer)
+            for layer in cache
+        )
+    return cache
+
+
 def _fix_cpu_buffers(model: nn.Module) -> None:
     """Move CPU-resident buffers to the same device as the module's parameters.
 
@@ -902,6 +924,98 @@ class LoRASharedBaseAgent(Agent):
                 logits_to_keep=1,
             )
         return out.hidden_states[-1]
+
+    def evaluate_hidden_chunked(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        chunk_size: int,
+    ):
+        """Generator: yield (s, e, hidden_chunk, values_chunk) per seq chunk.
+
+        Forwards the backbone in chunks along the time axis with KV-cache
+        propagation. The cache from prior chunks is detached, so each yielded
+        ``hidden_chunk`` carries an autograd graph that touches only the
+        backbone parameters used by *this* chunk's forward. Caller is
+        expected to compute a per-chunk loss and call backward before
+        consuming the next chunk.
+        """
+        self._activate()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        B, T = input_ids.shape
+        past_kv = None
+        for s in range(0, T, chunk_size):
+            e = min(s + chunk_size, T)
+            position_ids = torch.arange(s, e, device=input_ids.device).unsqueeze(0).expand(B, -1)
+            cache_position = torch.arange(s, e, device=input_ids.device)
+            out = self._backbone(
+                input_ids=input_ids[:, s:e],
+                attention_mask=attention_mask[:, :e],
+                position_ids=position_ids,
+                past_key_values=past_kv,
+                cache_position=cache_position,
+                output_hidden_states=True,
+                use_cache=True,
+            )
+            hidden_chunk = out.hidden_states[-1]
+            # Capture and detach the cache *before* the caller backwards through
+            # ``hidden_chunk`` — backward releases the chunk's autograd graph and
+            # the K/V tensors saved in it.
+            past_kv_next = _detach_kv_cache(out.past_key_values)
+            # Release per-layer hidden_states tuple now that we've grabbed [-1];
+            # the other layer outputs are not needed and would otherwise tie up
+            # ~num_layers × B × chunk × H of memory until ``out`` is overwritten.
+            del out
+            values_chunk = self._value_head(hidden_chunk.detach())
+            yield s, e, hidden_chunk, values_chunk
+            past_kv = past_kv_next
+
+    @torch.no_grad()
+    def evaluate_hidden_ref_chunked(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        chunk_size: int,
+    ):
+        """No-grad chunked counterpart of ``evaluate_hidden_ref`` for the
+        frozen reference (LoRA disabled). Yields (s, e, hidden_ref_chunk).
+
+        Returns ``None`` for ``hidden_ref_chunk`` if no reference model is
+        kept (mirrors ``evaluate_hidden_ref``'s ``None`` return).
+        """
+        if not self._keep_ref_model:
+            B, T = input_ids.shape
+            for s in range(0, T, chunk_size):
+                e = min(s + chunk_size, T)
+                yield s, e, None
+            return
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        B, T = input_ids.shape
+        past_kv = None
+        for s in range(0, T, chunk_size):
+            e = min(s + chunk_size, T)
+            position_ids = torch.arange(s, e, device=input_ids.device).unsqueeze(0).expand(B, -1)
+            cache_position = torch.arange(s, e, device=input_ids.device)
+            # NOTE: open disable_adapter only around the forward — never across
+            # the yield. Suspending the generator inside ``with disable_adapter()``
+            # would leave the adapter disabled in the caller's frame too, since
+            # peft toggles model state on enter/exit.
+            with self._backbone.disable_adapter():
+                out = self._backbone(
+                    input_ids=input_ids[:, s:e],
+                    attention_mask=attention_mask[:, :e],
+                    position_ids=position_ids,
+                    past_key_values=past_kv,
+                    cache_position=cache_position,
+                    output_hidden_states=True,
+                    use_cache=True,
+                )
+            hidden_ref_chunk = out.hidden_states[-1]
+            past_kv = out.past_key_values  # already no_grad; no detach needed
+            del out
+            yield s, e, hidden_ref_chunk
 
     def lm_head(self, hidden: torch.Tensor) -> torch.Tensor:
         # Adapter activation only affects LoRA-wrapped modules; lm_head is

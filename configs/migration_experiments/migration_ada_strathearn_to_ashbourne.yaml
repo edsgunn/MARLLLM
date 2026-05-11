@@ -52,9 +52,9 @@ snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 384
 max_episode_tokens: 24576
 environments:
-- name: study_group
+- name: study_group_ashbourne
   type: forum
-  scenario: study_group
+  environment: study_group_ashbourne
   post_token_budget: 128
   total_token_budget: 384
   personas:

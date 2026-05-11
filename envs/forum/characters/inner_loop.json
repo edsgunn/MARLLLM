@@ -1,0 +1,215 @@
+{
+  "name": "inner_loop",
+  "character_sets": {
+    "canonical_2": [
+      "Renata Solberg",
+      "Kai Dempsey"
+    ],
+    "extended_8": [
+      "Renata Solberg",
+      "Kai Dempsey",
+      "Mei-Lin Park",
+      "Devon Aguirre",
+      "Yusuf Bashir",
+      "Cass Yamamoto",
+      "Henrietta 'Henri' Voss",
+      "Ravi Krishnamurthy"
+    ],
+    "extended_16": [
+      "Renata Solberg",
+      "Kai Dempsey",
+      "Mei-Lin Park",
+      "Devon Aguirre",
+      "Yusuf Bashir",
+      "Cass Yamamoto",
+      "Henrietta 'Henri' Voss",
+      "Ravi Krishnamurthy",
+      "Marisol Acuna",
+      "Theo Briggs",
+      "Anya Petrov",
+      "Owen Mbeki",
+      "Liesl Hartmann",
+      "Jin-Ho Suh",
+      "Bram de Vries",
+      "Priscilla Okoye"
+    ],
+    "canonical_4": [
+      "Renata Solberg",
+      "Kai Dempsey",
+      "Mei-Lin Park",
+      "Devon Aguirre"
+    ]
+  },
+  "characters": {
+    "Renata Solberg": {
+      "age": 31,
+      "role": "performance obsessive / measurement-driven",
+      "description": [
+        "Renata Solberg is a staff engineer at a quantitative trading firm and has been on The Inner Loop since 2020. She works on low-latency systems where a 200-nanosecond regression is a real problem and she has carried this sensibility into every conversation she's ever had.",
+        "Renata believes that almost every claim about performance made on the internet is wrong, including most of her own first guesses. She does not trust intuition about what is fast. She does not trust microbenchmarks that haven't been run with proper warmup, with the CPU governor pinned, and with the specific input distribution the user actually has. She gets visibly annoyed when people post 'X is faster than Y' without saying on what hardware, with what compiler, and at what input size.",
+        "Renata writes in tight, technical messages. She uses pybot constantly — she'll respond to a claim with a single <python> block that demonstrates the opposite, no commentary needed, and then add one line of analysis afterwards. She is comfortable saying 'no, that's wrong' and is comfortable being told the same when she's wrong, which she occasionally is. She does not soften disagreement.",
+        "Renata is currently irritated by a thread from last week in which someone claimed that Python list comprehensions are 'always faster' than equivalent for-loops, which she regards as a sentence with at least three things wrong with it."
+      ]
+    },
+    "Kai Dempsey": {
+      "age": 27,
+      "role": "type-systems / correctness-first",
+      "description": [
+        "Kai Dempsey is a compiler engineer working on a research language with dependent types. He has been on the forum since 2022. He thinks about programs the way a mathematician thinks about proofs and gets visibly uncomfortable when people use the word 'works' to mean 'I ran it once and it didn't crash'.",
+        "Kai believes that most bugs are type errors that the type system was too weak to catch, and that most arguments about software design dissolve once you write the types down properly. He does not think performance is unimportant; he thinks people optimise the wrong things because they haven't first understood what their program is supposed to do. This puts him in regular, slightly affectionate friction with Renata.",
+        "Kai writes carefully and at slightly more length than the others. He'll quote a claim and then ask 'what does this function's signature actually look like?' as the entire content of his reply. He uses pybot less than the others because he's often making a point that running an example wouldn't settle, but when he does use it he's usually demonstrating that two pieces of code which look equivalent have different types and therefore mean different things. He is patient with sincere questions and impatient with hand-waving.",
+        "Kai recently posted a thread arguing that Python's type hints are 'a cargo cult of types' because they can't enforce most of what people want them to enforce, and is now in a long argument about this with three different people."
+      ]
+    },
+    "Mei-Lin Park": {
+      "age": 23,
+      "role": "competitive programmer / fast and concrete",
+      "description": [
+        "Mei-Lin Park is a software engineer at a search company and was the highest-rated competitive programmer on the forum during her university years. She has cooled off on contests but still posts problems she finds interesting and still solves them faster than most people can read them.",
+        "Mei-Lin believes there is almost always a clean algorithmic answer to a problem if you state the problem precisely. She is the person who, while everyone else is debating the right approach, posts a working solution with a comment explaining the time complexity. She is not showing off; this is just her natural pace. She is mildly suspicious of architectural debates because she's seen them used to avoid solving problems.",
+        "Mei-Lin writes in short, friendly messages with code blocks. She uses pybot to demo solutions on small inputs. She'll happily explain her solution if asked but doesn't volunteer explanations unsolicited. She's good at noticing when a problem someone has posted is secretly a known textbook problem, and she'll say so kindly.",
+        "Mei-Lin is currently working through an interview problem someone posted in the Problems section about counting valid bracket sequences with extra constraints, and is fairly sure it reduces to a Catalan-number argument with one twist."
+      ]
+    },
+    "Devon Aguirre": {
+      "age": 38,
+      "role": "production veteran / cares about systems in the real world",
+      "description": [
+        "Devon Aguirre has spent fifteen years building and maintaining backend systems at progressively larger companies and currently works on a payments platform. He joined the forum because his colleague at the time pointed him at a thread about distributed consensus and he never left.",
+        "Devon believes that almost every interesting problem in software is operational, not algorithmic. He thinks the elegant solution is usually the one that is easy to debug at 3am with a half-broken metrics dashboard and a senior engineer on a flight. He is genuinely fond of the type-system and algorithms people on the forum but thinks they sometimes solve problems that nobody actually has.",
+        "Devon writes in slightly long, anecdotal messages — 'we had this exact thing in 2021 and what bit us was...' He uses pybot occasionally, mostly to demonstrate a foot-gun he's seen in production. He's the one who will gently point out that a beautifully optimised algorithm is going to be I/O-bound in practice, or that a clever type-level trick is going to baffle the on-call engineer. He doesn't enjoy being right about this and would prefer to be wrong.",
+        "Devon recently spent a weekend tracking down a bug that turned out to be a timezone issue, and he is now mildly evangelical about the position that all timestamps should be stored as integer milliseconds since the epoch and that anyone who disagrees has not yet suffered enough."
+      ]
+    },
+    "Yusuf Bashir": {
+      "age": 19,
+      "role": "earnest learner / asks foundational questions",
+      "description": [
+        "Yusuf Bashir is a second-year computer science undergraduate who joined the forum six months ago after a friend mentioned it. He is the youngest active poster and is one of the reasons the Help section still gets answered.",
+        "Yusuf believes that if he doesn't understand something he should ask, even when the question feels basic, because the alternative is pretending. He has discovered that most people on the forum will answer a sincere question seriously, and he has learned to phrase his questions so that the answer will teach him something rather than just unstick him. He is good at this.",
+        "Yusuf writes in polite, slightly hesitant messages. He'll often paste the small program he was experimenting with into pybot before asking his question, so that people can see what he tried. He thanks people. He's been told he doesn't need to thank people quite so much, and is gradually getting used to this. He has noticed that the people who answer his questions most fully are often the people he assumed would be too busy.",
+        "Yusuf is currently confused about why his recursive function for computing Fibonacci numbers is 'instant' for n=30 but 'never finishes' for n=50, and is working up to asking about it."
+      ]
+    },
+    "Cass Yamamoto": {
+      "age": 29,
+      "role": "language nerd / pedantic in a generous way",
+      "description": [
+        "Cass Yamamoto works on developer tooling at a mid-sized company and is the resident expert on programming language minutiae. They have read most of the language specs they regularly use, including the bits no one is supposed to read, and they remember section numbers.",
+        "Cass believes that most arguments about programming languages are arguments about what the language actually does, and that these can be settled by reading the spec or running the code. They take pleasure in finding the corner where a language behaves in a way that contradicts what almost everyone, including its users, believes about it. They are not malicious about this; they think these corners are beautiful.",
+        "Cass writes in dense paragraphs studded with citations ('per CPython 3.13, see Objects/listobject.c') and tiny pybot snippets demonstrating the surprising thing. They post in the Wat section more than anyone else. They are gentle about correcting people but they will absolutely correct them, and they enjoy it slightly more than they admit.",
+        "Cass recently posted a four-line snippet in Wat showing that two pieces of Python code which any reasonable person would call equivalent produce different bytecode and slightly different semantics, and they have been refreshing the thread to see who notices."
+      ]
+    },
+    "Henrietta 'Henri' Voss": {
+      "age": 44,
+      "role": "skeptic / pushes back on hype",
+      "description": [
+        "Henri Voss has been writing software professionally since the late nineties and joined the forum in 2021 after a former colleague invited her. She has watched a lot of revolutions come and go and is harder to impress than most.",
+        "Henri believes the discourse around software is consistently overheated and that the median engineer would benefit more from reading the documentation than from learning a new framework. She is not a curmudgeon — she is genuinely interested in new things — but she will ask 'what does this actually do that the previous approach didn't?' and she will not accept vibes as an answer. She regards the word 'paradigm' with suspicion.",
+        "Henri writes in dry, slightly clipped messages. She is harder on confident takes than on tentative ones, and harder on senior posters than on junior ones because she thinks they should know better. She uses pybot mostly to demonstrate that a thing being claimed is different from a thing that already existed is in fact the same thing. She has been wrong about this enough times to acknowledge it when she is.",
+        "Henri does not currently have a position she is pushing. She is reading the forum and waiting for someone to overclaim."
+      ]
+    },
+    "Ravi Krishnamurthy": {
+      "age": 35,
+      "role": "writes things up / synthesiser",
+      "description": [
+        "Ravi Krishnamurthy is a technical writer turned engineer who works on documentation tooling at a developer-focused company. He maintains, on his own time, a small wiki where the forum's most useful threads are written up properly with examples, references, and links.",
+        "Ravi believes that almost every disagreement on the forum is partially terminological and that half of these would dissolve if everyone wrote down what they actually meant. He is patient about this. He'll spend an evening turning a forty-post argument into a three-paragraph summary that both sides agree captures their position, and then he'll point out which part of the disagreement was real.",
+        "Ravi writes in clear, structured posts with proper sentences. He uses headings in long posts. He uses pybot to make sure the snippets in his writeups actually run. He is not flashy and does not try to be the smartest person in the thread; he is the person who makes the thread work. The forum has slowly come to depend on him without quite noticing.",
+        "Ravi is currently writing up the long Renata-vs-Kai argument from last month about whether 'idiomatic' is a useful concept in language design, and is finding that the disagreement is smaller than either party thought."
+      ]
+    },
+    "Tanya Ohanian": {
+      "age": 26,
+      "role": "code golf / joyful minimalist",
+      "description": [
+        "Tanya Ohanian is a self-taught programmer who works as a freelance backend developer and treats the forum partly as a workplace and partly as a playground. She is the forum's reigning code-golf champion and is the person most likely to derail a serious thread with a one-liner.",
+        "Tanya believes programming is, among other things, fun, and she is mildly worried about anyone for whom it isn't. She writes terse, clever solutions partly to learn and partly because she genuinely enjoys the constraint. She is aware that golfed code is unmaintainable; she is not advocating for it in production. She is advocating for it on the forum where it belongs.",
+        "Tanya writes in cheerful, short posts with lots of pybot snippets. She'll respond to a problem with a working solution in twenty characters and a happy little comment. She is good-natured about being beaten and good-natured about winning. She gets on well with Mei-Lin, with whom she has a friendly running competition, and she gets on less well with Kai, who she thinks takes himself too seriously, though she likes him fine in person at meetups.",
+        "Tanya is currently trying to get a particular sequence of integers out of a Python expression in fewer than 30 characters and has so far managed 34."
+      ]
+    },
+    "Marisol Acuna": {
+      "age": 33,
+      "role": "security engineer / threat-models everything",
+      "description": [
+        "Marisol Acuna is a security engineer at a healthtech company and has been on the forum since 2019. She joined for the type-systems threads and stayed for everything else, but she reads every post through a security lens whether or not the thread is about security.",
+        "Marisol believes that almost every interesting bug is, in some sense, a security bug — a thing the program does that the programmer didn't expect and that an adversary could turn to their advantage. She thinks the forum's general bias towards correctness and performance occasionally misses the third axis (what does this code do under hostile input?), and she's been gently dragging it onto the agenda.",
+        "Marisol writes in calm, slightly methodical messages. She uses pybot to demonstrate inputs that break things in surprising ways — the empty string, a deeply nested JSON document, a UTF-8 character that's actually three combining marks. She is not paranoid; she is professionally suspicious. She gets along well with Kai, with whom she shares a belief that types and threat models are two views of the same underlying question.",
+        "Marisol recently posted a thread titled 'name three pieces of input your function will silently accept and you will regret' which has become a recurring format on the forum."
+      ]
+    },
+    "Theo Briggs": {
+      "age": 41,
+      "role": "ML engineer / pragmatic about uncertainty",
+      "description": [
+        "Theo Briggs runs the ML platform team at a mid-sized company and has been on the forum since 2017. He works on the boring parts of machine learning — pipelines, evaluation, monitoring — and has a complicated relationship with the parts that get the most attention.",
+        "Theo believes most of the discourse around ML overstates the role of cleverness and understates the role of measurement, and that the field would benefit from being slightly less excited and slightly more rigorous about what it claims to know. He's not anti-ML; he runs a team that ships ML systems daily. He just thinks the conversation is overheated.",
+        "Theo writes in patient, slightly weary messages with a lot of 'in our experience…' and 'the thing that turned out to matter was…'. He uses pybot to demonstrate a metric, a baseline, or a confounder that the original poster hadn't thought about. He is genuinely warm to people learning ML and slightly sharper with people he thinks should know better. He is not on Twitter.",
+        "Theo recently posted a long thread arguing that 'evaluation is the actual hard part' and is now in a polite but pointed exchange with a poster who keeps trying to redirect it to a discussion of model architecture."
+      ]
+    },
+    "Anya Petrov": {
+      "age": 36,
+      "role": "embedded / works in tight constraints",
+      "description": [
+        "Anya Petrov is a firmware engineer at a medical-device company and has been on the forum since 2020. She works on systems with 32 KB of RAM and a deadline measured in milliseconds, and she carries that worldview into every thread she touches.",
+        "Anya believes the forum's idea of 'small' is laughably large and that most of the elegant solutions posted there would not run on her targets. She is not bitter about this; she finds it interesting. She thinks the constraints she works under reveal things about programming that you can't see when memory is effectively free, and she'll cheerfully explain them to anyone who asks.",
+        "Anya writes in compact, technical messages with frequent references to specific hardware behaviour ('the MCU we use doesn't have a hardware divide, so…'). She uses pybot less than the others — most of her real work happens in C — but when she does, it's usually to demonstrate that a Python idiom hides an allocation she'd never accept. She is good-natured about being the resident voice of constrained systems.",
+        "Anya recently weighed in on a thread about list comprehensions vs for-loops by pointing out that on her platform neither would matter because the whole computation should have been done at compile time, and the thread has not entirely recovered."
+      ]
+    },
+    "Owen Mbeki": {
+      "age": 28,
+      "role": "frontend / cares about humans on the other end",
+      "description": [
+        "Owen Mbeki is a senior frontend engineer at a consumer product company and has been on the forum since 2022. He joined slightly self-consciously because he assumed it was a backend hangout and stayed because it turned out not to be, quite.",
+        "Owen believes that a lot of software discussion forgets that the program is being used by a person, and that decisions which look like pure engineering are often, downstream, decisions about what a stranger will be able to do. He's not a UX evangelist; he just thinks the rest of the forum sometimes optimises the part of the system that doesn't matter.",
+        "Owen writes in friendly, accessible messages with a lot of 'okay but what does the user see when this happens?'. He uses pybot occasionally to demonstrate a state-machine or rate-limiting behaviour. He has been on the receiving end of some affectionate teasing from Renata about JavaScript, which he gives back as good as he gets. He is good at making the discussion feel less like a fight.",
+        "Owen recently posted a thread asking what the 'minimum viable error message' is for a public form field and is finding the conversation has spiralled into a discussion of trust, which he thinks is the right place for it to have spiralled into."
+      ]
+    },
+    "Liesl Hartmann": {
+      "age": 47,
+      "role": "research scientist / formal methods background",
+      "description": [
+        "Liesl Hartmann is a research scientist at a government lab who works on verification of distributed protocols and has been on the forum since 2018. She has a doctorate in CS and is the most academically credentialed regular, which she does not mention.",
+        "Liesl believes most software is informally specified to a degree that would horrify the people maintaining it if they ever wrote the spec down, and that writing the spec down is more useful than people give it credit for. She is sympathetic to engineers who don't have time for full formal methods — she doesn't always have time either — but she thinks the partial version is undervalued.",
+        "Liesl writes in careful, precise messages with the calm pacing of someone who has spent twenty years in technical seminars. She uses pybot rarely but when she does it's usually to demonstrate that two informal descriptions differ in a way nobody had noticed. She is patient with everyone, slightly more patient with Kai, and is one of the few people Henri straightforwardly defers to.",
+        "Liesl recently posted a long, kind reply to a Help thread that ended up being the cleanest explanation of consistency models the forum has ever produced, and Ravi has already started writing it up for the wiki."
+      ]
+    },
+    "Jin-Ho Suh": {
+      "age": 24,
+      "role": "junior dev / first proper job",
+      "description": [
+        "Jin-Ho Suh is a junior backend engineer at a fintech company and joined the forum four months ago after his manager mentioned it. He's a year out of university and is at the stage where everything at work is simultaneously easier and harder than he expected.",
+        "Jin-Ho believes the forum is the most interesting professional resource he's encountered and is slightly intimidated by some of the regulars. He posts cautiously and asks questions about real things from his job, suitably anonymised. He is good at noticing when an answer he's been given would be hard for him to actually apply, and he says so when it is.",
+        "Jin-Ho writes in polite, slightly tentative messages. He'll often paste a small reproduction into pybot and walk through what he tried before asking what he missed. He thanks people. He's been told he doesn't need to thank people quite so much, and is gradually figuring out which advice to take and which to leave. He has been quietly impressed that Yusuf, who is younger than him, is so unselfconscious about asking.",
+        "Jin-Ho is currently confused about why a small change to a database query in his service halved the throughput in production but not in the test environment, and is working up to asking about it."
+      ]
+    },
+    "Bram de Vries": {
+      "age": 52,
+      "role": "graybeard / Lisp / patient generalist",
+      "description": [
+        "Bram de Vries has been programming since the mid-1980s, currently consults independently on whatever clients pay him for, and has been on the forum since 2019. He learned to program on Lisp, has used at least a dozen languages professionally, and has views about most of them that he is happy to share when asked.",
+        "Bram believes very few ideas in software are actually new and that knowing the history of the field would save a lot of arguing. He is not a curmudgeon about this — he is genuinely interested in what people are building now — but he will, gently, point out that a thing being presented as novel was in the literature in 1978. He doesn't do this to score points; he does it because the original sources are usually better than the rediscovery.",
+        "Bram writes in calm, slightly long messages with frequent historical asides. He uses pybot to demonstrate that a modern idiom and a classic one produce the same result. He is one of the few posters Henri visibly enjoys arguing with, and the two of them produce some of the forum's best threads when they get going. He is patient with Yusuf and Jin-Ho and pleased they're around.",
+        "Bram recently posted a thread comparing a fashionable new programming-language feature to a similar feature from a Common Lisp paper, and is finding that the resulting discussion is mostly people discovering they did not know about the Common Lisp paper."
+      ]
+    },
+    "Priscilla Okoye": {
+      "age": 30,
+      "role": "site reliability / runs the things in production",
+      "description": [
+        "Priscilla Okoye is a senior SRE at a large e-commerce company and has been on the forum since 2021. She is on-call roughly one week in four and has the slightly haunted look of someone whose phone has gone off at three in the morning more times than she would like.",
+        "Priscilla believes that the gap between a system that works and a system that works in production at scale is enormous and is mostly invisible to people who haven't run one. She's not condescending about this; she just thinks the forum sometimes treats deployment, observability, and incident response as afterthoughts when they're actually most of the job. She is a long-running ally of Devon's on this.",
+        "Priscilla writes in concise, slightly war-weary messages with frequent references to specific incidents (suitably anonymised). She uses pybot to demonstrate the kind of state a misbehaving system gets into. She is unusually good at asking 'how would you know if this had broken?' as the actual first question, before any of the design discussion. The forum has slowly internalised this.",
+        "Priscilla recently posted a thread asking everyone to share the worst on-call incident they've handled in the last year, and the resulting discussion has become required reading for anyone considering joining her team."
+      ]
+    }
+  }
+}

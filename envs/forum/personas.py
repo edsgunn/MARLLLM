@@ -1,28 +1,35 @@
 """
-Generic JSON-backed persona loader for ForumEnv scenarios.
+Loaders for ForumEnv character packs and environment prompts.
 
-A scenario JSON file lives at ``envs/forum/scenarios/<name>.json`` and
-follows this shape::
+Characters and environments are stored as separate JSON files so any
+character pack can be dropped into any environment.
+
+A character pack at ``envs/forum/characters/<pack>.json``::
 
     {
-      "environment": {
-        "name": "...",
-        "description": "..."        # forum description shown in initial ctx
-      },
-      "default_invitation": "...",  # optional first-thread invitation
-      "character_sets": {            # optional explicit subsets
-        "canonical_2": ["Name A", "Name B"]
+      "name": "...",
+      "character_sets": {
+        "canonical_2": ["Name A", "Name B"],
+        "canonical_4": [...],
+        "extended_8": [...]
       },
       "characters": {
-        "canonical":  {"Name A": {"description": ["...", "..."]}},
-        "additional": {"Name X": {"description": ["...", "..."]}}
-      },
+        "Name A": {"description": ["...", "..."]},
+        ...
+      }
+    }
+
+An environment prompt at ``envs/forum/environments/<env>.json``::
+
+    {
+      "name": "...",
+      "description": "...",                  # forum description in initial ctx
+      "default_invitation": "...",           # first-thread invitation
       "system_prompt_template": "You are {character_name}, ... {character_description_bullets} ..."
     }
 
-The :class:`JsonPersonaScenario` wrapper exposes ``forum_description``,
-``default_invitation``, ``get_character_set``, ``get_personas``,
-``get_memories`` and ``get_persona_text``.
+Compose them with :func:`build_personas` (or :meth:`render_persona`) to
+get the per-agent system-prompt text the trainer installs.
 """
 from __future__ import annotations
 
@@ -30,78 +37,86 @@ import json
 from pathlib import Path
 
 
-_SCENARIO_DIR = Path(__file__).parent / "scenarios"
+_CHARACTERS_DIR = Path(__file__).parent / "characters"
+_ENVIRONMENTS_DIR = Path(__file__).parent / "environments"
 
 
-class JsonPersonaScenario:
-    """Loader for a forum scenario described entirely by one JSON file."""
+class CharacterPack:
+    """A roster of characters plus named subsets (e.g. ``canonical_2``)."""
 
-    def __init__(self, scenario_name: str, *, json_path: Path | None = None) -> None:
-        self.scenario_name = scenario_name
-        self.json_path = json_path or (_SCENARIO_DIR / f"{scenario_name}.json")
+    def __init__(self, pack_name: str, *, json_path: Path | None = None) -> None:
+        self.pack_name = pack_name
+        self.json_path = json_path or (_CHARACTERS_DIR / f"{pack_name}.json")
         if not self.json_path.exists():
             raise FileNotFoundError(
-                f"Scenario JSON not found for {scenario_name!r}: {self.json_path}"
+                f"Character pack JSON not found for {pack_name!r}: {self.json_path}"
             )
         with self.json_path.open("r", encoding="utf-8") as fh:
-            self._data = json.load(fh)
+            data = json.load(fh)
 
-        env_block = self._data.get("environment", {})
-        self.forum_description: str = env_block.get("description", "")
-        self.default_invitation: str = self._data.get(
-            "default_invitation",
-            "A new thread has just opened. The forum is active and members are posting.",
-        )
-        self.system_prompt_template: str = self._data["system_prompt_template"]
-
-        chars = self._data.get("characters", {})
-        self._canonical: dict[str, dict] = dict(chars.get("canonical", {}))
-        self._additional: dict[str, dict] = dict(chars.get("additional", {}))
-        self._all: dict[str, dict] = {**self._canonical, **self._additional}
-
-        sets = dict(self._data.get("character_sets", {}))
-        # Defaults: canonical_4 = all canonical names; extended_8 = canonical+additional.
-        sets.setdefault("canonical_4", list(self._canonical.keys()))
-        sets.setdefault("extended_8", list(self._all.keys()))
-        # canonical_2 has no sensible default — the JSON must specify it
-        # (it is the most-opposed canonical pair, picked deliberately).
-        self._character_sets: dict[str, list[str]] = sets
-
-    # ----- character set lookup -------------------------------------------- #
+        self._characters: dict[str, dict] = dict(data.get("characters", {}))
+        self._character_sets: dict[str, list[str]] = dict(data.get("character_sets", {}))
+        self._character_sets.setdefault("all", list(self._characters.keys()))
 
     def get_character_set(self, name: str) -> list[str]:
         if name not in self._character_sets:
             raise ValueError(
-                f"Unknown character_set {name!r} for scenario "
-                f"{self.scenario_name!r}. Available: "
-                f"{sorted(self._character_sets)}"
+                f"Unknown character_set {name!r} in pack {self.pack_name!r}. "
+                f"Available: {sorted(self._character_sets)}"
             )
         return list(self._character_sets[name])
 
-    # ----- persona rendering ----------------------------------------------- #
-
     def get_memories(self, character_name: str) -> list[str]:
-        if character_name not in self._all:
+        if character_name not in self._characters:
             raise KeyError(
-                f"No persona memories for {character_name!r} in scenario "
-                f"{self.scenario_name!r}."
+                f"No character {character_name!r} in pack {self.pack_name!r}."
             )
-        return list(self._all[character_name]["description"])
+        return list(self._characters[character_name]["description"])
 
-    def get_persona_text(self, character_name: str) -> str:
-        bullets = "\n".join(f"- {m}" for m in self.get_memories(character_name))
+
+class EnvironmentPrompt:
+    """Forum description, invitation, and persona-template scaffold."""
+
+    def __init__(self, env_name: str, *, json_path: Path | None = None) -> None:
+        self.env_name = env_name
+        self.json_path = json_path or (_ENVIRONMENTS_DIR / f"{env_name}.json")
+        if not self.json_path.exists():
+            raise FileNotFoundError(
+                f"Environment prompt JSON not found for {env_name!r}: {self.json_path}"
+            )
+        with self.json_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+
+        self.forum_description: str = data.get("description", "")
+        self.default_invitation: str = data.get(
+            "default_invitation",
+            "A new thread has just opened. The forum is active and members are posting.",
+        )
+        self.system_prompt_template: str = data["system_prompt_template"]
+
+    def render_persona(self, character_name: str, memories: list[str]) -> str:
+        bullets = "\n".join(f"- {m}" for m in memories)
         return self.system_prompt_template.format(
             character_name=character_name,
             character_description_bullets=bullets,
         )
 
-    def get_personas(self, character_set: str) -> dict[str, str]:
-        return {
-            name: self.get_persona_text(name)
-            for name in self.get_character_set(character_set)
-        }
+
+def load_characters(pack_name: str) -> CharacterPack:
+    return CharacterPack(pack_name)
 
 
-def load_scenario(scenario_name: str) -> JsonPersonaScenario:
-    """Load a scenario by name (matches ``envs/<scenario_name>.json``)."""
-    return JsonPersonaScenario(scenario_name)
+def load_environment(env_name: str) -> EnvironmentPrompt:
+    return EnvironmentPrompt(env_name)
+
+
+def build_personas(
+    environment: EnvironmentPrompt,
+    characters: CharacterPack,
+    character_set: str,
+) -> dict[str, str]:
+    """Compose ``{character_name → system-prompt text}`` for one set."""
+    return {
+        name: environment.render_persona(name, characters.get_memories(name))
+        for name in characters.get_character_set(character_set)
+    }

@@ -161,29 +161,42 @@ def _build_forum_env(cfg: dict, tokenizer: Any) -> Any:
         raise SystemExit("Config has no forum environment in 'environments'.")
     spec = forum_specs[0]
 
-    from envs.forum import ForumEnv, JsonPersonaScenario
-    scenario = JsonPersonaScenario(spec.get("scenario", "robotic_athanor"))
+    from envs.forum import ForumEnv, load_characters, load_environment
+    if "environment" not in spec:
+        raise SystemExit(
+            "Forum env spec must set 'environment: <name>' to select a prompt "
+            "from envs/forum/environments/."
+        )
+    environment = load_environment(spec["environment"])
 
     if "personas" in spec:
         personas = dict(spec["personas"])
         agent_names = list(personas.keys())
     else:
+        if "characters" not in spec:
+            raise SystemExit(
+                "Forum env spec must set 'characters: <pack>' (with "
+                "'character_set:') or provide an explicit 'personas:' dict."
+            )
+        characters = load_characters(spec["characters"])
         cset = spec.get("character_set", "canonical_4")
-        agent_names = scenario.get_character_set(cset)
-        personas = scenario.get_personas(cset)
+        agent_names = characters.get_character_set(cset)
+        personas = {
+            name: environment.render_persona(name, characters.get_memories(name))
+            for name in agent_names
+        }
 
     return ForumEnv(
         agent_names=agent_names,
         agent_personas=personas,
         tokenizer=tokenizer,
-        forum_description=spec.get("forum_description") or scenario.forum_description,
-        initial_invitation=spec.get("initial_invitation") or scenario.default_invitation,
+        forum_description=spec.get("forum_description") or environment.forum_description,
+        initial_invitation=spec.get("initial_invitation") or environment.default_invitation,
         action_token_budget=spec.get("token_budget"),
         max_posts=int(spec.get("max_posts", 12)),
         post_order=spec.get("post_order", "round_robin"),
         seed=int(spec.get("seed", 0)),
         post_length_note=spec.get("post_length_note"),
-        thinking_enabled=bool(spec.get("thinking_enabled", False)),
         post_open_tag=spec.get("post_open_tag", "<post>"),
         post_close_tag=spec.get("post_close_tag", "</post>"),
         post_token_budget=spec.get("post_token_budget"),

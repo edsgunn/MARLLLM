@@ -179,7 +179,7 @@ class CCSMLoss(Loss):
         if (
             last_hidden_ref is not None
             and lm_head_ref is not None
-            and config.kl_coef > 0.0
+            and (config.kl_coef > 0.0 or getattr(config, "always_log_kl", False))
             and act_mask.any()
         ):
             shifted_act_mask = act_mask[:, 1:]
@@ -226,6 +226,264 @@ class CCSMLoss(Loss):
             + config.kl_coef * kl
         )
         return total, metrics
+
+    def compute_loss_chunked(
+        self,
+        agent,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        token_type_mask: torch.Tensor,
+        agent_id_mask: torch.Tensor,
+        target_agent_idx: int,
+        config: TrainingConfig,
+        backward_scale: float,
+        perception_source_indices: list[int] | None = None,
+    ) -> tuple[float, dict]:
+        """Sequence-chunked counterpart of ``compute_loss``.
+
+        Splits the per-episode forward+backward into chunks of
+        ``config.seq_chunk_size`` tokens. A no-grad streaming pass first
+        computes global surprises / returns / advantages / counts; a second
+        pass forwards each chunk with autograd, computes that chunk's
+        contribution to the global mean of each loss term, and calls
+        ``(loss * backward_scale).backward()`` immediately so the chunk's
+        autograd graph can be freed before the next chunk forwards.
+
+        The KV cache from prior chunks is detached, so cross-chunk attention
+        gradients are not captured. Within a chunk the gradient is exact.
+        """
+        chunk_size = config.seq_chunk_size
+        assert chunk_size is not None and chunk_size > 0, "seq_chunk_size must be set"
+        device = input_ids.device
+        dtype_h = next(agent._backbone.parameters()).dtype
+        B, T = input_ids.shape
+
+        # ---------------- Pass 1: no-grad streaming -----------------------
+        # Accumulate token_lp (B, T-1) and values (B, T) across chunks.
+        token_lp_full = input_ids.new_zeros((B, T - 1), dtype=dtype_h) if T > 1 else input_ids.new_zeros((B, 0), dtype=dtype_h)
+        values_full = input_ids.new_zeros((B, T), dtype=dtype_h)
+        with torch.no_grad():
+            for s, e, hidden_chunk, values_chunk in agent.evaluate_hidden_chunked(
+                input_ids, attention_mask, chunk_size,
+            ):
+                # token_lp for shifted predictions hidden[s..min(e,T-1)) → input[s+1..min(e,T))
+                pred_end = min(e, T - 1)
+                if pred_end > s:
+                    L = pred_end - s
+                    targets = input_ids[:, s + 1 : pred_end + 1]
+                    hidden_pred = hidden_chunk[:, :L, :]
+                    for vs in range(0, L, _T_CHUNK):
+                        ve = min(vs + _T_CHUNK, L)
+                        logits_chunk = agent.lm_head(hidden_pred[:, vs:ve, :])
+                        V = logits_chunk.shape[-1]
+                        nll = F.cross_entropy(
+                            logits_chunk.reshape(-1, V),
+                            targets[:, vs:ve].reshape(-1),
+                            reduction="none",
+                        ).reshape(B, ve - vs)
+                        token_lp_full[:, s + vs : s + ve] = -nll.to(dtype_h)
+                values_full[:, s:e] = values_chunk.to(dtype_h)
+
+        # Surprises, returns, masks (no_grad — these are pre-computed data).
+        surprises = _surprises_from_token_lp(token_lp_full, token_type_mask)
+        returns = _compute_returns(surprises, token_type_mask, config.gamma)
+
+        obs_mask = token_type_mask == int(TokenType.OBS)
+        if perception_source_indices is not None and len(perception_source_indices) > 0:
+            allowed = torch.zeros_like(agent_id_mask, dtype=torch.bool)
+            for idx in perception_source_indices:
+                allowed = allowed | (agent_id_mask == idx)
+            obs_mask = obs_mask & allowed
+        act_mask = (token_type_mask == int(TokenType.ACT)) & (agent_id_mask == target_agent_idx)
+
+        # Shifted-view (positions 1..T-1) masks for slicing per-chunk
+        # contributions. Note: ``n_obs_total`` matches the single-shot
+        # path's denominator, which is ``obs_mask.sum()`` over *absolute*
+        # positions — that count includes any OBS at position 0 (whose
+        # surprise is 0 by construction). Using the shifted-view count
+        # would silently drop that off-by-one and bias L_perc upwards.
+        # ``act_mask[:, 0]`` is always False (position 0 is never ACT),
+        # so absolute and shifted counts coincide for the ACT side.
+        shifted_obs_mask = obs_mask[:, 1:]
+        shifted_act_mask = act_mask[:, 1:]
+        n_obs_total = int(obs_mask.sum().item())
+        n_act_total = int(act_mask.sum().item())
+
+        # Global act_returns + advantages, optionally normalised.
+        if act_mask.any():
+            act_returns_global = returns[act_mask]
+            if config.normalise_returns and act_returns_global.numel() > 1:
+                act_returns_global = (act_returns_global - act_returns_global.mean()) / (act_returns_global.std() + 1e-8)
+            act_values_global_det = values_full[act_mask].detach()
+            advantages_global = -(act_returns_global - act_values_global_det)
+            # Per-position scatter buffers so each chunk can slice [s:e] cheaply.
+            advantages_per_pos = torch.zeros(B, T, device=device, dtype=dtype_h)
+            advantages_per_pos[act_mask] = advantages_global.to(dtype_h)
+            returns_per_pos_norm = torch.zeros(B, T, device=device, dtype=dtype_h)
+            returns_per_pos_norm[act_mask] = act_returns_global.to(dtype_h)
+        else:
+            act_returns_global = torch.zeros(0, device=device, dtype=dtype_h)
+            advantages_global = torch.zeros(0, device=device, dtype=dtype_h)
+            advantages_per_pos = torch.zeros(B, T, device=device, dtype=dtype_h)
+            returns_per_pos_norm = torch.zeros(B, T, device=device, dtype=dtype_h)
+
+        # OBS surprises (for diagnostics). Mirror the single-shot path's
+        # ``surprises[obs_mask]`` selection — over absolute positions, so
+        # any OBS at position 0 contributes a 0 to both sum and count.
+        obs_surprises_flat = surprises[obs_mask]
+
+        # ---------------- Pass 2: per-chunk grad + backward ---------------
+        agent.train_mode()
+        total_loss_scalar = 0.0
+        l_perc_acc = 0.0
+        l_act_policy_acc = 0.0
+        entropy_acc = 0.0
+        kl_acc = 0.0
+        l_val_acc = 0.0
+
+        keep_ref = (config.kl_coef > 0.0 or getattr(config, "always_log_kl", False)) and bool(act_mask.any()) and getattr(agent, "_keep_ref_model", False)
+        train_iter = agent.evaluate_hidden_chunked(input_ids, attention_mask, chunk_size)
+        ref_iter = (
+            agent.evaluate_hidden_ref_chunked(input_ids, attention_mask, chunk_size)
+            if keep_ref else None
+        )
+
+        denom_obs = max(n_obs_total, 1)
+        denom_act = max(n_act_total, 1)
+
+        for s, e, hidden_chunk, values_chunk in train_iter:
+            ref_chunk = None
+            if ref_iter is not None:
+                _rs, _re, ref_chunk = next(ref_iter)
+                assert (_rs, _re) == (s, e), "train/ref chunk iterators desynchronised"
+
+            chunk_loss = hidden_chunk.new_zeros(())
+
+            # Predictor side: this chunk's hidden states at positions
+            # [s, predictor_end) drive log-prob / entropy / KL for predicted
+            # absolute positions [s+1, predictor_end+1). The very last
+            # position T-1 has no target and is dropped.
+            predictor_end = min(e, T - 1)
+            L_pred = max(0, predictor_end - s)
+            if L_pred > 0:
+                hidden_pred = hidden_chunk[:, :L_pred, :]
+                targets = input_ids[:, s + 1 : predictor_end + 1]
+                token_lp_chunk = hidden_chunk.new_empty((B, L_pred))
+                for vs in range(0, L_pred, _T_CHUNK):
+                    ve = min(vs + _T_CHUNK, L_pred)
+                    logits_chunk = agent.lm_head(hidden_pred[:, vs:ve, :])
+                    V = logits_chunk.shape[-1]
+                    nll = F.cross_entropy(
+                        logits_chunk.reshape(-1, V),
+                        targets[:, vs:ve].reshape(-1),
+                        reduction="none",
+                    ).reshape(B, ve - vs)
+                    token_lp_chunk[:, vs:ve] = -nll
+
+                shifted_obs_chunk_local = shifted_obs_mask[:, s : s + L_pred]
+                shifted_act_chunk_local = shifted_act_mask[:, s : s + L_pred]
+
+                # L_perc contribution (predicted absolute positions [s+1, predictor_end+1))
+                if shifted_obs_chunk_local.any():
+                    perc_sum = (-token_lp_chunk * shifted_obs_chunk_local.to(token_lp_chunk.dtype)).sum()
+                    l_perc_chunk = perc_sum / denom_obs
+                    chunk_loss = chunk_loss + config.alpha_perc * l_perc_chunk
+                    l_perc_acc += float(l_perc_chunk.detach().item())
+
+                if shifted_act_chunk_local.any():
+                    chunk_adv = advantages_per_pos[:, s + 1 : predictor_end + 1].to(token_lp_chunk.dtype)
+                    chunk_act_float = shifted_act_chunk_local.to(token_lp_chunk.dtype)
+                    policy_sum = -(token_lp_chunk * chunk_adv * chunk_act_float).sum()
+                    l_policy_chunk = policy_sum / denom_act
+                    l_act_policy_acc += float(l_policy_chunk.detach().item())
+
+                    act_hidden_chunk = hidden_pred[shifted_act_chunk_local]  # (N_chunk_pred, H)
+                    ent_sum_chunk = act_hidden_chunk.new_zeros(())
+                    for ns in range(0, act_hidden_chunk.shape[0], _N_ACT_CHUNK):
+                        ne = min(ns + _N_ACT_CHUNK, act_hidden_chunk.shape[0])
+                        log_p = F.log_softmax(agent.lm_head(act_hidden_chunk[ns:ne]), dim=-1)
+                        ent_sum_chunk = ent_sum_chunk - (log_p.exp() * log_p).sum()
+                    l_ent_chunk = ent_sum_chunk / denom_act
+                    entropy_acc += float(l_ent_chunk.detach().item())
+
+                    chunk_loss = chunk_loss + config.alpha_act * (l_policy_chunk - config.beta * l_ent_chunk)
+
+                    if keep_ref and ref_chunk is not None:
+                        ref_pred = ref_chunk[:, :L_pred, :]
+                        act_hidden_ref_chunk = ref_pred[shifted_act_chunk_local]
+                        # lm_head is not LoRA-wrapped in any current config, so
+                        # ``lm_head_ref`` (which wraps the call in disable_adapter)
+                        # is functionally identical to ``lm_head``. Avoid the
+                        # context-manager toggle inside this inner loop — it
+                        # caused a "backward through graph twice" error when the
+                        # input pattern interacted with gradient checkpointing.
+                        kl_sum_chunk = act_hidden_chunk.new_zeros(())
+                        for ns in range(0, act_hidden_chunk.shape[0], _N_ACT_CHUNK):
+                            ne = min(ns + _N_ACT_CHUNK, act_hidden_chunk.shape[0])
+                            log_p = F.log_softmax(agent.lm_head(act_hidden_chunk[ns:ne]), dim=-1)
+                            log_p_ref = F.log_softmax(agent.lm_head(act_hidden_ref_chunk[ns:ne]), dim=-1)
+                            kl_sum_chunk = kl_sum_chunk + (log_p.exp() * (log_p - log_p_ref)).sum()
+                        l_kl_chunk = kl_sum_chunk / denom_act
+                        kl_acc += float(l_kl_chunk.detach().item())
+                        chunk_loss = chunk_loss + config.kl_coef * l_kl_chunk
+
+            # Value side: this chunk's values at absolute positions [s, e)
+            # train the value head on returns at any act positions it owns.
+            # Disjoint from the predictor side (predictor is one position
+            # earlier), so we account for them separately.
+            chunk_act_abs_mask = act_mask[:, s:e]
+            if chunk_act_abs_mask.any():
+                chunk_values_at_act = values_chunk[chunk_act_abs_mask]
+                chunk_returns_at_act = returns_per_pos_norm[:, s:e][chunk_act_abs_mask].to(chunk_values_at_act.dtype)
+                val_sum = ((chunk_values_at_act - chunk_returns_at_act.detach()) ** 2).sum()
+                l_val_chunk = val_sum / denom_act
+                l_val_acc += float(l_val_chunk.detach().item())
+                chunk_loss = chunk_loss + config.alpha_val * l_val_chunk
+
+            if chunk_loss.requires_grad:
+                (chunk_loss * backward_scale).backward()
+                total_loss_scalar += float(chunk_loss.detach().item())
+            # Free chunk-local tensors before next iteration.
+            del hidden_chunk, values_chunk
+            if ref_chunk is not None:
+                del ref_chunk
+
+        # Drain reference iterator if any chunks were skipped.
+        if ref_iter is not None:
+            for _ in ref_iter:
+                pass
+
+        # Diagnostics — mirror the single-shot path.
+        if obs_surprises_flat.numel() > 0:
+            surp_q = torch.quantile(
+                obs_surprises_flat.float().detach(),
+                torch.tensor([0.25, 0.5, 0.75, 0.95], device=obs_surprises_flat.device),
+            ).tolist()
+            surp_p25, surp_p50, surp_p75, surp_p95 = surp_q
+            surp_max = obs_surprises_flat.detach().max().item()
+            mean_surprise = obs_surprises_flat.mean().item()
+        else:
+            surp_p25 = surp_p50 = surp_p75 = surp_p95 = surp_max = 0.0
+            mean_surprise = 0.0
+
+        l_act_total = l_act_policy_acc - config.beta * entropy_acc
+        metrics = {
+            "mean_surprise": mean_surprise,
+            "surprise_p25": surp_p25,
+            "surprise_p50": surp_p50,
+            "surprise_p75": surp_p75,
+            "surprise_p95": surp_p95,
+            "surprise_max": surp_max,
+            "mean_return": float(act_returns_global.mean().item()) if act_returns_global.numel() > 0 else 0.0,
+            "return_abs_max": float(act_returns_global.abs().max().item()) if act_returns_global.numel() > 0 else 0.0,
+            "mean_advantage": float(advantages_global.mean().item()) if advantages_global.numel() > 0 else 0.0,
+            "entropy": entropy_acc,
+            "perc_loss": l_perc_acc,
+            "act_loss": l_act_total,
+            "value_loss": l_val_acc,
+            "kl": kl_acc,
+        }
+        return total_loss_scalar, metrics
 
 
 # ------------------------------------------------------------------ #

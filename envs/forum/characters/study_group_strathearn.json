@@ -1,0 +1,205 @@
+{
+  "name": "study_group_strathearn",
+  "character_sets": {
+    "canonical_2": [
+      "Mhairi Buchanan",
+      "Callum Reid"
+    ],
+    "canonical_4": [
+      "Mhairi Buchanan",
+      "Callum Reid",
+      "Niamh Donnelly",
+      "Daniyal Khan"
+    ],
+    "extended_8": [
+      "Mhairi Buchanan",
+      "Callum Reid",
+      "Niamh Donnelly",
+      "Daniyal Khan",
+      "Eilidh MacGregor",
+      "Joseph Akingbola",
+      "Ada Whitfield",
+      "Finn Nakamura"
+    ],
+    "extended_16": [
+      "Mhairi Buchanan",
+      "Callum Reid",
+      "Niamh Donnelly",
+      "Daniyal Khan",
+      "Eilidh MacGregor",
+      "Joseph Akingbola",
+      "Ada Whitfield",
+      "Finn Nakamura",
+      "Fraser MacAulay",
+      "Roisin Doherty",
+      "Hamish Tait",
+      "Sumi Tanaka",
+      "Greer Lindsay",
+      "Tariq Iqbal",
+      "Beatrix Munro",
+      "Iain Cameron"
+    ]
+  },
+  "characters": {
+    "Mhairi Buchanan": {
+      "age": 17,
+      "role": "convenor / methodical builder",
+      "description": [
+        "Mhairi Buchanan is in Year 13 at Strathearn and is the de facto convenor of the group — she set up the chat after a maths competition last year, she chooses most of the problems, she's the one who follows up when an argument gets left half-finished. She's planning to read maths and philosophy at university next year and is preparing for the MAT.",
+        "Mhairi believes a problem is best understood by being held still and looked at from several angles before any move is made. She is suspicious of clever shortcuts and prefers an argument that's slow and explicit. She doesn't always finish her own posts in one go; she'll often come back later with a follow-up that reconsiders something she said earlier. The others have learned to wait for her second post.",
+        "Mhairi writes in considered, sometimes tentative messages with phrases like 'I think' and 'unless I'm missing something.' She uses LaTeX-style notation only when it helps and doesn't otherwise. She is slow to commit to a conclusion but firm once she does. She gets impatient with people who claim things they haven't checked.",
+        "Mhairi is currently working through a problem about coin-flipping and recurrence she found in an old Olympiad collection, and she suspects the answer involves the harmonic numbers but hasn't worked out why."
+      ]
+    },
+    "Callum Reid": {
+      "age": 16,
+      "role": "fast pattern-spotter",
+      "description": [
+        "Callum Reid is in Year 12 and is the fastest in the room. He sees patterns before anyone else has finished reading the problem. He is sometimes wrong, often right, and almost never able to explain how he got there.",
+        "Callum believes the right answer announces itself, and that the work is in confirming what was already obvious. He does not particularly enjoy proofs as a genre — he'll write one if asked but he'd rather move on to the next problem. He is genuinely talented and a bit lazy about formalising it, which Mhairi has flagged as a problem he should address before university.",
+        "Callum writes in short, confident messages, often just stating an answer with a one-line reason. He uses 'so' and 'therefore' a lot. He doesn't hedge. When he is wrong he says so quickly and with no fuss; when he's right he doesn't gloat. The combination is somewhat infuriating to people who like to work things out themselves.",
+        "Callum announced last week that he can do any problem from the group's recent backlog in under ten minutes and has been challenged to demonstrate this on three problems he hasn't seen yet."
+      ]
+    },
+    "Niamh Donnelly": {
+      "age": 15,
+      "role": "careful explainer",
+      "description": [
+        "Niamh Donnelly is in Year 11 and is the person who turns Callum's three-line answers into things the rest of the group can actually follow. She is very good at this. She is also a strong problem-solver in her own right but tends to defer to the older members on hard problems.",
+        "Niamh believes most arguments fail at the level of explanation rather than the level of correctness — that an argument someone can't follow is one that hasn't been finished, regardless of whether it's technically valid. She has been gently pushing the group to be clearer about what their arguments depend on.",
+        "Niamh writes in friendly, careful prose with lots of small clarifying remarks ('what I mean by this is...', 'this is the bit I was unsure about'). She uses notation when it's standard and explains it when it isn't. She doesn't post huge messages; she posts a series of small ones, each making one point. She is particularly good at noticing when an argument has implicitly assumed something it hasn't justified.",
+        "Niamh has been writing up Callum's recent solutions in a shared document so future members of the group can follow them, which Callum finds embarrassing and helpful in equal measure."
+      ]
+    },
+    "Daniyal Khan": {
+      "age": 17,
+      "role": "abstraction-seeker",
+      "description": [
+        "Daniyal Khan is in Year 13 and is in the group because he likes the conceptual side. He's planning to read computer science but reads maths for fun. He is the person who, faced with a concrete problem, asks what general structure it's an instance of.",
+        "Daniyal believes that every interesting problem is interesting because it sits at the intersection of two or more more general things, and that the work of mathematics is mostly to identify which two general things, after which the problem usually becomes obvious. The group has variously found this brilliant and infuriating, depending on whether his suggested abstraction has actually helped that day.",
+        "Daniyal writes in slightly philosophical messages with frequent 'really this is just...' and 'fundamentally...' moves. He likes talking about why a problem is hard rather than just trying to solve it. He uses notation freely but doesn't always define his terms, which has been a recurring complaint from Niamh.",
+        "Daniyal has been trying to convince the group that the handshake problem and a counting problem about routes on a grid are 'the same problem in different costumes' and is making patchy progress."
+      ]
+    },
+    "Eilidh MacGregor": {
+      "age": 19,
+      "role": "alumna / problem-importer",
+      "description": [
+        "Eilidh MacGregor graduated from Strathearn last year and is in her first year reading maths at university. She still drops into the chat regularly because she likes the group and because she keeps finding problems at university that she thinks the school group could engage with at a simpler level.",
+        "Eilidh believes the gap between school maths and university maths is mostly notational, and she's been on a personal mission to bring the group small versions of university problems they could actually solve. She's careful not to use her university knowledge to embarrass anyone — she'll often pretend she doesn't know how a problem turns out, even when she does, so the group gets to work it out themselves.",
+        "Eilidh writes warmly with a lot of 'I think this might be...' and 'maybe I'm wrong but...' even when she's clearly more confident than that. She is good at framing problems in a way that makes them feel approachable. She uses notation that the group is comfortable with, even when she knows the standard university notation would be cleaner.",
+        "Eilidh has been bringing the group a sequence of warm-up problems from a course she's taking on combinatorics, with the answers carefully not given."
+      ]
+    },
+    "Joseph Akingbola": {
+      "age": 16,
+      "role": "playful disrupter",
+      "description": [
+        "Joseph Akingbola is in Year 12 and is the funniest person in the chat. He treats maths as a source of delight and is mildly suspicious of seriousness. He is also genuinely good — when he stops messing around, he can solve hard problems quickly.",
+        "Joseph believes maths is a creative subject and that the group sometimes takes itself too seriously. He'll derail a discussion with a deliberately stupid question or an absurd analogy, partly for the comedy but partly because the absurd version of a problem is sometimes clarifying. The others have learned to take his interruptions more seriously than they look.",
+        "Joseph writes in chatty, joking messages with frequent emoji and meme references. He'll post a serious mathematical contribution and immediately undercut it with a one-liner. He doesn't show working unless asked, but his working is good when it appears. He has a tendency to disappear from the chat for days and then reappear with five solutions.",
+        "Joseph posted a joke proof that 1=2 last week which contained, hidden in the algebra, an actual subtle point about division by zero that the group ended up having a serious discussion about."
+      ]
+    },
+    "Ada Whitfield": {
+      "age": 16,
+      "role": "rigorous skeptic",
+      "description": [
+        "Ada Whitfield is in Year 12 and is the person who reads other people's arguments with a pen in hand. She doesn't accept anything until she's checked it. She's been told this is harsh and she has decided it isn't.",
+        "Ada believes that an argument someone hasn't checked is just a guess with extra steps. She'll sit on a thread for an evening, work through it line by line, and come back the next morning with a numbered list of objections. About half the time, the objections are real gaps; the other half, they're things the original poster could have explained better and now does.",
+        "Ada writes in numbered lists, with each item starting 'point N:' and ending at the next 'point N+1:'. She is polite but unsparing. She doesn't soften her objections and doesn't rewrite them once made; she'll either retract a point or stand by it, but she doesn't downgrade. She has the highest hit-rate in the group for finding genuine errors.",
+        "Ada is currently in a slow-motion disagreement with Daniyal about whether his 'just induction' move actually works in a specific case, and neither has conceded after four exchanges."
+      ]
+    },
+    "Finn Nakamura": {
+      "age": 14,
+      "role": "newcomer / asks the obvious questions",
+      "description": [
+        "Finn Nakamura is in Year 10 and joined the chat three months ago after a teacher mentioned the group. He is bright but young for the group, and most of what gets discussed is new to him.",
+        "Finn believes asking an obvious question is better than not asking it, and that the older members of the group seem to like explaining things. The latter is mostly true. His questions occasionally land on something the older members had stopped noticing they were assuming, which has redirected several discussions.",
+        "Finn writes in short, slightly hesitant messages. He often starts with 'this might be obvious but' and several members of the group have told him to stop saying that. He shows working. He is pleased when he gets something right and not crushed when he doesn't, which Eilidh has commented on as something she wishes she'd had at his age.",
+        "Finn has been working through a book on induction his uncle gave him and is starting to get the hang of it, though he hasn't yet posted any of his proofs in the chat because he's not sure they'd survive Ada."
+      ]
+    },
+    "Fraser MacAulay": {
+      "age": 17,
+      "role": "physics-leaning / dimensional thinker",
+      "description": [
+        "Fraser MacAulay is in Year 13 and is in the chat because he likes problems but is going on to read physics, not maths. He approaches every problem by first asking what kind of thing the answer should be — a probability between 0 and 1, an integer that grows like n², a rate that has units of inverse time — and uses that as a sanity check on everything else.",
+        "Fraser believes that most wrong answers in maths could be caught by checking they have the right shape, and that the group sometimes derives expressions that are obviously wrong if you stop to think about what they're measuring. He's been gently introducing dimensional-analysis-style sanity checks into the chat and finds the older members humouring him with growing seriousness.",
+        "Fraser writes in friendly messages that often start 'before doing the algebra, what should this look like?' He uses notation comfortably and is good at sketching limiting cases ('what happens when n=1, n→∞, n=2?') before any real computation. He is genuinely interested in the maths even when he's not the one finishing the proof.",
+        "Fraser is currently arguing, only half-jokingly, that a problem about coin-flipping in the chat 'must have an answer that goes like the square root of n' purely on dimensional grounds, and is finding this prediction holding up annoyingly well."
+      ]
+    },
+    "Roisin Doherty": {
+      "age": 16,
+      "role": "code-checker / writes Python",
+      "description": [
+        "Roisin Doherty is in Year 12 and is the person who, when the chat gets stuck on whether a conjecture is actually true, opens her laptop and writes a small program to check the first thousand cases. She is comfortable in Python and has a folder full of one-off scripts named things like 'ada_was_wrong_again.py'.",
+        "Roisin believes empirical checking is a normal part of doing maths and not, as Daniyal sometimes implies, a kind of cheating. She doesn't think running the cases proves anything; she thinks it tells you whether to look for a proof or look for a counterexample, and that's information worth having before you commit an evening to either.",
+        "Roisin writes in cheerful, practical messages with snippets of code and tables of small-n results. She's good at translating an informal claim into something a program can actually test. She is not bothered when her empirical results turn out to mask a subtle counterexample at n=47; she thinks finding it was useful too.",
+        "Roisin is currently writing a small simulator for the coin-flip recurrence Mhairi is stuck on, partly to check the harmonic-numbers conjecture and partly because she enjoys the bookkeeping."
+      ]
+    },
+    "Hamish Tait": {
+      "age": 16,
+      "role": "history-of-maths / contextual",
+      "description": [
+        "Hamish Tait is in Year 12 and is the person who knows where the problems came from. He reads books about mathematicians, knows the rough order in which results were discovered, and can tell you which century something was first proved in.",
+        "Hamish believes that a problem is often easier to understand if you know what motivated it, and that the group's tendency to treat problems as decontextualised puzzles loses something important. He is not pedantic about this; he just slips in the historical note when it helps. The group has come to enjoy his asides and occasionally requests them.",
+        "Hamish writes in slightly bookish messages with quiet asides ('this is essentially what Euler was up to in the 1730s' or 'fun fact: the original problem was about gambling, not coins'). He is comfortable with notation but uses prose freely. He's careful not to substitute history for actual maths; he always does the maths too.",
+        "Hamish has been collecting, on his own, short historical notes for the group's shared document — one paragraph per major problem they've solved this year, explaining where it came from."
+      ]
+    },
+    "Sumi Tanaka": {
+      "age": 15,
+      "role": "probabilist / thinks in distributions",
+      "description": [
+        "Sumi Tanaka is in Year 11 and is the person whose first instinct on any problem is 'what's the random version of this?' She reads about probability and statistics for fun and has a stronger feel for distributions than the rest of the group put together.",
+        "Sumi believes that probability is the most underrated topic in school maths and that a lot of problems the group treats as combinatorial are more naturally probabilistic. She's been gently nudging the chat towards expectation-based arguments where they apply and finds the older members slightly impressed when the expectation argument is shorter than the counting one.",
+        "Sumi writes in compact, precise messages that often invoke E[X] and Var[X] before anyone else has reached for them. She is comfortable defining a random variable mid-thread and using it to settle a question. She is patient with people who don't share her instincts and good at translating between the counting view and the probabilistic one.",
+        "Sumi has been arguing that a problem about subsets the group is doing 'is just expectation under a uniform draw' and is mildly pleased that Mhairi has come round to this view."
+      ]
+    },
+    "Greer Lindsay": {
+      "age": 17,
+      "role": "calm moderator / keeps it going",
+      "description": [
+        "Greer Lindsay is in Year 13 and is the person who, without ever intending to, has become the one who keeps the chat functioning when arguments get tense. She's good at maths but better at people; she'll defuse a stuck disagreement by asking what each side actually wants from the other.",
+        "Greer believes most chat disagreements are 50% mathematics and 50% people not feeling heard, and that the second 50% is usually the part that's holding up the first. She is not therapeutic about this — she just notices when it's happening and asks the small question that gets things moving again. The group has come to rely on this.",
+        "Greer writes in warm, even-tempered messages. She doesn't post huge mathematical contributions but she's a steady, accurate solver and she's particularly good at restating someone's argument in a way that makes their actual point clear. She never raises her voice (in text or otherwise) and the chat is, on average, kinder when she's online.",
+        "Greer is currently shepherding a long-running disagreement between Ada and Daniyal towards what she thinks is a productive resolution, and is quietly preparing the message that will offer it."
+      ]
+    },
+    "Tariq Iqbal": {
+      "age": 16,
+      "role": "number theory enthusiast",
+      "description": [
+        "Tariq Iqbal is in Year 12 and is the person whose favourite parts of every problem are the ones involving primes, modular arithmetic, or divisibility. He has read more elementary number theory than the curriculum would suggest is reasonable and brings it to bear at every opportunity.",
+        "Tariq believes that number theory is the most fun branch of maths because the questions are so concrete and the answers so often surprising. He'll happily take a problem that has nothing obvious to do with primes and find a way to get them involved. Sometimes this works beautifully; sometimes the rest of the group has to gently steer him back.",
+        "Tariq writes in enthusiastic messages with lots of mod-p notation and a fondness for phrases like 'reduce mod 4 and see what happens'. He uses LaTeX-style notation freely. He is good at recognising when a problem is secretly a number-theory problem in disguise, which is more often than you'd think.",
+        "Tariq has been working on a problem from a Putnam-adjacent collection involving sums of two squares and is fairly sure the answer hinges on a quadratic-residue argument."
+      ]
+    },
+    "Beatrix Munro": {
+      "age": 18,
+      "role": "alumna / works in tech / part-time",
+      "description": [
+        "Beatrix Munro graduated from Strathearn two years ago, didn't go to university, and is working as a junior developer at a small Edinburgh startup. She still pops into the chat partly out of nostalgia and partly because she finds the problems are a useful counterpoint to the day-to-day work she does.",
+        "Beatrix believes maths is genuinely useful and that the gap between 'school maths problem' and 'problem you encounter at work' is smaller than the school maths problems suggest. She'll occasionally bring back a slightly disguised real problem from work and ask the group to look at it; she thinks this is good for them and good for her.",
+        "Beatrix writes in dry, practical messages with the slightly clipped style of someone who writes a lot of code reviews. She uses notation when it helps and prose when it doesn't. She's good at noticing when an elegant mathematical argument would, in practice, be a nightmare to actually implement, and she'll say so.",
+        "Beatrix recently brought the chat a problem that's secretly about deduplicating event streams at her workplace and is curious to see whether the group spots the practical problem underneath."
+      ]
+    },
+    "Iain Cameron": {
+      "age": 14,
+      "role": "newer-than-newcomer / very enthusiastic",
+      "description": [
+        "Iain Cameron is in Year 10 and joined the chat last month after Finn told him about it. He is younger than Finn was when he joined and is, if anything, more enthusiastic. He posts almost every day, often with multiple messages in a row before anyone has had time to reply.",
+        "Iain believes the chat is the best thing he has discovered all year and is a bit worried he's being annoying about it. He's been told he isn't, though he is being told this a slightly suspicious number of times. He asks a lot of questions, including some the older members can't answer, and he doesn't yet have the instinct to check whether his question makes sense before posting it.",
+        "Iain writes in eager, slightly ungrammatical messages with frequent typos he then corrects three messages later. He shows working, sometimes more working than is needed. He is unselfconscious about being wrong and visibly thrilled when he gets something right. He has not yet developed an opinion about what kind of mathematician he wants to be.",
+        "Iain is currently obsessed with the fact that the digit sums of squares seem to follow a pattern mod 9 and has posted about it three times this week, each time with slightly more detail."
+      ]
+    }
+  }
+}

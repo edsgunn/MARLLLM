@@ -31,9 +31,36 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+
+def _load_json_resilient(path: Path, attempts: int = 4, delay_s: float = 0.15):
+    """``json.load`` that tolerates a concurrent writer.
+
+    The trainer flushes trace files while the viewer is running; an
+    unlucky read can land mid-write and trip ``JSONDecodeError``. We
+    retry a few times with a short backoff before giving up — almost all
+    of these races resolve within a few hundred ms.
+
+    Raises ``json.JSONDecodeError`` after all retries are exhausted so
+    the caller can return a 503 (the client retries 503 transparently).
+    """
+    last_err: Exception | None = None
+    for i in range(attempts):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            last_err = e
+            if i < attempts - 1:
+                time.sleep(delay_s * (i + 1))
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
 
 _ASSISTANT_TURN_RE = re.compile(r"<\|im_start\|>assistant\n(.*?)<\|im_end\|>", re.DOTALL)
 
@@ -78,13 +105,16 @@ def _convert_forum_records(records: list, label: str) -> dict:
             turns = turns_by_agent.get(speaker, [])
             if n < len(turns) and turns[n]:
                 post["raw_turn"] = turns[n]
-        ep_meta = {k: v for k, v in env_t.items() if k not in ("thread", "agents")}
+        events = list(env_t.get("events") or [])
+        ep_meta = {k: v for k, v in env_t.items()
+                   if k not in ("thread", "agents", "events")}
         episodes.append({
             "episode": rec.get("episode", 0),
             "meta": ep_meta,
             "participating_agents": ep_agents,
             "thread": thread,
             "agent_contexts": contexts,
+            "events": events,
         })
     return {
         "format": "forum",
@@ -116,8 +146,14 @@ _HTML = r"""<!DOCTYPE html>
          display:flex; height:100vh; overflow:hidden; }
 
   /* Sidebar */
-  #sidebar { width:260px; min-width:200px; background:var(--panel);
-             border-right:1px solid #222; display:flex; flex-direction:column; flex-shrink:0; }
+  #sidebar { width:260px; min-width:160px; background:var(--panel);
+             border-right:1px solid #222; display:flex; flex-direction:column;
+             flex-shrink:0; position:relative; }
+  #sidebar-resizer { position:absolute; top:0; right:-3px; width:6px; height:100%;
+                     cursor:col-resize; z-index:10; background:transparent; }
+  #sidebar-resizer:hover, #sidebar-resizer.dragging { background:var(--accent); opacity:0.6; }
+  body.resizing-sidebar { cursor:col-resize; user-select:none; }
+  body.resizing-sidebar * { user-select:none !important; }
   #sidebar-title { padding:12px 14px; font-size:13px; font-weight:700; color:var(--accent);
                    border-bottom:1px solid #222; letter-spacing:1px; }
   #exp-list { flex:1; overflow-y:auto; padding:4px 0; }
@@ -248,6 +284,32 @@ _HTML = r"""<!DOCTYPE html>
                  white-space:pre-wrap; word-break:break-word; }
   .snap-sample .tok { color:var(--muted); font-size:10px; margin-right:6px; }
 
+  /* Events view */
+  #events-view { display:flex; flex-direction:column; gap:6px; max-width:980px; }
+  .ev-row { border-radius:5px; overflow:hidden; border:1px solid #333;
+            background:rgba(255,255,255,0.02); display:flex; flex-direction:column; }
+  .ev-row.sev-info  { border-color:#3a4a6a; }
+  .ev-row.sev-warn  { border-color:#7a6a2d; }
+  .ev-row.sev-error { border-color:#7a2d2d; }
+  .ev-row .ev-top { display:flex; gap:10px; align-items:center; padding:5px 10px;
+                    font-size:11px; font-family:var(--font-mono); }
+  .ev-badge { padding:1px 7px; border-radius:9px; font-size:10px; font-weight:700;
+              letter-spacing:0.5px; text-transform:uppercase; }
+  .ev-badge.sev-info  { background:#1e3a5f; color:#cfe; }
+  .ev-badge.sev-warn  { background:#5f4a1e; color:#fed; }
+  .ev-badge.sev-error { background:#5f1e1e; color:#fcc; }
+  .ev-row .ev-kind { color:#cdf; font-weight:600; }
+  .ev-row .ev-where { color:var(--muted); margin-left:auto; }
+  .ev-row .ev-msg { padding:4px 12px 7px; font-size:12px; color:#ddd;
+                    font-family:var(--font-mono); line-height:1.5; }
+  .ev-row pre.ev-extra { margin:0 12px 8px; padding:6px 9px; background:rgba(0,0,0,0.3);
+                         border-radius:3px; font-size:11px; line-height:1.45;
+                         white-space:pre-wrap; word-break:break-word; color:#aab; }
+  .ev-empty { color:var(--muted); padding:20px; text-align:center; font-size:12px; }
+  .ev-summary { background:var(--card2); border-radius:5px; padding:7px 12px;
+                font-size:11px; color:var(--muted); display:flex; gap:14px; flex-wrap:wrap; }
+  .ev-summary b { color:#fff; }
+
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-thumb { background:#333; border-radius:3px; }
 </style>
@@ -257,6 +319,7 @@ _HTML = r"""<!DOCTYPE html>
 <div id="sidebar">
   <div id="sidebar-title">MARLLLM Traces</div>
   <div id="exp-list"><div style="padding:14px;color:var(--muted);font-size:11px">Loading…</div></div>
+  <div id="sidebar-resizer" title="Drag to resize"></div>
 </div>
 
 <div id="main">
@@ -274,6 +337,7 @@ _HTML = r"""<!DOCTYPE html>
     <label>View</label>
     <button class="tb-btn"        id="btn-forum"   onclick="setMode('forum')">Forum</button>
     <button class="tb-btn"        id="btn-env"     onclick="setMode('env')">Env log</button>
+    <button class="tb-btn"        id="btn-events"  onclick="setMode('events')">Events</button>
     <button class="tb-btn"        id="btn-context" onclick="setMode('context')">Context</button>
     <div id="thread-tabs"></div>
     <div id="agent-tabs"></div>
@@ -320,7 +384,16 @@ let metricsRows=[], metricsGroups=null;   // pre-sorted, cached
 let metricsVisible=false;
 let chartSize = parseInt(localStorage.getItem('mvChartSize') || '240', 10);
 let exIndex = { iters:[], ckpts:[], snaps:[] };
-let traceCache = new Map();   // key → payload
+// Caches survive experiment switches so flipping back to a previous run is
+// instant. Keys include the experiment name.
+let traceCache   = new Map();   // exp:source:name → payload
+let indexCache   = new Map();   // exp → index
+let metricsCache = new Map();   // exp → {rows, groups}
+// Monotonic request id — every selectExp/loadTrace bumps it; in-flight
+// fetches whose id no longer matches are discarded so a slow response from
+// the previous run can't clobber the current view (the source of the
+// "error flashes then disappears" behaviour).
+let reqId = 0;
 
 document.getElementById('chart-size').value = chartSize;
 document.getElementById('chart-size').oninput = function() {
@@ -330,10 +403,27 @@ document.getElementById('chart-size').oninput = function() {
 };
 
 // ── API ───────────────────────────────────────────────────────────────────────
-async function api(path) {
-  const r = await fetch(path);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+// Retry transparently on 503 (server hit a partial-write while reading) and
+// on transient network errors — these are the "random errors" that appear
+// when training is actively flushing trace files.
+async function api(path, {retries=3, backoffMs=120} = {}) {
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const r = await fetch(path);
+      if (r.status === 503 && attempt < retries) {
+        await new Promise(res => setTimeout(res, backoffMs * (attempt+1)));
+        continue;
+      }
+      if (!r.ok) throw new Error(await r.text());
+      return await r.json();
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= retries) throw e;
+      await new Promise(res => setTimeout(res, backoffMs * (attempt+1)));
+    }
+  }
+  throw lastErr;
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
@@ -363,16 +453,38 @@ async function loadExperiments() {
 async function selectExp(name, el) {
   document.querySelectorAll('.exp-item').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
+  const myReq = ++reqId;
   currentExp=name; currentTrace=null; currentSnapshot=null;
-  metricsRows=[]; metricsGroups=null; traceCache.clear();
 
-  const [idx, metricsResp] = await Promise.all([
-    api('/api/index?exp='+encodeURIComponent(name)),
-    api('/api/metrics?exp='+encodeURIComponent(name)),
-  ]);
+  // Reuse cached index/metrics for instant switch-back; otherwise fetch
+  // (in parallel) and fill the caches.
+  const idxPromise = indexCache.has(name)
+    ? Promise.resolve(indexCache.get(name))
+    : api('/api/index?exp='+encodeURIComponent(name)).then(d => { indexCache.set(name, d); return d; });
+  const metricsPromise = metricsCache.has(name)
+    ? Promise.resolve(metricsCache.get(name))
+    : api('/api/metrics?exp='+encodeURIComponent(name)).then(d => {
+        const cached = {rows: d.rows, groups: buildChartGroups(d.rows)};
+        metricsCache.set(name, cached); return cached;
+      });
+
+  document.getElementById('content').innerHTML =
+    '<div style="padding:40px;color:var(--muted);text-align:center;font-size:12px">Loading…</div>';
+
+  let idx, metricsBundle;
+  try {
+    [idx, metricsBundle] = await Promise.all([idxPromise, metricsPromise]);
+  } catch (e) {
+    if (myReq !== reqId) return;
+    document.getElementById('content').innerHTML =
+      '<div style="padding:40px;color:#c44;font-size:12px">Error: '+esc(e.message)+'</div>';
+    return;
+  }
+  if (myReq !== reqId) return;   // user switched runs mid-fetch — discard.
+
   exIndex = idx;
-  metricsRows = metricsResp.rows;
-  metricsGroups = buildChartGroups(metricsRows);
+  metricsRows  = metricsBundle.rows;
+  metricsGroups = metricsBundle.groups;
   if (metricsVisible) renderMetrics();
 
   populateIterSelect();
@@ -422,24 +534,28 @@ function loadCurrent(name){
 // ── Trace loading (training rollout / checkpoint trace) ───────────────────────
 async function loadTrace(name) {
   currentTrace=null; currentSnapshot=null;
-  const cacheKey = currentSource+':'+name;
+  const myReq = ++reqId;
+  const reqExp = currentExp, reqSource = currentSource;
+  const cacheKey = reqExp+':'+reqSource+':'+name;
   document.getElementById('content').innerHTML =
     '<div style="padding:40px;color:var(--muted);text-align:center;font-size:12px">Loading…</div>';
   try {
     let data = traceCache.get(cacheKey);
     if (!data) {
-      const url = currentSource==='ckpt'
-        ? '/api/ckpt_trace?exp='+encodeURIComponent(currentExp)+'&ckpt='+encodeURIComponent(name)
-        : '/api/trace?exp='+encodeURIComponent(currentExp)+'&trace='+encodeURIComponent(name);
+      const url = reqSource==='ckpt'
+        ? '/api/ckpt_trace?exp='+encodeURIComponent(reqExp)+'&ckpt='+encodeURIComponent(name)
+        : '/api/trace?exp='+encodeURIComponent(reqExp)+'&trace='+encodeURIComponent(name);
       data = await api(url);
       traceCache.set(cacheKey, data);
     }
+    if (myReq !== reqId) return;   // stale — user moved on
     currentTrace = data;
     currentEpisode = 0;
 
     const isForum = data.format === 'forum';
     document.getElementById('btn-forum').style.display   = isForum ? 'inline-block' : 'none';
     document.getElementById('btn-env').style.display     = isForum ? 'none' : 'inline-block';
+    document.getElementById('btn-events').style.display  = 'inline-block';
     document.getElementById('btn-context').style.display = 'inline-block';
     if (isForum) currentMode = 'forum';
     else if (currentMode==='forum') currentMode='env';
@@ -467,8 +583,9 @@ async function loadTrace(name) {
     if (metricsVisible) updateMetricsMarker();
     render();
     const meta = data.meta || {};
-    document.getElementById('tb-info').textContent = currentSource+' • '+(meta.label || meta.iteration || name);
+    document.getElementById('tb-info').textContent = reqSource+' • '+(meta.label || meta.iteration || name);
   } catch(e){
+    if (myReq !== reqId) return;
     document.getElementById('content').innerHTML =
       '<div style="padding:40px;color:#c44;font-size:12px">Error: '+esc(e.message)+'</div>';
   }
@@ -476,18 +593,22 @@ async function loadTrace(name) {
 
 async function loadSnapshot(name) {
   currentTrace=null; currentSnapshot=null;
-  const cacheKey = 'snap:'+name;
+  const myReq = ++reqId;
+  const reqExp = currentExp;
+  const cacheKey = reqExp+':snap:'+name;
   document.getElementById('content').innerHTML =
     '<div style="padding:40px;color:var(--muted);text-align:center;font-size:12px">Loading…</div>';
   try {
     let data = traceCache.get(cacheKey);
     if (!data) {
-      data = await api('/api/snapshot?exp='+encodeURIComponent(currentExp)+'&iter='+encodeURIComponent(name));
+      data = await api('/api/snapshot?exp='+encodeURIComponent(reqExp)+'&iter='+encodeURIComponent(name));
       traceCache.set(cacheKey, data);
     }
+    if (myReq !== reqId) return;
     currentSnapshot = data;
     document.getElementById('btn-forum').style.display='none';
     document.getElementById('btn-env').style.display='none';
+    document.getElementById('btn-events').style.display='none';
     document.getElementById('btn-context').style.display='none';
     document.getElementById('agent-tabs').style.display='none';
     document.getElementById('ep-wrap').style.display='none';
@@ -500,6 +621,7 @@ async function loadSnapshot(name) {
     renderSnapshot();
     document.getElementById('tb-info').textContent = 'snapshot • iter '+(data.iteration ?? name);
   } catch(e){
+    if (myReq !== reqId) return;
     document.getElementById('content').innerHTML =
       '<div style="padding:40px;color:#c44;font-size:12px">Error: '+esc(e.message)+'</div>';
   }
@@ -830,7 +952,7 @@ function setupChartEvents(canvas, group, traceIters) {
 // ── Mode/agent/thread tabs ────────────────────────────────────────────────────
 function setMode(m) { currentMode=m; refreshModeButtons(); render(); }
 function refreshModeButtons() {
-  ['forum','env','context'].forEach(id => {
+  ['forum','env','events','context'].forEach(id => {
     const el = document.getElementById('btn-'+id);
     if (el) el.classList.toggle('active', id===currentMode);
   });
@@ -953,6 +1075,73 @@ function renderForumView(trace) {
   return html;
 }
 
+function collectEvents(trace) {
+  // Forum traces store events per-episode; non-forum traces (legacy) may
+  // surface them at the top level.
+  if (trace.format === 'forum') {
+    const ep = currentEpisodeData();
+    return ep ? (ep.events || []) : [];
+  }
+  return trace.events || trace.environment_events || [];
+}
+
+const _EVENT_EXTRA_KEYS = new Set(['post_index','speaker','kind','severity','message']);
+
+function renderEvents(trace) {
+  const events = collectEvents(trace);
+  let html = renderMeta(trace.meta);
+  html += '<div class="section-hdr">Events</div>';
+  // Severity tally so the user can spot whether the run had any errors
+  // without scrolling.
+  const counts = {info:0, warn:0, error:0};
+  events.forEach(ev => {
+    const s = (ev.severity || 'info').toLowerCase();
+    if (counts[s] == null) counts[s] = 0;
+    counts[s] += 1;
+  });
+  html += '<div class="ev-summary">'
+        + '<span><b>'+events.length+'</b> total</span>'
+        + '<span style="color:#fcc">errors <b>'+counts.error+'</b></span>'
+        + '<span style="color:#fed">warns <b>'+counts.warn+'</b></span>'
+        + '<span style="color:#cfe">info <b>'+counts.info+'</b></span>'
+        + '</div>';
+  if (!events.length) {
+    return html + '<div class="ev-empty">No events recorded for this episode.</div>';
+  }
+  html += '<div id="events-view">';
+  events.forEach((ev, i) => {
+    const sev = (ev.severity || 'info').toLowerCase();
+    const where = [];
+    if (ev.post_index != null) where.push('post #'+esc(ev.post_index));
+    if (ev.speaker) where.push(esc(ev.speaker));
+    const extras = {};
+    Object.entries(ev).forEach(([k,v]) => {
+      if (!_EVENT_EXTRA_KEYS.has(k)) extras[k] = v;
+    });
+    let extraHtml = '';
+    if (Object.keys(extras).length) {
+      // Render scalar extras inline, longer/string ones as a <pre>.
+      const lines = [];
+      Object.entries(extras).forEach(([k,v]) => {
+        const s = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+        lines.push(k + ': ' + s);
+      });
+      extraHtml = '<pre class="ev-extra">'+esc(lines.join('\n'))+'</pre>';
+    }
+    html += '<div class="ev-row sev-'+sev+'">'
+          + '<div class="ev-top">'
+          +   '<span class="ev-badge sev-'+sev+'">'+esc(sev)+'</span>'
+          +   '<span class="ev-kind">'+esc(ev.kind || '?')+'</span>'
+          +   '<span class="ev-where">'+(where.join(' • ') || ('#'+i))+'</span>'
+          + '</div>'
+          + '<div class="ev-msg">'+esc(ev.message || '')+'</div>'
+          + extraHtml
+          + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function renderContextAnnotated(turns) {
   let html='';
   turns.forEach(t => {
@@ -978,6 +1167,7 @@ function render() {
   const content = document.getElementById('content');
   if (currentMode==='forum')   { content.innerHTML = renderForumView(currentTrace); return; }
   if (currentMode==='env')     { content.innerHTML = renderEnvLog(currentTrace);    return; }
+  if (currentMode==='events')  { content.innerHTML = renderEvents(currentTrace);    return; }
 
   let contextSource;
   if (currentTrace.format==='forum') {
@@ -1036,6 +1226,47 @@ function renderSnapshot() {
   content.innerHTML = html;
 }
 
+// ── Sidebar resize ───────────────────────────────────────────────────────────
+(function setupSidebarResize() {
+  const sidebar = document.getElementById('sidebar');
+  const handle  = document.getElementById('sidebar-resizer');
+  const stored = parseInt(localStorage.getItem('mvSidebarWidth') || '0', 10);
+  if (stored && stored >= 160 && stored <= 1200) sidebar.style.width = stored + 'px';
+
+  let dragging = false, startX = 0, startW = 0;
+  handle.addEventListener('mousedown', e => {
+    dragging = true; startX = e.clientX; startW = sidebar.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing-sidebar');
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const w = Math.min(Math.max(startW + (e.clientX - startX), 160), window.innerWidth - 200);
+    sidebar.style.width = w + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.classList.remove('resizing-sidebar');
+    localStorage.setItem('mvSidebarWidth', String(parseInt(sidebar.style.width, 10) || 260));
+  });
+  // Double-click handle to autofit to the longest experiment name.
+  handle.addEventListener('dblclick', () => {
+    const items = document.querySelectorAll('.exp-item');
+    let max = 200;
+    items.forEach(el => {
+      const prev = el.style.whiteSpace; el.style.whiteSpace = 'nowrap';
+      max = Math.max(max, el.scrollWidth + 28);
+      el.style.whiteSpace = prev;
+    });
+    const w = Math.min(max, window.innerWidth - 200);
+    sidebar.style.width = w + 'px';
+    localStorage.setItem('mvSidebarWidth', String(w));
+  });
+})();
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadExperiments();
 </script>
@@ -1050,7 +1281,17 @@ class Handler(BaseHTTPRequestHandler):
     root: Path = Path("runs/cultural_emergence")
 
     def log_message(self, fmt, *args):
-        pass
+        # Print every request to the terminal so the operator can see
+        # client connects, which trace/snapshot was fetched, and any
+        # errors as they happen.
+        ts = self.log_date_time_string()
+        client = self.address_string()
+        print(f"[{ts}] {client} {fmt % args}", flush=True)
+
+    def log_error(self, fmt, *args):
+        ts = self.log_date_time_string()
+        client = self.address_string()
+        print(f"[{ts}] {client} ERROR {fmt % args}", flush=True)
 
     def _respond(self, code, ctype, body):
         self.send_response(code)
@@ -1106,8 +1347,10 @@ class Handler(BaseHTTPRequestHandler):
             json_path = self.root / exp / "traces" / f"{trace}.json"
             txt_path  = self.root / exp / "traces" / f"{trace}.txt"
             if json_path.exists():
-                with open(json_path) as f:
-                    data = json.load(f)
+                try:
+                    data = _load_json_resilient(json_path)
+                except json.JSONDecodeError:
+                    self._error(503, "Trace file mid-write; retry"); return
                 if isinstance(data, list):
                     payload = _convert_forum_records(data, trace)
                     payload["meta"]["iteration"] = _iter_num(trace)
@@ -1133,8 +1376,10 @@ class Handler(BaseHTTPRequestHandler):
             json_path = ckpt_dir / "traces.json"
             txt_path  = ckpt_dir / "traces.txt"
             if json_path.exists():
-                with open(json_path) as f:
-                    data = json.load(f)
+                try:
+                    data = _load_json_resilient(json_path)
+                except json.JSONDecodeError:
+                    self._error(503, "Checkpoint trace mid-write; retry"); return
                 if isinstance(data, list):
                     payload = _convert_forum_records(data, ckpt)
                     payload["meta"]["iteration"] = _iter_num(ckpt)
@@ -1159,8 +1404,10 @@ class Handler(BaseHTTPRequestHandler):
             snap_path = self.root / exp / "snapshots" / f"{it}.json"
             if not snap_path.exists():
                 self._error(404, "Snapshot not found"); return
-            with open(snap_path) as f:
-                data = json.load(f)
+            try:
+                data = _load_json_resilient(snap_path)
+            except json.JSONDecodeError:
+                self._error(503, "Snapshot mid-write; retry"); return
             agents = data.get("agents", {}) or {}
             agents_order = list(agents.keys())
             thread_set: list[str] = []
@@ -1219,6 +1466,7 @@ def main() -> None:
     print("Ctrl-C to stop.")
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    print(f"Ready — request log follows.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

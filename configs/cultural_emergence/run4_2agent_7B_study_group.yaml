@@ -34,9 +34,10 @@ snapshot_samples_per_context: 8
 snapshot_max_new_tokens: 384
 max_episode_tokens: 16384
 environments:
-- name: study_group
+- name: study_group_ashbourne
   type: forum
-  scenario: study_group
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne
   token_budget: 384
   character_set: canonical_2
   max_posts: 12

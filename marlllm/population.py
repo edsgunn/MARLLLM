@@ -330,32 +330,66 @@ class PopulationTrainer:
             dist.all_reduce(p.grad, op=dist.ReduceOp.AVG)
 
     def _ddp_reduce_metrics(self, metrics: dict[str, float]) -> dict[str, float]:
-        """Average scalar metrics across ranks. Sums episode counts."""
+        """Average scalar metrics across ranks. Sums episode counts.
+
+        With multi-env mixtures, different ranks may emit different env-tagged
+        keys in the same iter (rank 0 might sample only env A while rank 1
+        samples both A and B). We must therefore reduce over the *union* of
+        keys across ranks, not each rank's local set, otherwise the per-rank
+        tensors have mismatched sizes and ``dist.all_reduce`` hangs forever.
+        """
         import torch.distributed as dist
-        if not self.ddp or not metrics:
+        if not self.ddp:
             return metrics
         # Sums for things that should aggregate, averages for everything else.
         SUM_KEYS_PREFIX = ("rollout/gen_tokens", "rollout/gen_calls", "n_episodes",
                             "unique_pairings", "env_episodes/")
-        keys = sorted(metrics.keys())
-        # Pack into one tensor per reduction op for efficiency.
         def _is_sum_key(k: str) -> bool:
             if any(k.startswith(p) for p in SUM_KEYS_PREFIX):
                 return True
             # Tool-use raw counts sum across ranks; per-episode rates average.
             return k.startswith("tool/") and k.endswith("_total")
-        sum_keys = [k for k in keys if _is_sum_key(k)]
-        avg_keys = [k for k in keys if k not in sum_keys and isinstance(metrics[k], (int, float))]
+
+        # Gather the set of metric keys present on each rank, then take the
+        # union so every rank packs tensors of the same size in the same order.
+        local_keys = {k for k, v in metrics.items() if isinstance(v, (int, float))}
+        gathered: list[set[str] | None] = [None] * self.ddp_world_size
+        dist.all_gather_object(gathered, local_keys)
+        all_keys = sorted(set().union(*(g or set() for g in gathered)))
+        if not all_keys:
+            return metrics
+
+        sum_keys = [k for k in all_keys if _is_sum_key(k)]
+        avg_keys = [k for k in all_keys if k not in sum_keys]
+
         if sum_keys:
-            t = torch.tensor([float(metrics[k]) for k in sum_keys], device="cuda")
+            # Missing-on-this-rank → contribute 0 to the sum.
+            t = torch.tensor(
+                [float(metrics.get(k, 0.0)) for k in sum_keys], device="cuda"
+            )
             dist.all_reduce(t, op=dist.ReduceOp.SUM)
             for k, v in zip(sum_keys, t.cpu().tolist()):
                 metrics[k] = v
+
         if avg_keys:
-            t = torch.tensor([float(metrics[k]) for k in avg_keys], device="cuda")
-            dist.all_reduce(t, op=dist.ReduceOp.AVG)
-            for k, v in zip(avg_keys, t.cpu().tolist()):
-                metrics[k] = v
+            # Average over the ranks that actually emitted each key, not over
+            # all ranks: SUM the values (0 for missing) and SUM a presence
+            # mask, then divide. Otherwise a key absent on some ranks would
+            # be averaged against implicit 0s and biased toward zero.
+            vals = torch.tensor(
+                [float(metrics.get(k, 0.0)) for k in avg_keys], device="cuda"
+            )
+            mask = torch.tensor(
+                [1.0 if k in metrics else 0.0 for k in avg_keys], device="cuda"
+            )
+            dist.all_reduce(vals, op=dist.ReduceOp.SUM)
+            dist.all_reduce(mask, op=dist.ReduceOp.SUM)
+            counts = mask.clamp_min(1.0)  # avoid div-by-zero
+            avgs = (vals / counts).cpu().tolist()
+            present = mask.cpu().tolist()
+            for k, v, p in zip(avg_keys, avgs, present):
+                if p > 0.0:
+                    metrics[k] = v
         return metrics
 
     @property
@@ -376,9 +410,14 @@ class PopulationTrainer:
         for raw in raw_episodes:
             history, _info, _pairing, _pids, env_name, _ctx, _trace = raw
             env_t = env_by_name.get(env_name)
-            thinking_enabled = bool(getattr(env_t, "_thinking_enabled", False))
-            open_tag = getattr(env_t, "_thinking_open_tag", "<think>")
-            close_tag = getattr(env_t, "_thinking_close_tag", "</think>")
+            # Forum env decomposes the action into thinking / post / python
+            # regions via <post>...</post> and <python>...</python> tags.
+            # Other envs lack these attributes — the get-with-default makes
+            # the decomposition gracefully no-op for them (everything counts
+            # as post).
+            post_open = getattr(env_t, "_post_open_tag", None)
+            post_close = getattr(env_t, "_post_close_tag", None)
+            tag_extraction = bool(post_open and post_close)
             post_budget = int(getattr(env_t, "_post_token_budget", 0) or 0)
             total_budget = int(getattr(env_t, "_total_token_budget", 0) or 0)
             a = agg.setdefault(env_name, {
@@ -404,24 +443,32 @@ class PopulationTrainer:
                 text = self.tokeniser.decode_action(ids)
                 thinking_tokens = 0
                 unclosed = False
-                if thinking_enabled and open_tag in text:
-                    j = text.find(open_tag)
-                    k_close = text.find(close_tag, j + len(open_tag))
-                    if k_close < 0:
-                        unclosed = True
-                        thinking_text = text[j:]
-                        post_text = text[:j]
-                    else:
-                        thinking_text = text[j:k_close + len(close_tag)]
-                        post_text = text[:j] + text[k_close + len(close_tag):]
-                    thinking_tokens = (
-                        len(self.tokeniser.encode_observation(thinking_text))
-                        if thinking_text else 0
-                    )
+                if tag_extraction:
+                    # Extract <post> blocks; everything else (including
+                    # <python> code and stray text) is non-post. We don't
+                    # split python out separately here — its share shows
+                    # up in (n_act - post_tokens) along with thinking.
+                    post_chunks: list[str] = []
+                    i = 0
+                    n_post_blocks = 0
+                    while i < len(text):
+                        j = text.find(post_open, i)
+                        if j < 0:
+                            break
+                        k = text.find(post_close, j + len(post_open))
+                        if k < 0:
+                            unclosed = True
+                            post_chunks.append(text[j + len(post_open):])
+                            break
+                        post_chunks.append(text[j + len(post_open):k])
+                        n_post_blocks += 1
+                        i = k + len(post_close)
+                    post_text = "\n\n".join(c.strip() for c in post_chunks).strip()
                     post_tokens = (
-                        len(self.tokeniser.encode_observation(post_text.strip()))
-                        if post_text.strip() else 0
+                        len(self.tokeniser.encode_observation(post_text))
+                        if post_text else 0
                     )
+                    thinking_tokens = max(0, n_act - post_tokens)
                 else:
                     post_tokens = n_act
                 a["n_actions"] += 1
@@ -430,7 +477,7 @@ class PopulationTrainer:
                 a["sum_post_tokens"] += post_tokens
                 if n_act > a["max_action_tokens"]:
                     a["max_action_tokens"] = n_act
-                if thinking_enabled and thinking_tokens > 0:
+                if tag_extraction and thinking_tokens > 0:
                     a["n_thinking_present"] += 1
                 if unclosed:
                     a["n_unclosed_thinking"] += 1
@@ -563,26 +610,45 @@ class PopulationTrainer:
                         mb_types     = mb_types[:, :actual_len]
                         mb_agents    = mb_agents[:, :actual_len]
 
-                    last_hidden, values = agent.evaluate_hidden(mb_input_ids, mb_attn)
-                    last_hidden_ref = agent.evaluate_hidden_ref(mb_input_ids, mb_attn)
                     agent_idx = self.agent_index[pop_name]
-
-                    loss_val, metrics = self.loss.compute_loss(
-                        last_hidden=last_hidden,
-                        lm_head=agent.lm_head,
-                        values=values,
-                        input_ids=mb_input_ids,
-                        token_type_mask=mb_types,
-                        agent_id_mask=mb_agents,
-                        target_agent_idx=agent_idx,
-                        config=self.config,
-                        last_hidden_ref=last_hidden_ref,
-                        lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
-                    )
-
                     scale = 1.0 / (num_micros * len(self.population))
-                    (loss_val * scale).backward()
-                    total_loss_scalar += loss_val.item() / num_micros
+
+                    if self.config.seq_chunk_size is not None and self.config.seq_chunk_size > 0:
+                        # Sequence-chunked path: do per-chunk forward+backward
+                        # internally so the chunk's autograd graph can be freed
+                        # before the next chunk forwards. Trades extra compute
+                        # (one no-grad streaming pass first) for ~T/chunk_size
+                        # less peak activation memory.
+                        loss_scalar, metrics = self.loss.compute_loss_chunked(
+                            agent=agent,
+                            input_ids=mb_input_ids,
+                            attention_mask=mb_attn,
+                            token_type_mask=mb_types,
+                            agent_id_mask=mb_agents,
+                            target_agent_idx=agent_idx,
+                            config=self.config,
+                            backward_scale=scale,
+                        )
+                        total_loss_scalar += loss_scalar / num_micros
+                    else:
+                        last_hidden, values = agent.evaluate_hidden(mb_input_ids, mb_attn)
+                        last_hidden_ref = agent.evaluate_hidden_ref(mb_input_ids, mb_attn)
+
+                        loss_val, metrics = self.loss.compute_loss(
+                            last_hidden=last_hidden,
+                            lm_head=agent.lm_head,
+                            values=values,
+                            input_ids=mb_input_ids,
+                            token_type_mask=mb_types,
+                            agent_id_mask=mb_agents,
+                            target_agent_idx=agent_idx,
+                            config=self.config,
+                            last_hidden_ref=last_hidden_ref,
+                            lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
+                        )
+
+                        (loss_val * scale).backward()
+                        total_loss_scalar += loss_val.item() / num_micros
 
                     for k, v in metrics.items():
                         key = f"{pop_name}/{k}"

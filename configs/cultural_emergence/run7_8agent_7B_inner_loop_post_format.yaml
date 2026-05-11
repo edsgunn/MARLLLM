@@ -1,0 +1,80 @@
+# Run 7 — 8-agent Inner Loop on the new <post>/<python> tag format.
+#
+# Format change vs the earlier thinking-tokens runs: instead of <think>
+# being the private region and everything else being the public post,
+# the env now treats *only* tagged blocks as doing anything:
+#   * <post>...</post>      — the public utterance shared with everyone
+#   * <python>...</python>  — code submitted to the pybot tool
+#   * everything else       — private thinking, never shown to anyone
+# The env logs success rates of both tools (post_success / post_missing
+# / post_unclosed / post_empty + python_success / python_runtime_error
+# / python_timeout / python_unclosed) under tool/* in metrics.jsonl.
+name: run7_8agent_7B_inner_loop_post_format
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "12:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+# Memory-tuned for vLLM + DDP co-location on 4 × GH200 (95 GB each):
+#   - lora_modules: q,v only (~5x less LoRA than all-7-projection default)
+#   - use_8bit_adam: bitsandbytes AdamW8bit (halves Adam state)
+#   - vllm_quantization: fp8 (halves vLLM weight memory ~17 GB → ~9 GB)
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Renata Solberg
+- Kai Dempsey
+- Mei-Lin Park
+- Devon Aguirre
+- Yusuf Bashir
+- Cass Yamamoto
+- Henrietta 'Henri' Voss
+- Ravi Krishnamurthy
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 500
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+environments:
+- name: inner_loop
+  type: forum
+  characters: inner_loop
+  environment: inner_loop
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+  # The env always runs in tag-extraction mode now: <post> and <python>
+  # are the only "doing-anything" regions, everything else is private
+  # thinking. Tag defaults are fine, no need to override.
+  python_tool_enabled: true
+  python_timeout_seconds: 5.0
+  python_output_max_chars: 2000
+output_dir: runs/cultural_emergence/run7_8agent_7B_inner_loop_post_format
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50
