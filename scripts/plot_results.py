@@ -18,7 +18,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -190,16 +192,33 @@ def _agent_mean(data: dict, key: str) -> np.ndarray | None:
     return arr.mean(axis=0) if arr is not None else None
 
 
+@functools.lru_cache(maxsize=8)
+def _distinct_palette(n: int) -> tuple:
+    import distinctipy
+    # rng seed pins the palette so colours are stable across runs.
+    return tuple(distinctipy.get_colors(n, rng=0))
+
+
+def _agent_color(i: int, n: int):
+    """Stable per-agent colour. Uses the curated palette for small populations
+    and distinctipy for larger ones so each agent gets a visually distinct
+    colour instead of recycling 8."""
+    if n <= len(_AGENT_COLORS):
+        return _AGENT_COLORS[i % len(_AGENT_COLORS)]
+    return _distinct_palette(n)[i]
+
+
 def _plot_per_agent(ax, iters, agents_arr, agent_names, *, alpha=0.95, lw=1.2):
     """Plot one line per agent on ``ax`` using the shared agent palette.
 
     No legend is created on the axis itself — agent identity is conveyed by
     a single figure-level legend assembled in ``plot_training_curves``.
     """
+    n = len(agents_arr)
     for i, series in enumerate(agents_arr):
         label = agent_names[i] if i < len(agent_names) else f"agent_{i}"
         ax.plot(iters, smooth(series),
-                color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
+                color=_agent_color(i, n),
                 label=label, alpha=alpha, linewidth=lw)
 
 
@@ -217,7 +236,12 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     #   row 3 : KL from reference       | policy entropy           ← paired
     # KL panel is shown even when kl_coef==0 (it just sits at zero); this keeps
     # the layout stable across runs and makes the pairing obvious.
-    fig, axes = plt.subplots(4, 2, figsize=(12, 13.5), squeeze=False,
+    # Scale figure height with agent count so per-agent panels don't get
+    # squashed by a tall legend strip when n_agents is large (e.g. 32).
+    legend_ncol = min(max(n_agents, 1), 16)
+    legend_rows = math.ceil(max(n_agents, 1) / legend_ncol)
+    fig_h = 13.5 + 0.35 * max(legend_rows - 1, 0)
+    fig, axes = plt.subplots(4, 2, figsize=(12, fig_h), squeeze=False,
                              sharex=True)
     fig.suptitle(exp_dir.name, fontsize=12, fontweight="bold", y=0.995)
 
@@ -262,9 +286,12 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
                         alpha=0.12, color="#4C72B0")
         _plot_per_agent(ax, iters, all_returns, agent_names,
                         alpha=0.55, lw=0.9)
-        ax.plot(iters, smooth(mean_ret), color="#222222",
-                linewidth=1.8, label="population mean")
-        ax.legend(loc="best", fontsize=7, frameon=False)
+        mean_line, = ax.plot(iters, smooth(mean_ret), color="#222222",
+                             linewidth=1.8, label="population mean")
+        # Only legend the population-mean handle here — the figure-level
+        # legend at the bottom carries the per-agent identities. Without this
+        # filter, loc="best" picks up all N agent labels and explodes the row.
+        ax.legend(handles=[mean_line], loc="best", fontsize=7, frameon=False)
     ax.set_title("Mean return")
     ax.set_ylabel("return")
 
@@ -315,28 +342,28 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     if n_agents > 0:
         from matplotlib.lines import Line2D
         handles = [
-            Line2D([0], [0], color=_AGENT_COLORS[i % len(_AGENT_COLORS)],
+            Line2D([0], [0], color=_agent_color(i, n_agents),
                    linewidth=2.0,
                    label=agent_names[i] if i < len(agent_names) else f"agent_{i}")
             for i in range(n_agents)
         ]
-        ncol = min(n_agents, 8)
         fig.legend(handles=handles,
                    loc="lower center",
                    bbox_to_anchor=(0.5, -0.005),
-                   ncol=ncol,
+                   ncol=legend_ncol,
                    frameon=True,
                    fancybox=True,
                    framealpha=0.95,
                    borderpad=0.6,
-                   columnspacing=1.6,
-                   handlelength=2.4,
-                   fontsize=9,
+                   columnspacing=1.2,
+                   handlelength=2.0,
+                   fontsize=8 if n_agents > 16 else 9,
                    title="Agents",
                    title_fontsize=9)
-        # Reserve room at the bottom for the legend strip; tight_layout would
-        # otherwise overlap it.
-        fig.tight_layout(rect=[0, 0.035, 1, 0.975])
+        # Reserve room at the bottom for the legend strip; scales with the
+        # number of legend rows so panels don't get squashed.
+        bottom_frac = 0.025 + 0.022 * legend_rows
+        fig.tight_layout(rect=[0, bottom_frac, 1, 0.975])
     else:
         fig.tight_layout(rect=[0, 0, 1, 0.975])
 

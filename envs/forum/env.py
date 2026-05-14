@@ -674,15 +674,30 @@ class ForumEnv(AECEnv):
             return ""
         return self._tok.decode(ids, skip_special_tokens=True)
 
+    # Native-thinking container. The model wraps private reasoning in
+    # <think>...</think> when enable_thinking is on. Any <post>/<python>
+    # text *inside* a think block is just thinking content — it must not
+    # trigger a post or pybot call. We hardcode the literal tags here
+    # because they're a Qwen3-template invariant; if a future model uses
+    # a different reasoning tag, surface this as a constructor arg.
+    _THINK_OPEN  = "<think>"
+    _THINK_CLOSE = "</think>"
+
     def _extract_tagged(
         self, text: str
     ) -> tuple[str, list[str], bool, bool, int]:
         """Partition ``text`` into post / python / thinking regions.
 
-        Walks the string left-to-right.  At each position, finds the
-        nearest ``<post>`` or ``<python>`` open tag and extracts up to
-        its matching close tag.  Anything between blocks is treated as
-        private thinking and discarded.
+        Only **outermost** tags are functional. The parser walks the
+        string left-to-right at depth 0 and, at each step, picks the
+        earliest open tag among ``<think>``, ``<post>``, ``<python>``.
+        Whichever it finds, the parser jumps to that tag's matching close
+        (or end-of-string if unclosed) without rescanning the interior
+        for nested tags. So a ``<post>`` written inside a ``<think>``
+        block is just text and does not accidentally start a post; a
+        ``<python>`` inside a ``<post>`` is part of the post's content;
+        a stray nested ``<post>`` inside an already-open ``<post>`` is
+        absorbed by the first ``</post>`` (existing behaviour).
 
         Returns ``(public_post, code_blocks, post_unclosed, python_unclosed,
         n_post_blocks)``:
@@ -698,6 +713,7 @@ class ForumEnv(AECEnv):
         """
         po, pc = self._post_open_tag, self._post_close_tag
         yo, yc = self._python_open_tag, self._python_close_tag
+        to, tc = self._THINK_OPEN, self._THINK_CLOSE
         py_active = self._python_tool_enabled
         posts: list[str] = []
         codes: list[str] = []
@@ -708,24 +724,42 @@ class ForumEnv(AECEnv):
         while i < len(text):
             jp = text.find(po, i) if po else -1
             jy = text.find(yo, i) if (yo and py_active) else -1
-            if jp < 0 and jy < 0:
+            jt = text.find(to, i) if to else -1
+            # Pick the earliest open tag at depth 0. -1 means "not found"
+            # — sort by (found?, position) so missing tags never win.
+            candidates = [
+                (jp, "post"),
+                (jy, "python"),
+                (jt, "think"),
+            ]
+            candidates = [(pos, kind) for pos, kind in candidates if pos >= 0]
+            if not candidates:
                 break
-            if jp >= 0 and (jy < 0 or jp < jy):
-                k = text.find(pc, jp + len(po))
+            pos, kind = min(candidates, key=lambda pk: pk[0])
+            if kind == "post":
+                k = text.find(pc, pos + len(po))
                 if k < 0:
                     post_unclosed = True
-                    posts.append(text[jp + len(po):])
+                    posts.append(text[pos + len(po):])
                     break
-                posts.append(text[jp + len(po):k])
+                posts.append(text[pos + len(po):k])
                 n_closed_posts += 1
                 i = k + len(pc)
-            else:
-                k = text.find(yc, jy + len(yo))
+            elif kind == "python":
+                k = text.find(yc, pos + len(yo))
                 if k < 0:
                     python_unclosed = True
                     break
-                codes.append(text[jy + len(yo):k])
+                codes.append(text[pos + len(yo):k])
                 i = k + len(yc)
+            else:  # think — skip the whole region without rescanning
+                k = text.find(tc, pos + len(to))
+                if k < 0:
+                    # Truncated mid-think (budget cut off, or model never
+                    # closed). Discard the tail; do not look for nested
+                    # post/python inside it.
+                    break
+                i = k + len(tc)
         public = "\n\n".join(p.strip() for p in posts).strip()
         return public, codes, post_unclosed, python_unclosed, n_closed_posts
 

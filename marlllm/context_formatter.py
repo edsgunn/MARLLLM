@@ -27,9 +27,16 @@ detection is unaffected.
 
 Supported formats
 -----------------
-ChatMLFormatter   : Qwen2, Qwen2.5, SmolLM2, and any model whose chat_template
-                    contains the string "im_start".
+ChatMLFormatter   : Qwen2, Qwen2.5, Qwen3.x, SmolLM2, and any model whose
+                    chat_template contains the string "im_start".
                     Uses  <|im_start|>system / user / assistant  markers.
+                    When the chat template references ``enable_thinking``
+                    (Qwen3.x native CoT), the assistant primer is extended
+                    with an opening ``<think>\\n`` so generation starts
+                    in-distribution. The injected primer tokens stay on
+                    the OBS side of the OBS/ACT boundary — they were not
+                    sampled by the agent. The matching ``</think>`` is
+                    sampled and lives in ACT as normal.
 
 Llama3Formatter   : Llama 3.x and any model whose chat_template contains
                     "start_header_id".
@@ -72,7 +79,7 @@ class ContextFormatter:
 
 class ChatMLFormatter(ContextFormatter):
     """
-    ChatML format used by Qwen2, Qwen2.5, SmolLM2-Instruct, and others.
+    ChatML format used by Qwen2, Qwen2.5, Qwen3.x, SmolLM2-Instruct, and others.
 
     Context structure produced::
 
@@ -84,16 +91,32 @@ class ChatMLFormatter(ContextFormatter):
         {action tokens}
         <|im_start|>user
         {next observation} ...
+
+    Native thinking
+    ---------------
+    When ``enable_thinking=True`` (Qwen3-style native CoT), an opening
+    ``<think>\\n`` is appended to the assistant primer so the model starts
+    inside its trained thinking distribution. The injection lives on the
+    OBS side of the OBS/ACT boundary (it's part of ``wrap_observation``'s
+    output, like ``<|im_start|>assistant\\n`` itself) — these tokens were
+    not sampled by the agent and therefore must not receive policy
+    gradient. The closing ``</think>`` is sampled by the model and stays
+    on the ACT side. ``marlllm.thinking.strip_thinking`` handles both
+    closed and truncated-open blocks before routing the action to the env.
     """
 
     name: str = "chatml"
 
-    def __init__(self, tokenizer) -> None:
+    def __init__(self, tokenizer, *, enable_thinking: bool = False) -> None:
         enc = lambda s: tokenizer.encode(s, add_special_tokens=False)
+        self.enable_thinking = enable_thinking
         self._sys_prefix   = enc("<|im_start|>system\n")
         self._sys_suffix   = enc("<|im_end|>\n")
         self._user_prefix  = enc("<|im_start|>user\n")
-        self._user_suffix  = enc("<|im_end|>\n<|im_start|>assistant\n")
+        assistant_primer = "<|im_end|>\n<|im_start|>assistant\n"
+        if enable_thinking:
+            assistant_primer += "<think>\n"
+        self._user_suffix  = enc(assistant_primer)
         # End-of-turn marker for the assistant turn. Single token in vocab.
         im_end = enc("<|im_end|>")
         self._im_end_id = im_end[0] if len(im_end) == 1 else None
@@ -166,6 +189,15 @@ _REGISTRY: dict[str, type[ContextFormatter]] = {
 }
 
 
+def _detect_native_thinking(tokenizer) -> bool:
+    """Return True if the tokenizer's chat template carries Qwen3-style
+    native thinking (i.e. references an ``enable_thinking`` variable and
+    emits a ``<think>`` opener). Used by the ``"auto"`` path so Qwen3.x
+    runs get the thinking primer without any config change."""
+    template = getattr(tokenizer, "chat_template", "") or ""
+    return "enable_thinking" in template and "<think>" in template
+
+
 def make_formatter(tokenizer, name: str = "auto") -> ContextFormatter:
     """
     Return a ContextFormatter for *tokenizer*.
@@ -176,21 +208,31 @@ def make_formatter(tokenizer, name: str = "auto") -> ContextFormatter:
         A HuggingFace tokenizer.  Used for auto-detection and for encoding
         the special-token strings in the concrete formatters.
     name:
-        One of ``"auto"`` (default), ``"none"``, ``"chatml"``, ``"llama3"``.
-        ``"auto"`` inspects ``tokenizer.chat_template`` to pick the right class.
+        One of ``"auto"`` (default), ``"none"``, ``"chatml"``,
+        ``"chatml-think"``, ``"chatml-nothink"``, ``"llama3"``.
+        ``"auto"`` inspects ``tokenizer.chat_template`` to pick the right
+        class and to decide whether to inject a ``<think>`` opener (Qwen3.x).
+        ``"chatml-think"`` / ``"chatml-nothink"`` force the injection on/off
+        for cases where auto-detection is wrong or undesired.
     """
     if name != "auto":
+        if name == "chatml-think":
+            return ChatMLFormatter(tokenizer, enable_thinking=True)
+        if name == "chatml-nothink":
+            return ChatMLFormatter(tokenizer, enable_thinking=False)
         cls = _REGISTRY.get(name)
         if cls is None:
             raise ValueError(
                 f"Unknown context_formatter {name!r}. "
-                f"Choose from: {list(_REGISTRY)}"
+                f"Choose from: {list(_REGISTRY) + ['chatml-think', 'chatml-nothink']}"
             )
         return cls(tokenizer) if cls is not ContextFormatter else ContextFormatter()
 
     template = getattr(tokenizer, "chat_template", "") or ""
     if "im_start" in template:
-        return ChatMLFormatter(tokenizer)
+        return ChatMLFormatter(
+            tokenizer, enable_thinking=_detect_native_thinking(tokenizer)
+        )
     if "start_header_id" in template:
         return Llama3Formatter(tokenizer)
     return ContextFormatter()

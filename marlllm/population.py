@@ -264,6 +264,20 @@ class PopulationTrainer:
         self.ddp_world_size = ddp_world_size
         self.ddp = ddp_world_size > 1
         self._ddp_params = all_params  # cached for the gradient all-reduce
+        # FSDP shards the backbone across ranks and reduce-scatters gradients
+        # automatically during backward, so the manual all-reduce path must be
+        # bypassed. Detect by checking the first agent's backbone.
+        try:
+            from marlllm.fsdp_utils import is_fsdp
+            first_agent_obj = next(iter(population.values()))
+            self._fsdp = bool(is_fsdp(getattr(first_agent_obj, "_backbone", None)))
+        except Exception:
+            self._fsdp = False
+        if self._fsdp and self.ddp_rank == 0:
+            print(
+                f"[fsdp] Detected FSDP-wrapped backbone; skipping manual grad "
+                f"all-reduce. world_size={self.ddp_world_size}"
+            )
 
         # Chat-template EOS ids: stop generation cleanly on <|im_end|> /
         # <|endoftext|> (or the equivalent for the active model family) so
@@ -328,6 +342,28 @@ class PopulationTrainer:
                 # all-reduce still happens (and contributes 0).
                 p.grad = torch.zeros_like(p)
             dist.all_reduce(p.grad, op=dist.ReduceOp.AVG)
+
+    def _fsdp_all_reduce_value_head_grads(self) -> None:
+        """Average value-head gradients across ranks.
+
+        FSDP reduce-scatters gradients for params it wraps, but the per-agent
+        value heads sit *outside* the wrapped backbone — each rank holds an
+        unsharded replica that would otherwise diverge. Manually average just
+        those grads so the heads stay bit-identical across ranks.
+        """
+        import torch.distributed as dist
+        seen: set[int] = set()
+        for agent in self.population.values():
+            head = getattr(agent, "_value_head", None)
+            if head is None:
+                continue
+            for p in head.parameters():
+                if id(p) in seen:
+                    continue
+                seen.add(id(p))
+                if p.grad is None:
+                    p.grad = torch.zeros_like(p)
+                dist.all_reduce(p.grad, op=dist.ReduceOp.AVG)
 
     def _ddp_reduce_metrics(self, metrics: dict[str, float]) -> dict[str, float]:
         """Average scalar metrics across ranks. Sums episode counts.
@@ -660,7 +696,7 @@ class PopulationTrainer:
 
             # ── 3. Optimizer step ─────────────────────────────────────────
             _t_phase = time.perf_counter()
-            if self.ddp:
+            if self.ddp and not self._fsdp:
                 # Average gradients across ranks before stepping. We don't wrap
                 # in DistributedDataParallel because PEFT swaps the wrapped
                 # forward (adapter switching) and torch.compile + DDP +
@@ -668,7 +704,15 @@ class PopulationTrainer:
                 # the .grad buffers is equivalent, simpler, and easy to reason
                 # about: every rank applies the same averaged gradient and
                 # therefore stays bit-identical in optimizer state.
+                #
+                # FSDP path: skipped — reduce-scatter happens inside backward
+                # and the optimizer steps on the local shard directly.
                 self._ddp_all_reduce_grads()
+            elif self.ddp and self._fsdp:
+                # FSDP handles backbone grads (sharded params) but the
+                # per-agent value heads live outside the wrap and need a
+                # manual cross-rank average to stay in sync.
+                self._fsdp_all_reduce_value_head_grads()
             self.optimizer.step()
             if self.sampling_engine is not None and self._sampling_engine_peft_model is not None:
                 # Push fresh LoRA weights into vLLM so the next rollout
@@ -772,13 +816,20 @@ class PopulationTrainer:
                     self._auto_plot_training_curves()
 
                 if iteration % self.config.checkpoint_every == 0:
-                    self.save_checkpoint(iteration)
                     self._write_checkpoint_traces(iteration, raw_episodes)
                     self._write_behavioral_snapshot(iteration)
                     # Snapshot eval allocates large activation buffers and leaves
                     # the caching allocator fragmented; release before next iter.
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+
+            # FSDP requires every rank to enter the param-gather collective in
+            # save_checkpoint(); call it from all ranks (the helper writes only
+            # on rank 0 under FSDP).
+            if iteration % self.config.checkpoint_every == 0 and (
+                self._fsdp or self.is_main_rank
+            ):
+                self.save_checkpoint(iteration)
 
             # All ranks barrier here so non-main ranks don't race ahead while
             # rank 0 is doing slow snapshot/checkpoint I/O. Without this, rank 0
@@ -787,8 +838,9 @@ class PopulationTrainer:
                 import torch.distributed as dist
                 dist.barrier()
 
-        if self.is_main_rank:
+        if self._fsdp or self.is_main_rank:
             self.save_checkpoint(self.config.num_iterations, tag="final")
+        if self.is_main_rank:
             self._write_checkpoint_traces(self.config.num_iterations, raw_episodes)
             self._write_behavioral_snapshot(self.config.num_iterations)
             self._auto_plot_training_curves()

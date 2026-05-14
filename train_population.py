@@ -269,6 +269,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--vllm-dtype', default='bfloat16', help='Dtype for the vLLM engine (bfloat16 / float16 / auto).')
     p.add_argument('--vllm-quantization', default=None, help="Quantization for vLLM weights (e.g. 'fp8'). Halves weight memory at minor accuracy cost. Default: none.")
     p.add_argument('--use-8bit-adam', action='store_true', help="Use bitsandbytes' AdamW8bit. Halves optimizer state memory at no expressiveness cost.")
+    p.add_argument('--use-fsdp', action='store_true', help='Wrap the shared LoRA backbone with FULL_SHARD FSDP across ranks (single-node multi-GPU). Lets the trainer fit base models that exceed a single GH200 (e.g. Qwen2.5-32B). Requires --lora-shared-base and a launch under torchrun (WORLD_SIZE > 1).')
+    p.add_argument('--fsdp-reduce-dtype', default='float32', help='Gradient reduce dtype for FSDP mixed precision (float32 or bfloat16). float32 (default) is the safer choice for RL-style loss scales.')
     p.add_argument('--iters', type=int, default=500)
     p.add_argument('--rollouts', type=int, default=8, help='Episodes per iteration (drawn from the env mixture).')
     p.add_argument('--lr', type=float, default=3e-05)
@@ -396,6 +398,28 @@ def main() -> None:
         if args.compile:
             print("torch.compile-ing the shared backbone forward (mode='default'). First rollout/loss step will be slow as kernels warm up.")
             peft_model.forward = torch.compile(peft_model.forward, mode='default')
+        if args.use_fsdp and args.gradient_checkpointing:
+            # Enable HF activation checkpointing on the shared backbone before
+            # FSDP wraps it — required for 32B to fit. use_reentrant=False is
+            # the FSDP-compatible mode (reentrant=True breaks FSDP's hooks).
+            print('Enabling gradient checkpointing on the shared backbone (use_reentrant=False).')
+            peft_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': False})
+            if hasattr(peft_model, 'enable_input_require_grads'):
+                peft_model.enable_input_require_grads()
+        if args.use_fsdp:
+            if not ddp:
+                raise ValueError('--use-fsdp requires a torchrun launch with WORLD_SIZE > 1 (FSDP shards across the ranks of the current node).')
+            from marlllm.fsdp_utils import wrap_peft_model_with_fsdp
+            reduce_dtype_map = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'fp32': torch.float32, 'bf16': torch.bfloat16}
+            reduce_dtype = reduce_dtype_map.get(args.fsdp_reduce_dtype, torch.float32)
+            param_dtype = torch_dtype if isinstance(torch_dtype, torch.dtype) else torch.bfloat16
+            # Cast LoRA adapter params (fp32 by default in PEFT) to param_dtype so
+            # FSDP's per-decoder-layer FlatParam can flatten a uniform-dtype group.
+            for p in peft_model.parameters():
+                if p.dtype != param_dtype:
+                    p.data = p.data.to(param_dtype)
+            print(f'Wrapping shared backbone in FULL_SHARD FSDP: param_dtype={param_dtype}, reduce_dtype={reduce_dtype}, world_size={ddp_world_size}')
+            peft_model = wrap_peft_model_with_fsdp(peft_model, local_rank=ddp_local_rank, param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=param_dtype)
         for name, prompt in character_prompts.items():
             prompt_str = prompt[0] if isinstance(prompt, list) else prompt
             population[name] = LoRASharedBaseAgent(agent_id=name, character_prompt=prompt_str, shared_backbone=peft_model, adapter_name=name, tokenizer=tokenizer, device=device, keep_ref_model=keep_ref, compile_rollout=args.compile)

@@ -53,7 +53,13 @@ def _is_independent(agent: Any) -> bool:
 
 
 def extract_agent_state(agent: Any) -> dict[str, Any]:
-    """Build a per-agent checkpoint payload (LoRA-only for shared-base agents)."""
+    """Build a per-agent checkpoint payload (LoRA-only for shared-base agents).
+
+    Under FSDP the backbone parameters are sharded across ranks. Callers
+    must enter ``marlllm.fsdp_utils.summon_full_params(backbone)`` on
+    every rank before invoking this function for FSDP-wrapped agents —
+    ``save_population_checkpoint`` does that automatically.
+    """
     payload: dict[str, Any] = {
         "agent_id": getattr(agent, "_agent_id", None) or getattr(agent, "agent_id", None),
         "value_head": agent._value_head.state_dict(),
@@ -180,47 +186,72 @@ def save_population_checkpoint(
     weight-tied population), only one ``.pt`` is written and ``meta.pt``
     records the slot→object mapping so loading reconstructs both.
     """
+    # FSDP awareness: if any backbone is sharded, all ranks must enter the
+    # summon-full-params collective; only rank 0 writes the .pt files.
+    from marlllm.fsdp_utils import is_fsdp, summon_full_params
+    first_backbone = getattr(next(iter(population.values())), "_backbone", None)
+    fsdp = bool(is_fsdp(first_backbone))
+    if fsdp:
+        import torch.distributed as dist
+        rank = dist.get_rank() if dist.is_initialized() else 0
+    else:
+        rank = 0
+
     ckpt_root = Path(output_dir) / "checkpoints"
     name = (tag if tag is not None else f"iter_{iteration:06d}")
     ckpt_dir = ckpt_root / name
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    if rank == 0:
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     seen: dict[int, str] = {}
     slot_to_object: dict[str, str] = {}
-    for slot, agent in population.items():
-        if id(agent) in seen:
-            slot_to_object[slot] = seen[id(agent)]
-            continue
-        canonical = slot
-        seen[id(agent)] = canonical
-        slot_to_object[slot] = canonical
-        payload = extract_agent_state(agent)
-        torch.save(payload, ckpt_dir / f"{canonical}.pt")
+    with summon_full_params(first_backbone, writeback=False):
+        for slot, agent in population.items():
+            if id(agent) in seen:
+                slot_to_object[slot] = seen[id(agent)]
+                continue
+            canonical = slot
+            seen[id(agent)] = canonical
+            slot_to_object[slot] = canonical
+            payload = extract_agent_state(agent)
+            if rank == 0:
+                torch.save(payload, ckpt_dir / f"{canonical}.pt")
 
-    meta = {
-        "iteration": iteration,
-        "optimizer_state": optimizer.state_dict() if optimizer is not None else None,
-        "rng_state": torch.get_rng_state(),
-        "config": config_dict,
-        "agent_slots": list(population.keys()),
-        "slot_to_object": slot_to_object,
-    }
-    if extra_meta:
-        meta.update(extra_meta)
-    torch.save(meta, ckpt_dir / "meta.pt")
+    if rank == 0:
+        meta = {
+            "iteration": iteration,
+            # Optimizer state under FSDP is sharded per rank; full
+            # consolidation needs FSDP.optim_state_dict and isn't wired up
+            # yet. Skip it under FSDP — resume will start with a fresh
+            # optimizer (model weights still resume cleanly).
+            "optimizer_state": (
+                optimizer.state_dict()
+                if optimizer is not None and not fsdp
+                else None
+            ),
+            "rng_state": torch.get_rng_state(),
+            "config": config_dict,
+            "agent_slots": list(population.keys()),
+            "slot_to_object": slot_to_object,
+            "fsdp": fsdp,
+        }
+        if extra_meta:
+            meta.update(extra_meta)
+        torch.save(meta, ckpt_dir / "meta.pt")
 
-    # Symlink "latest" → this dir (replace if exists)
-    latest = ckpt_root / "latest"
-    if latest.exists() or latest.is_symlink():
+    # Symlink "latest" → this dir (rank 0 only; others skip to avoid races).
+    if rank == 0:
+        latest = ckpt_root / "latest"
+        if latest.exists() or latest.is_symlink():
+            try:
+                latest.unlink()
+            except OSError:
+                pass
         try:
-            latest.unlink()
-        except OSError:
+            latest.symlink_to(name, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            # Filesystem may not support symlinks; that's OK.
             pass
-    try:
-        latest.symlink_to(name, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        # Filesystem may not support symlinks; that's OK.
-        pass
 
     return ckpt_dir
 
@@ -240,19 +271,26 @@ def load_population_checkpoint(
     ckpt_dir = Path(ckpt_dir)
     meta = torch.load(ckpt_dir / "meta.pt", map_location=device or "cpu")
 
+    # FSDP: gather params on every rank with writeback=True so injection
+    # edits the full tensor and FSDP re-shards on exit.
+    from marlllm.fsdp_utils import is_fsdp, summon_full_params
+    first_backbone = getattr(next(iter(population.values())), "_backbone", None)
+    fsdp = bool(is_fsdp(first_backbone))
+
     slot_to_object: dict[str, str] = meta.get("slot_to_object", {})
     loaded_objects: dict[int, bool] = {}
-    for slot, agent in population.items():
-        if id(agent) in loaded_objects:
-            continue
-        canonical = slot_to_object.get(slot, slot)
-        path = ckpt_dir / f"{canonical}.pt"
-        if not path.exists():
-            _LOG.warning("No per-agent checkpoint found for slot %r at %s", slot, path)
-            continue
-        payload = torch.load(path, map_location=device or "cpu")
-        inject_agent_state(agent, payload, strict=False)
-        loaded_objects[id(agent)] = True
+    with summon_full_params(first_backbone, writeback=fsdp):
+        for slot, agent in population.items():
+            if id(agent) in loaded_objects:
+                continue
+            canonical = slot_to_object.get(slot, slot)
+            path = ckpt_dir / f"{canonical}.pt"
+            if not path.exists():
+                _LOG.warning("No per-agent checkpoint found for slot %r at %s", slot, path)
+                continue
+            payload = torch.load(path, map_location=device or "cpu")
+            inject_agent_state(agent, payload, strict=False)
+            loaded_objects[id(agent)] = True
 
     if load_optimizer and optimizer is not None and meta.get("optimizer_state") is not None:
         try:

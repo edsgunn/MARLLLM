@@ -109,8 +109,11 @@ class VLLMSamplingEngine:
         logger.info("vLLM adapter staging dir: %s", self._adapter_root)
 
         # Save initial weights for every adapter before constructing the engine.
-        for name in self._adapter_names:
-            self._save_adapter(peft_model, name)
+        # Under FSDP the LoRA params are sharded; summon gathers them first.
+        from marlllm.fsdp_utils import summon_full_params
+        with summon_full_params(peft_model, writeback=False):
+            for name in self._adapter_names:
+                self._save_adapter(peft_model, name)
 
         from vllm import LLM
         llm_kwargs: dict[str, Any] = dict(
@@ -122,6 +125,13 @@ class VLLMSamplingEngine:
             dtype=dtype,
             enforce_eager=enforce_eager,
             disable_log_stats=True,
+            # Qwen3.5 ships as a multimodal arch (Qwen3_5ForConditionalGeneration).
+            # We only use the text path for training rollouts, so zero out the
+            # multimodal slots — otherwise vLLM's profile_run exercises the vision
+            # tower (qwen3_vl.embed_multimodal → triton vision kernels) and
+            # budgets KV cache for image tokens we never send. No-op on text-only
+            # models (Qwen2.5 etc.) since they have no MM modalities.
+            limit_mm_per_prompt={"image": 0, "video": 0},
         )
         if max_model_len is not None:
             llm_kwargs["max_model_len"] = max_model_len
@@ -268,9 +278,17 @@ class VLLMSamplingEngine:
 
         Call this once per training step, after ``optimizer.step()``. The
         next ``generate`` for an adapter will pick up the fresh weights.
+
+        Under FSDP the LoRA tensors live as per-rank shards on the
+        attached parameters; ``save_pretrained`` would write only the
+        local slice. ``summon_full_params`` all-gathers every shard for
+        the duration of the saves so each rank's on-disk adapter copy is
+        the full tensor (matches the per-rank vLLM engine's expectation).
         """
-        for name in self._adapter_names:
-            self._save_adapter(peft_model, name)
+        from marlllm.fsdp_utils import summon_full_params
+        with summon_full_params(peft_model, writeback=False):
+            for name in self._adapter_names:
+                self._save_adapter(peft_model, name)
 
     def _lora_request(self, name: str):
         from vllm.lora.request import LoRARequest
