@@ -605,7 +605,14 @@ class PopulationTrainer:
             all_metrics: dict[str, float] = {}
             pad_id = self._pad_token_id()
 
+            # Per-agent wall-time breakdown: lets us see whether the
+            # sequential per-agent forward+backward (one pass per population
+            # member) is becoming the dominant cost as population grows.
+            # Surfaces as ``per_agent/<name>/total_s`` etc. in metrics.
+            per_agent_timings: dict[str, dict[str, float]] = {}
+
             for pop_name, agent in self.population.items():
+                _t_agent = time.perf_counter()
                 agent_episodes = [
                     ep for ep in raw_episodes if pop_name in ep[2]
                 ]
@@ -618,9 +625,22 @@ class PopulationTrainer:
                 if not trajectories:
                     continue
 
-                batch = RolloutBatch.from_trajectories(
-                    trajectories, self.agent_index, pad_id
-                )
+                _t_collate = time.perf_counter()
+                if getattr(self.config, "pack_sequences", False):
+                    if self.config.seq_chunk_size is not None and self.config.seq_chunk_size > 0:
+                        raise ValueError(
+                            "pack_sequences and seq_chunk_size are mutually exclusive "
+                            "in this release. Disable seq_chunk_size to use packing, or "
+                            "wait for the cu_seqlens-chunked path."
+                        )
+                    batch = RolloutBatch.pack_trajectories(
+                        trajectories, self.agent_index, pad_id
+                    )
+                else:
+                    batch = RolloutBatch.from_trajectories(
+                        trajectories, self.agent_index, pad_id
+                    )
+                collate_s = time.perf_counter() - _t_collate
 
                 K = batch.input_ids.shape[0]
                 grad_accum = max(1, min(self.config.grad_accum_steps, K))
@@ -631,6 +651,7 @@ class PopulationTrainer:
                 agent.train_mode()
                 dev = agent.device
 
+                _t_fb = time.perf_counter()
                 for micro_start in micro_starts:
                     micro_end = min(micro_start + micro_size, K)
 
@@ -639,12 +660,29 @@ class PopulationTrainer:
                     mb_types    = batch.token_type_mask[micro_start:micro_end].to(dev)
                     mb_agents   = batch.agent_id_mask[micro_start:micro_end].to(dev)
 
-                    actual_len = int(mb_attn.sum(dim=1).max())
-                    if actual_len < mb_input_ids.shape[1]:
-                        mb_input_ids = mb_input_ids[:, :actual_len]
-                        mb_attn      = mb_attn[:, :actual_len]
-                        mb_types     = mb_types[:, :actual_len]
-                        mb_agents    = mb_agents[:, :actual_len]
+                    mb_seq_ids = mb_position_ids = None
+                    mb_attn_for_model: torch.Tensor | None
+                    if batch.packed:
+                        # Packed mode (transformers >= 4.55, torch >= 2.6):
+                        # passing ``attention_mask=None`` + ``position_ids`` that
+                        # reset to 0 at each trajectory boundary triggers
+                        # transformers' built-in packed-sequence detection
+                        # (find_packed_sequence_indices in masking_utils.py).
+                        # The block-diagonal causal mask is then constructed
+                        # inside the attention impl as a mask-function rather
+                        # than a dense 4D tensor — no O(T²) memory cost on the
+                        # autograd graph.
+                        mb_seq_ids = batch.seq_ids[micro_start:micro_end].to(dev)
+                        mb_position_ids = batch.position_ids[micro_start:micro_end].to(dev)
+                        mb_attn_for_model = None
+                    else:
+                        actual_len = int(mb_attn.sum(dim=1).max())
+                        if actual_len < mb_input_ids.shape[1]:
+                            mb_input_ids = mb_input_ids[:, :actual_len]
+                            mb_attn      = mb_attn[:, :actual_len]
+                            mb_types     = mb_types[:, :actual_len]
+                            mb_agents    = mb_agents[:, :actual_len]
+                        mb_attn_for_model = mb_attn  # 2D mask; HF builds causal mask itself
 
                     agent_idx = self.agent_index[pop_name]
                     scale = 1.0 / (num_micros * len(self.population))
@@ -667,8 +705,12 @@ class PopulationTrainer:
                         )
                         total_loss_scalar += loss_scalar / num_micros
                     else:
-                        last_hidden, values = agent.evaluate_hidden(mb_input_ids, mb_attn)
-                        last_hidden_ref = agent.evaluate_hidden_ref(mb_input_ids, mb_attn)
+                        last_hidden, values = agent.evaluate_hidden(
+                            mb_input_ids, mb_attn4d, position_ids=mb_position_ids,
+                        )
+                        last_hidden_ref = agent.evaluate_hidden_ref(
+                            mb_input_ids, mb_attn4d, position_ids=mb_position_ids,
+                        )
 
                         loss_val, metrics = self.loss.compute_loss(
                             last_hidden=last_hidden,
@@ -681,6 +723,7 @@ class PopulationTrainer:
                             config=self.config,
                             last_hidden_ref=last_hidden_ref,
                             lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
+                            seq_ids=mb_seq_ids,
                         )
 
                         (loss_val * scale).backward()
@@ -690,9 +733,33 @@ class PopulationTrainer:
                         key = f"{pop_name}/{k}"
                         all_metrics[key] = all_metrics.get(key, 0.0) + v / num_micros
 
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                fb_s = time.perf_counter() - _t_fb
+                per_agent_timings[pop_name] = {
+                    "collate_s": collate_s,
+                    "fb_s": fb_s,  # forward + backward (all microbatches)
+                    "total_s": time.perf_counter() - _t_agent,
+                    "n_traj": float(K),
+                    "n_micros": float(num_micros),
+                    "T_max": float(batch.input_ids.shape[1]),
+                }
+
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             loss_s = time.perf_counter() - _t_phase
+
+            # Surface per-agent wall-time as flat metrics so plot_results
+            # picks them up automatically. Also emit population-level
+            # aggregates for at-a-glance dashboard reading.
+            if per_agent_timings:
+                for pn, t in per_agent_timings.items():
+                    for k, v in t.items():
+                        all_metrics[f"per_agent/{pn}/{k}"] = v
+                fb_values = [t["fb_s"] for t in per_agent_timings.values()]
+                all_metrics["per_agent/fb_s_max"] = max(fb_values)
+                all_metrics["per_agent/fb_s_mean"] = sum(fb_values) / len(fb_values)
+                all_metrics["per_agent/fb_s_sum"] = sum(fb_values)
 
             # ── 3. Optimizer step ─────────────────────────────────────────
             _t_phase = time.perf_counter()

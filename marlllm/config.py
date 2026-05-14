@@ -84,6 +84,22 @@ class TrainingConfig:
     # single-shot path).
     seq_chunk_size: int | None = None
 
+    # Sequence packing: concatenate one agent's K trajectories into a single
+    # (1, T_total) row with a block-diagonal causal attention mask instead of
+    # right-padding them all to T_max. Removes pad-token FLOPs (which dominate
+    # at our typical 3-5x length variance per agent), at the cost of building
+    # a 4D (1, 1, T_total, T_total) additive attention mask — 128 MiB in bf16
+    # at T_total=8192, kept live on the autograd graph. For very long T_total
+    # use flash-attention varlen instead (one-line follow-up once flash-attn
+    # is in the venv; see RLvr_rollout_optimisation_audit.md).
+    #
+    # Constraints (May 2026):
+    #   * Mutually exclusive with seq_chunk_size — chunked + packed together
+    #     needs cu_seqlens-aware per-chunk masks, not yet implemented.
+    #   * Only the non-chunked compute_loss path is wired (single forward
+    #     over the packed row), so total tokens per agent must fit memory.
+    pack_sequences: bool = False
+
     # LoRA (PEFT) — set lora_r > 0 to enable; requires `peft` package
     lora_r: int = 0                    # LoRA rank; 0 = full fine-tuning
     lora_alpha: int = 16               # LoRA scaling factor

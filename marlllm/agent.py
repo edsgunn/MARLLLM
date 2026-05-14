@@ -606,7 +606,8 @@ class IndependentAgent(Agent):
     def evaluate_hidden(
         self,
         input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if self.device.type == "cuda":
             torch.cuda.set_device(self.device.index or 0)
@@ -614,13 +615,16 @@ class IndependentAgent(Agent):
         # instead of (B, T, V); the full logits tensor is several GiB at long T.
         # We discard that 1-position slice and apply lm_head ourselves chunk-wise
         # in the loss path.
-        out = self._backbone(
+        kwargs: dict = dict(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
             use_cache=False,
             logits_to_keep=1,
         )
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+        out = self._backbone(**kwargs)
         last_hidden = out.hidden_states[-1]              # (B, T, H)
         values = self._value_head(last_hidden.detach())  # (B, T)
         return last_hidden, values
@@ -629,7 +633,8 @@ class IndependentAgent(Agent):
     def evaluate_ref(
         self,
         input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         """
         Forward pass through the frozen reference model.
@@ -639,26 +644,33 @@ class IndependentAgent(Agent):
             return None
         if self.device.type == "cuda":
             torch.cuda.set_device(self.device.index or 0)
-        out = self._ref_backbone(input_ids=input_ids, attention_mask=attention_mask)
+        kwargs: dict = dict(input_ids=input_ids, attention_mask=attention_mask)
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+        out = self._ref_backbone(**kwargs)
         return out.logits
 
     @torch.no_grad()
     def evaluate_hidden_ref(
         self,
         input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         if self._ref_backbone is None:
             return None
         if self.device.type == "cuda":
             torch.cuda.set_device(self.device.index or 0)
-        out = self._ref_backbone(
+        kwargs: dict = dict(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
             use_cache=False,
             logits_to_keep=1,
         )
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+        out = self._ref_backbone(**kwargs)
         return out.hidden_states[-1]
 
     def lm_head(self, hidden: torch.Tensor) -> torch.Tensor:
@@ -874,17 +886,30 @@ class LoRASharedBaseAgent(Agent):
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
+        position_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass yielding (last_hidden, values).
+
+        Accepts a 2D or 4D ``attention_mask``. HuggingFace causal-LM forwards
+        treat a 4D ``(B, 1, T_q, T_k)`` additive mask as a complete user-
+        supplied mask, bypassing internal causal construction. Packed
+        callers should pass the block-diagonal causal mask from
+        ``marlllm.loss._build_block_diagonal_causal_mask`` together with
+        ``position_ids`` that reset to 0 at each trajectory boundary.
+        """
         self._activate()
         if self.device.type == "cuda":
             torch.cuda.set_device(self.device.index or 0)
-        out = self._backbone(
+        kwargs: dict = dict(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
             use_cache=False,
             logits_to_keep=1,
         )
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+        out = self._backbone(**kwargs)
         last_hidden = out.hidden_states[-1]
         values = self._value_head(last_hidden.detach())
         return last_hidden, values
@@ -894,6 +919,7 @@ class LoRASharedBaseAgent(Agent):
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
+        position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         if not self._keep_ref_model:
             return None
@@ -901,8 +927,11 @@ class LoRASharedBaseAgent(Agent):
             torch.cuda.set_device(self.device.index or 0)
         # The frozen pre-trained base (adapters disabled) serves as the reference
         # for both agents — consistent with anchoring each LoRA delta to the prior.
+        kwargs: dict = dict(input_ids=input_ids, attention_mask=attention_mask)
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
         with self._backbone.disable_adapter():
-            out = self._backbone(input_ids=input_ids, attention_mask=attention_mask)
+            out = self._backbone(**kwargs)
         return out.logits
 
     @torch.no_grad()
@@ -910,19 +939,23 @@ class LoRASharedBaseAgent(Agent):
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
+        position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         if not self._keep_ref_model:
             return None
         if self.device.type == "cuda":
             torch.cuda.set_device(self.device.index or 0)
+        kwargs: dict = dict(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+            logits_to_keep=1,
+        )
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
         with self._backbone.disable_adapter():
-            out = self._backbone(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                use_cache=False,
-                logits_to_keep=1,
-            )
+            out = self._backbone(**kwargs)
         return out.hidden_states[-1]
 
     def evaluate_hidden_chunked(

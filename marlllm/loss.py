@@ -97,6 +97,7 @@ class CCSMLoss(Loss):
         last_hidden_ref: torch.Tensor | None = None,
         lm_head_ref: Callable[[torch.Tensor], torch.Tensor] | None = None,
         perception_source_indices: list[int] | None = None,
+        seq_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict]:
         # Single chunked pass through lm_head produces shifted per-token
         # log p(input_ids[t+1] | hidden[t]). Both surprises and act log-probs
@@ -106,7 +107,23 @@ class CCSMLoss(Loss):
             last_hidden, lm_head, input_ids, _T_CHUNK,
         )
         surprises = _surprises_from_token_lp(token_lp, token_type_mask)
-        returns = _compute_returns(surprises, token_type_mask, config.gamma)
+        # In packed mode, positions where the causal shift crosses a
+        # trajectory boundary have meaningless predictions (logits[t-1] came
+        # from a different trajectory than input_ids[t]). Zero those
+        # surprises so they don't enter the perception loss or returns.
+        if seq_ids is not None:
+            boundary_shifted = _seq_boundary_shifted(seq_ids)             # (B, T-1)
+            # _surprises_from_token_lp returns (B, T) with position 0 zero-padded;
+            # invalid shifted positions correspond to indices 1..T-1, i.e. surprises[:, 1:].
+            B = surprises.shape[0]
+            zero_pad = torch.zeros(B, 1, device=surprises.device, dtype=surprises.dtype)
+            valid_shift = (~boundary_shifted).to(surprises.dtype)
+            surprises = torch.cat(
+                [zero_pad, surprises[:, 1:] * valid_shift], dim=1
+            )
+        returns = _compute_returns(
+            surprises, token_type_mask, config.gamma, seq_ids=seq_ids
+        )
 
         obs_mask = token_type_mask == int(TokenType.OBS)
         if perception_source_indices is not None and len(perception_source_indices) > 0:
@@ -116,6 +133,19 @@ class CCSMLoss(Loss):
             obs_mask = obs_mask & allowed
         # ACT mask: only this agent's action tokens contribute to L_act and L_val
         act_mask = (token_type_mask == int(TokenType.ACT)) & (agent_id_mask == target_agent_idx)
+        if seq_ids is not None:
+            # Drop ACT positions whose shifted prediction would cross a trajectory
+            # boundary (logits at the boundary's preceding position came from a
+            # different trajectory, so the predicted log-prob is meaningless).
+            # We DO NOT drop these positions from ``obs_mask`` — their surprise
+            # contribution is already zeroed above, but keeping them in the mask
+            # preserves the denominator of ``surprises.mean()`` to match how the
+            # padded path counts position-0-of-each-row (whose surprise is
+            # similarly zero-padded by _surprises_from_token_lp).
+            B, T = token_type_mask.shape
+            invalid = torch.zeros_like(act_mask)
+            invalid[:, 1:] = _seq_boundary_shifted(seq_ids)
+            act_mask = act_mask & ~invalid
 
         # ---- Perception loss ----
         obs_surprises = surprises[obs_mask]
@@ -533,6 +563,7 @@ def _compute_returns(
     surprises: torch.Tensor,
     token_type_mask: torch.Tensor,
     gamma: float,
+    seq_ids: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Compute discounted future observation surprise G_t at ACT positions.
@@ -543,6 +574,11 @@ def _compute_returns(
     paper — includes gaps where action or prompt tokens appear between t and s.
 
     Implemented via a backwards scan over the sequence dimension.
+
+    When ``seq_ids`` is provided (packed mode), the running accumulator is
+    reset at trajectory boundaries so returns never bleed across packed
+    trajectories. Whenever ``seq_ids[:, t] != seq_ids[:, t+1]`` the running
+    sum is zeroed before incorporating position ``t`` (backward scan).
     """
     B, T = surprises.shape
     returns = torch.zeros_like(surprises)
@@ -550,6 +586,10 @@ def _compute_returns(
     running = torch.zeros(B, device=surprises.device, dtype=surprises.dtype)
 
     for t in range(T - 1, -1, -1):
+        if seq_ids is not None and t < T - 1:
+            same_seq = (seq_ids[:, t] == seq_ids[:, t + 1]).to(dtype=surprises.dtype)
+            running = running * same_seq
+
         obs_here = (token_type_mask[:, t] == int(TokenType.OBS)).to(dtype=surprises.dtype)
         act_here = (token_type_mask[:, t] == int(TokenType.ACT)).to(dtype=surprises.dtype)
 
@@ -563,6 +603,41 @@ def _compute_returns(
         returns[:, t] = act_here * running
 
     return returns  # (B, T) — non-zero only at ACT positions
+
+
+def _seq_boundary_shifted(seq_ids: torch.Tensor) -> torch.Tensor:
+    """Boolean (B, T-1) mask: True where the shifted prediction (logits[t-1]
+    predicts input_ids[t]) crosses a packed-trajectory boundary and must be
+    excluded from any shifted loss. Returns all-False if ``seq_ids`` is
+    constant (degenerate single-trajectory packed batch)."""
+    return seq_ids[:, 1:] != seq_ids[:, :-1]
+
+
+def _build_block_diagonal_causal_mask(
+    seq_ids: torch.Tensor,
+    *,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """4D additive attention mask for a packed batch.
+
+    Returns shape ``(B, 1, T, T)``. Position ``(i, j)`` is 0 when token ``i``
+    may attend to token ``j`` (same trajectory *and* ``j <= i``); otherwise
+    ``-inf``. Memory cost is ``B × T × T`` of the chosen dtype: at T=8192
+    that's 128 MiB in bf16 per batch, kept live on the autograd graph until
+    backward releases it. For longer T prefer flash-attn varlen via
+    ``cu_seqlens`` (one-line swap once ``flash-attn`` is in the venv).
+    """
+    if dtype is None:
+        dtype = torch.float32
+    device = seq_ids.device
+    B, T = seq_ids.shape
+    arange = torch.arange(T, device=device)
+    causal = arange.unsqueeze(0) <= arange.unsqueeze(1)              # (T, T) — j <= i
+    same_seq = seq_ids.unsqueeze(2) == seq_ids.unsqueeze(1)          # (B, T, T)
+    allow = same_seq & causal                                         # (B, T, T)
+    mask = torch.zeros(B, T, T, dtype=dtype, device=device)
+    mask.masked_fill_(~allow, float("-inf"))
+    return mask.unsqueeze(1)                                          # (B, 1, T, T)
 
 
 def _act_log_probs(

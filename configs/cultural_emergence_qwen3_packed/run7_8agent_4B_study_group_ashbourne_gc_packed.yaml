@@ -1,0 +1,85 @@
+# Qwen3-4B 8-agent variant with sequence packing on (Task 3 of the
+# RLVR rollout optimisation audit). Concatenates all of one agent's
+# trajectories into a single (1, T_total) row with per-token seq_ids
+# and position_ids resetting at each boundary. Transformers ≥ 4.55 +
+# torch ≥ 2.6 auto-detects this and builds a block-diagonal causal
+# mask in the attention impl rather than materialising a dense 4D mask.
+#
+# Constraints vs the unpacked sibling:
+#   * seq_chunk_size is REMOVED — pack_sequences and seq_chunk_size are
+#     mutually exclusive in this release (chunked+packed needs cu_seqlens-
+#     aware per-chunk masks; deferred follow-up).
+#   * max_episode_tokens cut 24576 → 12288 so per-agent packed totals
+#     (typically ~4 trajectories × ~12k = ~48k tokens) don't blow
+#     activation memory without chunking. gradient_checkpointing absorbs
+#     most of the rest.
+#   * total_token_budget cut 1024 → 768 in step with the episode cap.
+#   * vllm_enforce_eager kept on; vllm_gpu_mem_util kept at 0.25.
+#
+# What we're measuring: with packing on, pad-token FLOPs disappear
+# (was 40-60% of train compute at our length variance). The new
+# per_agent/<name>/fb_s metrics should drop relative to the unpacked
+# baseline run on the same config minus pack_sequences.
+name: run7_8agent_4B_study_group_ashbourne_gc_packed
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen3-4B
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.25
+vllm_max_model_len: 8192
+vllm_max_num_seqs: 8
+vllm_enforce_eager: true
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+pack_sequences: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+- Marcus Webb
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 12288
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 768
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+  thinking_enabled: true
+output_dir: runs/cultural_emergence_qwen3_packed/run7_8agent_4B_study_group_ashbourne_gc_packed
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50
