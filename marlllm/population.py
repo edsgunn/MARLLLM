@@ -706,10 +706,10 @@ class PopulationTrainer:
                         total_loss_scalar += loss_scalar / num_micros
                     else:
                         last_hidden, values = agent.evaluate_hidden(
-                            mb_input_ids, mb_attn4d, position_ids=mb_position_ids,
+                            mb_input_ids, mb_attn_for_model, position_ids=mb_position_ids,
                         )
                         last_hidden_ref = agent.evaluate_hidden_ref(
-                            mb_input_ids, mb_attn4d, position_ids=mb_position_ids,
+                            mb_input_ids, mb_attn_for_model, position_ids=mb_position_ids,
                         )
 
                         loss_val, metrics = self.loss.compute_loss(
