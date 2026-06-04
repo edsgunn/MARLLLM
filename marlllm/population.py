@@ -50,9 +50,171 @@ except Exception:  # pragma: no cover - optional dep
     psutil = None
     _PSUTIL_PROC = None
 
+# NVML: per-GPU SM and memory-bandwidth utilisation as instantaneous
+# percentages. Initialised lazily on first call so import-time failure
+# on a CPU-only login node doesn't block module import.
+_NVML_STATE: dict[str, Any] = {"tried": False, "ok": False, "module": None}
+
+# Background NVML sampler: polls every ~200ms, tracks per-GPU peak used
+# memory and SM-utilisation samples between log calls. Solves the
+# "log-time snapshot misses the peak" problem — empty_cache() runs at
+# end of iteration so a snapshot taken there reads the low-water mark.
+import threading as _threading  # noqa: E402 — local import keeps top of file tidy
+_NVML_SAMPLER: dict[str, Any] = {
+    "thread": None,
+    "stop": None,
+    "lock": _threading.Lock(),
+    # Per-GPU peak used (bytes), running max since last drain.
+    "peak_used_b": {},
+    # Per-GPU SM-utilisation sample sum / count for mean since last drain.
+    "sm_sum": {},
+    "sm_n": {},
+    "sm_max": {},
+    "n_samples": 0,
+}
+
+
+def _nvml_init() -> bool:
+    """Initialise pynvml lazily. Returns True if usable; idempotent."""
+    if _NVML_STATE["tried"]:
+        return _NVML_STATE["ok"]
+    _NVML_STATE["tried"] = True
+    try:
+        import pynvml  # type: ignore
+        pynvml.nvmlInit()
+        _NVML_STATE["module"] = pynvml
+        _NVML_STATE["ok"] = True
+    except Exception:
+        _NVML_STATE["ok"] = False
+    return _NVML_STATE["ok"]
+
+
+def _nvml_sampler_loop(interval_s: float, stop_event: _threading.Event) -> None:
+    """Background poll: track per-GPU peak used memory + SM samples.
+
+    Sampled at ~200ms cadence (default) — fast enough to catch the
+    per-iteration memory spike that ``empty_cache`` then erases before
+    the log-time snapshot reads it.
+    """
+    if not _nvml_init():
+        return
+    pynvml = _NVML_STATE["module"]
+    try:
+        n = pynvml.nvmlDeviceGetCount()
+    except Exception:
+        return
+    handles: list[tuple[int, Any]] = []
+    for i in range(n):
+        try:
+            handles.append((i, pynvml.nvmlDeviceGetHandleByIndex(i)))
+        except Exception:
+            pass
+    if not handles:
+        return
+    state = _NVML_SAMPLER
+    while not stop_event.is_set():
+        for i, h in handles:
+            try:
+                used = pynvml.nvmlDeviceGetMemoryInfo(h).used
+            except Exception:
+                used = None
+            try:
+                sm = pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+            except Exception:
+                sm = None
+            with state["lock"]:
+                if used is not None:
+                    prior = state["peak_used_b"].get(i, 0)
+                    if used > prior:
+                        state["peak_used_b"][i] = used
+                if sm is not None:
+                    state["sm_sum"][i] = state["sm_sum"].get(i, 0.0) + float(sm)
+                    state["sm_n"][i]   = state["sm_n"].get(i, 0) + 1
+                    if sm > state["sm_max"].get(i, 0):
+                        state["sm_max"][i] = float(sm)
+                state["n_samples"] += 1
+        stop_event.wait(interval_s)
+
+
+def _start_nvml_sampler(interval_s: float = 0.2) -> None:
+    """Start the background NVML poller. Idempotent."""
+    if _NVML_SAMPLER["thread"] is not None:
+        return
+    if not _nvml_init():
+        return
+    stop = _threading.Event()
+    t = _threading.Thread(
+        target=_nvml_sampler_loop, args=(interval_s, stop),
+        daemon=True, name="nvml_sampler",
+    )
+    t.start()
+    _NVML_SAMPLER["thread"] = t
+    _NVML_SAMPLER["stop"] = stop
+
+
+def _drain_nvml_sampler() -> tuple[dict[int, int], dict[int, float], dict[int, float], int]:
+    """Snapshot and reset the sampler's accumulated stats.
+
+    Returns ``(peak_used_b, sm_mean, sm_max, n_samples)``.
+    """
+    state = _NVML_SAMPLER
+    with state["lock"]:
+        peak_used = dict(state["peak_used_b"])
+        sm_n = dict(state["sm_n"])
+        sm_sum = dict(state["sm_sum"])
+        sm_max = dict(state["sm_max"])
+        n_samples = state["n_samples"]
+        state["peak_used_b"] = {}
+        state["sm_sum"] = {}
+        state["sm_n"] = {}
+        state["sm_max"] = {}
+        state["n_samples"] = 0
+    sm_mean = {i: sm_sum[i] / sm_n[i] for i in sm_n if sm_n[i] > 0}
+    return peak_used, sm_mean, sm_max, n_samples
+
 
 def _resource_metrics() -> dict[str, float]:
-    """Snapshot of GPU/CPU memory and related counters for the current process."""
+    """Snapshot of GPU/CPU memory and related counters.
+
+    A few of these readings are subtler than they look — read this if you
+    care which knob in the logged metrics actually predicts OOM:
+
+    Per-GPU keys:
+      mem/gpu{i}/alloc_gb, reserved_gb, peak_alloc_gb, peak_reserved_gb
+          — *Calling process only* — PyTorch's per-process allocator
+            view. In multi-rank DDP each rank's primary work is on its
+            own GPU; rank 0 sees only its own allocations on every GPU,
+            so these understate the per-GPU pressure on other ranks'
+            GPUs. Useful for tracking rank 0's footprint, NOT for
+            predicting OOM on rank 1/2/3.
+      mem/gpu{i}/free_gb, total_gb, used_frac
+          — Driver view of the whole device (all processes). Captures
+            co-tenants like vLLM. But it's an *instantaneous* snapshot
+            taken at log time, which is right after ``empty_cache()``
+            at the end of the iteration — so this also misses the
+            per-iter peak.
+      mem/gpu{i}/nvml_used_gb
+          — NVML whole-device used memory at log time (all processes).
+            Same instantaneous limitation as ``used_frac`` but reports
+            absolute bytes so it's easier to compare against the GPU
+            total.
+      mem/gpu{i}/nvml_peak_used_gb
+          — NVML peak used memory **across the interval since the last
+            ``_resource_metrics`` call**, sampled by a background thread
+            at ~200ms cadence. This is the line that actually predicts
+            OOM — captures the per-iter spike that ``empty_cache`` then
+            releases before log-time.
+      mem/gpu{i}/nvml_peak_n_samples
+          — How many samples the peak was drawn from. If this is small
+            (< ~50/iter), the sampler isn't running or the iter was
+            very fast; treat the peak as a lower bound.
+      util/gpu{i}/sm, util/gpu{i}/mem_bw
+          — NVML instantaneous % utilisation at log time. Noisy point
+            samples; prefer ``util/gpu{i}/sm_mean`` / ``sm_max``.
+      util/gpu{i}/sm_mean, util/gpu{i}/sm_max
+          — Mean and max SM utilisation across the interval since the
+            last log call, from the background sampler.
+    """
     out: dict[str, float] = {}
     GB = 1024 ** 3
 
@@ -70,6 +232,43 @@ def _resource_metrics() -> dict[str, float]:
                 out[f"{prefix}/used_frac"] = 1.0 - free_b / total_b
             except Exception:
                 pass
+
+        if _nvml_init():
+            # Start the background poller on first call. Idempotent.
+            _start_nvml_sampler()
+            pynvml = _NVML_STATE["module"]
+            try:
+                n_nvml = pynvml.nvmlDeviceGetCount()
+            except Exception:
+                n_nvml = 0
+            for i in range(min(torch.cuda.device_count(), n_nvml)):
+                try:
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                except Exception:
+                    continue
+                try:
+                    u = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                    out[f"util/gpu{i}/sm"]     = float(u.gpu)
+                    out[f"util/gpu{i}/mem_bw"] = float(u.memory)
+                except Exception:
+                    pass
+                try:
+                    mi = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    out[f"mem/gpu{i}/nvml_used_gb"] = mi.used / GB
+                except Exception:
+                    pass
+
+            # Drain the background sampler — per-iter peak memory and
+            # SM mean/max captured at 200ms cadence (not just the
+            # post-empty_cache low-water snapshot).
+            peak_used_b, sm_mean, sm_max, n_samples = _drain_nvml_sampler()
+            out["mem/nvml_sampler/n_samples"] = float(n_samples)
+            for i, used_b in peak_used_b.items():
+                out[f"mem/gpu{i}/nvml_peak_used_gb"] = used_b / GB
+            for i, m in sm_mean.items():
+                out[f"util/gpu{i}/sm_mean"] = float(m)
+            for i, mx in sm_max.items():
+                out[f"util/gpu{i}/sm_max"] = float(mx)
 
     if _PSUTIL_PROC is not None:
         try:
@@ -224,6 +423,21 @@ class PopulationTrainer:
         # calls sync_all_adapters() after each optimizer.step().
         self.sampling_engine = sampling_engine
         self._sampling_engine_peft_model = sampling_engine_peft_model
+
+        # ── Async rollout state (Phase 2 of the off-policy roadmap) ───
+        # When config.async_rollout is True, _collect_episodes_batched runs
+        # on a background thread that feeds a bounded buffer. The training
+        # thread consumes whatever is ready and stamps every iter with a
+        # monotonically-increasing ``_policy_version`` so the loss path can
+        # compute staleness for the off-policy correction.
+        #
+        # ``_policy_version`` is bumped after each ``optimizer.step()`` +
+        # ``sync_all_adapters()`` succeeds. The worker reads it at the top
+        # of every batch so the stamp on enqueued episodes reflects the
+        # weights vLLM was actually sampling under.
+        self._policy_version: int = 0
+        self._rollout_buffer = None
+        self._rollout_worker = None
 
         self.device = torch.device(config.device)
         self.agent_index: dict[str, int] = {
@@ -573,6 +787,8 @@ class PopulationTrainer:
         # Collect a batch of episodes from the untrained policy and dump
         # traces so we have a "what does the model do out of the box" record
         # to compare later checkpoints against. Only on a fresh run.
+        # NB: baseline always runs synchronously — async worker is started
+        # after this so the very first measured iter has a buffer-ready batch.
         if start_iteration == 1:
             baseline_episodes: list[_RawEpisode] = self._collect_episodes_batched(
                 local_episodes_per_iter
@@ -583,6 +799,48 @@ class PopulationTrainer:
                 import torch.distributed as dist
                 dist.barrier()
 
+        # ── Async rollout setup ──────────────────────────────────────────
+        # When enabled, a background thread continuously fills a bounded
+        # buffer with batches of episodes; the training thread consumes
+        # whatever is ready each iter. Trajectories carry the policy_version
+        # they were sampled under so the loss path can apply PPO importance
+        # correction and reject items exceeding ``max_staleness``.
+        async_enabled = bool(getattr(self.config, "async_rollout", False))
+        if async_enabled:
+            from marlllm.rollout_buffer import RolloutBuffer, RolloutWorker, BufferClosed
+            buffer_size = max(1, int(getattr(self.config, "replay_buffer_size", 2)))
+            self._rollout_buffer = RolloutBuffer(max_size=buffer_size)
+            def _produce_one(v: int) -> tuple[list, dict]:
+                eps = self._collect_episodes_batched(local_episodes_per_iter)
+                return eps, dict(self._rollout_stats)
+            self._rollout_worker = RolloutWorker(
+                buffer=self._rollout_buffer,
+                produce_one_batch=_produce_one,
+                current_policy_version=lambda: self._policy_version,
+            )
+            self._rollout_worker.start()
+            self._logger.info(
+                "async rollout worker started (buffer_size=%d, max_staleness=%d)",
+                buffer_size, int(getattr(self.config, "max_staleness", buffer_size)),
+            )
+
+        try:
+            self._train_loop(start_iteration, local_episodes_per_iter, async_enabled)
+        finally:
+            if self._rollout_worker is not None:
+                self._rollout_worker.stop(timeout=5.0)
+                self._rollout_worker = None
+                self._rollout_buffer = None
+
+    def _train_loop(
+        self,
+        start_iteration: int,
+        local_episodes_per_iter: int,
+        async_enabled: bool,
+    ) -> None:
+        from marlllm.rollout_buffer import BufferClosed
+        max_staleness = int(getattr(self.config, "max_staleness", 1)) if async_enabled else 0
+
         for iteration in range(start_iteration, self.config.num_iterations + 1):
 
             if torch.cuda.is_available():
@@ -591,9 +849,49 @@ class PopulationTrainer:
 
             # ── 1. Collect episodes ───────────────────────────────────────
             _t_phase = time.perf_counter()
-            raw_episodes: list[_RawEpisode] = self._collect_episodes_batched(
-                local_episodes_per_iter
-            )
+            if async_enabled:
+                # Pull from buffer; drop trajectories older than the staleness
+                # budget. With buffer_size==1 and max_staleness==1, this
+                # collapses to one-step pipelined (rollout for iter k+1
+                # happens in parallel with training on iter k).
+                while True:
+                    # Block indefinitely. The worker's first batch can take
+                    # the full rollout duration (~10-20min for our configs)
+                    # since it runs an iter's worth of vLLM generation from
+                    # scratch. Worker death is signalled separately via the
+                    # sentinel put in its finally block, which surfaces as
+                    # BufferClosed on get — no need for a polling timeout.
+                    try:
+                        item = self._rollout_buffer.get()
+                    except BufferClosed:
+                        if (self._rollout_worker is not None
+                                and self._rollout_worker.exception is not None):
+                            raise RuntimeError(
+                                "rollout worker died"
+                            ) from self._rollout_worker.exception
+                        raise
+                    staleness = self._policy_version - item.policy_version
+                    if staleness > max_staleness:
+                        self._logger.info(
+                            "discarding stale batch (age=%d > %d)",
+                            staleness, max_staleness,
+                        )
+                        continue
+                    raw_episodes: list[_RawEpisode] = item.episodes
+                    # The worker thread owns ``self._rollout_stats`` (it is
+                    # this iteration's workspace inside _collect_episodes_
+                    # batched). We must NOT overwrite the attribute from the
+                    # trainer thread or the worker's next call will race.
+                    # Use the captured copy attached to the item instead.
+                    iter_rollout_stats = item.rollout_stats
+                    iter_staleness = staleness
+                    break
+            else:
+                raw_episodes = self._collect_episodes_batched(
+                    local_episodes_per_iter
+                )
+                iter_rollout_stats = dict(self._rollout_stats)
+                iter_staleness = 0
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             rollout_s = time.perf_counter() - _t_phase
@@ -711,6 +1009,9 @@ class PopulationTrainer:
                         last_hidden_ref = agent.evaluate_hidden_ref(
                             mb_input_ids, mb_attn_for_model, position_ids=mb_position_ids,
                         )
+                        mb_lp_old = batch.act_log_probs_old[micro_start:micro_end].to(dev)
+                        if not batch.packed:
+                            mb_lp_old = mb_lp_old[:, :actual_len]
 
                         loss_val, metrics = self.loss.compute_loss(
                             last_hidden=last_hidden,
@@ -724,6 +1025,7 @@ class PopulationTrainer:
                             last_hidden_ref=last_hidden_ref,
                             lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
                             seq_ids=mb_seq_ids,
+                            act_log_probs_old=mb_lp_old,
                         )
 
                         (loss_val * scale).backward()
@@ -783,8 +1085,12 @@ class PopulationTrainer:
             self.optimizer.step()
             if self.sampling_engine is not None and self._sampling_engine_peft_model is not None:
                 # Push fresh LoRA weights into vLLM so the next rollout
-                # samples from the just-updated policy.
+                # samples from the just-updated policy. Under async this also
+                # bumps the policy version — the rollout worker reads it at
+                # the top of its next batch so the stamp on enqueued
+                # episodes reflects the weights vLLM was actually serving.
                 self.sampling_engine.sync_all_adapters(self._sampling_engine_peft_model)
+            self._policy_version += 1
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 # Release the caching allocator's reserved-but-unallocated blocks
@@ -803,24 +1109,30 @@ class PopulationTrainer:
             all_metrics["time/rollout_s"] = rollout_s
             all_metrics["time/loss_s"]    = loss_s
             all_metrics["time/optim_s"]   = optim_s
+            # Off-policy bookkeeping. Under sync rollout these are 0/0.
+            all_metrics["async/staleness"]   = float(iter_staleness)
+            all_metrics["async/policy_version"] = float(self._policy_version)
+            all_metrics["async/buffer_size"] = float(
+                self._rollout_buffer.size if self._rollout_buffer is not None else 0
+            )
             iter_s = rollout_s + loss_s + optim_s
             all_metrics["time/iter_s"]    = iter_s
             # Phase fraction of total iter wall time (different from rollout/gen_frac
             # which is the fraction of the rollout *phase* spent in actual generation).
             all_metrics["time/rollout_frac"] = (rollout_s / iter_s) if iter_s > 0 else 0.0
             all_metrics["time/loss_frac"]    = (loss_s / iter_s) if iter_s > 0 else 0.0
-            gen_time = self._rollout_stats.get("gen_time_s", 0.0)
-            gen_tokens = self._rollout_stats.get("gen_tokens", 0)
+            gen_time = iter_rollout_stats.get("gen_time_s", 0.0)
+            gen_tokens = iter_rollout_stats.get("gen_tokens", 0)
             all_metrics["time/gen_s"]       = gen_time
-            all_metrics["time/env_step_s"]  = self._rollout_stats.get("env_step_time_s", 0.0)
+            all_metrics["time/env_step_s"]  = iter_rollout_stats.get("env_step_time_s", 0.0)
             all_metrics["rollout/gen_tokens"] = gen_tokens
-            gen_calls = self._rollout_stats.get("gen_calls", 0)
+            gen_calls = iter_rollout_stats.get("gen_calls", 0)
             all_metrics["rollout/gen_calls"]  = gen_calls
             all_metrics["rollout/tokens_per_s"] = (gen_tokens / gen_time) if gen_time > 0 else 0.0
             all_metrics["rollout/gen_frac"]     = (gen_time / rollout_s) if rollout_s > 0 else 0.0
-            gen_batch_sum = self._rollout_stats.get("gen_batch_sum", 0)
+            gen_batch_sum = iter_rollout_stats.get("gen_batch_sum", 0)
             all_metrics["rollout/mean_batch"] = (gen_batch_sum / gen_calls) if gen_calls > 0 else 0.0
-            all_metrics["rollout/max_batch"]  = self._rollout_stats.get("gen_batch_max", 0)
+            all_metrics["rollout/max_batch"]  = iter_rollout_stats.get("gen_batch_max", 0)
 
             all_metrics.update(_resource_metrics())
             all_metrics["n_episodes"]  = n_eps
@@ -1127,7 +1439,15 @@ class PopulationTrainer:
 
             for pop_name, env_indices in act_groups.items():
                 agent = self.population[pop_name]
-                agent.eval_mode()
+                # Only toggle peft_model train/eval mode when actually using
+                # the HF generation path. Under async rollout the worker
+                # thread runs concurrently with training-thread forward+
+                # backward, and a shared peft_model can't safely have its
+                # mode flipped under DDP/grad-checkpointing. vLLM doesn't
+                # use peft_model for inference (it loads LoRA weights from
+                # disk), so the toggle is unnecessary there.
+                if self.sampling_engine is None:
+                    agent.eval_mode()
 
                 batch_contexts = [
                     contexts[k][envs[k].agent_selection]
@@ -1136,6 +1456,26 @@ class PopulationTrainer:
                 # Token budget may differ per episode — use the max for batching,
                 # which is safe since outputs are trimmed to actual length.
                 n_tokens = max(n_tokens_per_ep[k] for k in env_indices)
+
+                # Env-supplied stop-strings (e.g. info-action close tags) halt a
+                # turn the moment the actor commits to waiting on perception, so
+                # the model never samples past it. Union over this batch's envs.
+                # Disabled for native-thinking models: a stop-string firing
+                # inside a <think> block would truncate the chain of thought
+                # (the env still enforces turn-ending by parsing the completed
+                # generation). Behaviour-policy log-probs are unaffected — a
+                # stopped sequence is simply shorter.
+                stop_strings: list[str] | None = None
+                if not getattr(
+                    self.population[pop_name].context_formatter,
+                    "enable_thinking", False,
+                ):
+                    collected: set[str] = set()
+                    for k in env_indices:
+                        collected.update(
+                            getattr(envs[k], "generation_stop_strings", []) or [])
+                    stop_strings = sorted(collected) or None
+
                 _t_gen = time.perf_counter()
                 if self.sampling_engine is not None:
                     batch_ids, batch_lps = self.sampling_engine.generate(
@@ -1144,6 +1484,7 @@ class PopulationTrainer:
                         temperature=self.config.temperature,
                         eos_token_ids=self._eos_token_ids,
                         adapter_name=pop_name,
+                        stop_strings=stop_strings,
                     )
                 else:
                     with torch.no_grad():
@@ -1152,6 +1493,7 @@ class PopulationTrainer:
                             n_tokens=n_tokens,
                             temperature=self.config.temperature,
                             eos_token_ids=self._eos_token_ids,
+                            stop_strings=stop_strings,
                         )
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
@@ -1235,17 +1577,35 @@ class PopulationTrainer:
                     info={},
                 ))
             for step in history:
-                if step.agent_id == pop_name:
-                    if step.token_type == TokenType.OBS:
-                        fids = formatter.wrap_observation(step.token_ids)
-                        lps = step.log_probs
-                    elif step.token_type == TokenType.ACT:
-                        fids = formatter.wrap_action(step.token_ids)
-                        lps = step.log_probs + [0.0] * (len(fids) - len(step.token_ids))
-                    else:
-                        fids = step.token_ids
-                        lps = step.log_probs
-                    steps.append(EpisodeStep(pop_name, fids, step.token_type, lps, step.info))
+                if step.agent_id != pop_name:
+                    continue
+                if step.token_type == TokenType.OBS:
+                    fids = formatter.wrap_observation(step.token_ids)
+                    steps.append(EpisodeStep(
+                        pop_name, fids, TokenType.OBS, step.log_probs, step.info))
+                elif step.token_type == TokenType.ACT:
+                    # Observation principle: only tokens the model *generated*
+                    # are actions (σ=0). The turn-closing scaffolding the
+                    # framework appends (<|im_end|>\n etc.) was inserted, not
+                    # sampled, so it is perception (σ=1/OBS) — emitted here as a
+                    # separate OBS step. Concatenated, the two steps reproduce
+                    # wrap_action(token_ids) exactly, so the training sequence
+                    # stays byte-identical to the rollout context; only the σ
+                    # mask (and thus which tokens enter L_act vs L_perc) differs.
+                    # This also keeps the inserted close out of the PPO ratio,
+                    # where it would otherwise carry a fabricated old-logprob of
+                    # 0.0 (prob 1.0) for a token the policy never chose.
+                    steps.append(EpisodeStep(
+                        pop_name, list(step.token_ids), TokenType.ACT,
+                        step.log_probs, step.info))
+                    close = formatter.action_close_tokens(step.token_ids)
+                    if close:
+                        steps.append(EpisodeStep(
+                            pop_name, close, TokenType.OBS, [], step.info))
+                else:
+                    steps.append(EpisodeStep(
+                        pop_name, step.token_ids, step.token_type,
+                        step.log_probs, step.info))
             traj = self.tokeniser.build_trajectory(
                 episode_history=steps,
                 agent_ids_present=list(self.population.keys()),

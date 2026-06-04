@@ -20,12 +20,33 @@ def _detach_kv_cache(cache):
     """Detach all K/V tensors in an HF cache so the next chunk's autograd
     graph is independent of prior chunks.
 
-    Handles both the modern ``DynamicCache`` (lists of per-layer tensors)
-    and the legacy tuple-of-tuples format. Returns ``cache`` (mutated in
-    place for DynamicCache; new tuple for the legacy form).
+    Three supported formats:
+
+    * Modern ``DynamicCache`` (transformers ≥ 4.50ish) stores per-layer
+      K/V on ``cache.layers[i].keys`` / ``.values``. The older top-level
+      ``cache.key_cache`` / ``.value_cache`` attributes are gone, so a
+      ``hasattr`` check on them silently fails — which used to leave the
+      cache un-detached and triggered "backward through graph twice"
+      errors in the chunked-loss path.
+    * Pre-4.50ish DynamicCache exposed ``key_cache`` / ``value_cache``
+      as the backing lists; we still support that.
+    * Legacy tuple-of-tuples format used by older models.
+
+    Returns ``cache`` (mutated in place for both DynamicCache variants;
+    new tuple for the legacy form).
     """
     if cache is None:
         return None
+    layers = getattr(cache, "layers", None)
+    if layers is not None:
+        for layer in layers:
+            k = getattr(layer, "keys", None)
+            v = getattr(layer, "values", None)
+            if k is not None:
+                layer.keys = k.detach()
+            if v is not None:
+                layer.values = v.detach()
+        return cache
     if hasattr(cache, "key_cache") and hasattr(cache, "value_cache"):
         cache.key_cache = [k.detach() if k is not None else k for k in cache.key_cache]
         cache.value_cache = [v.detach() if v is not None else v for v in cache.value_cache]
@@ -109,6 +130,7 @@ def _generate_batch(
     temperature: float,
     eos_token_ids: list[int] | None,
     cache_implementation: str | None = None,
+    stop_strings: list[str] | None = None,
 ) -> tuple[list[list[int]], list[list[float]]]:
     """Batched autoregressive sampling via HF ``model.generate``.
 
@@ -155,6 +177,12 @@ def _generate_batch(
     )
     if eos_token_ids:
         gen_kwargs["eos_token_id"] = list(eos_token_ids)
+    if stop_strings:
+        # HF halts each sequence when any of these strings is generated; the
+        # stop string is retained in the output. Requires the tokenizer so HF
+        # can match against decoded text. Mirrors the vLLM path's `stop=`.
+        gen_kwargs["stop_strings"] = list(stop_strings)
+        gen_kwargs["tokenizer"] = tokenizer
     if temperature == 0.0:
         gen_kwargs["do_sample"] = False
     else:
@@ -568,12 +596,14 @@ class IndependentAgent(Agent):
         n_tokens: int,
         temperature: float = 1.0,
         eos_token_ids: list[int] | None = None,
+        stop_strings: list[str] | None = None,
     ) -> tuple[list[list[int]], list[list[float]]]:
         """Batched autoregressive sampling — delegates to ``_generate_batch``."""
         return _generate_batch(
             self._backbone, self._tokenizer, self.device,
             contexts, n_tokens, temperature, eos_token_ids,
             cache_implementation=self._cache_impl,
+            stop_strings=stop_strings,
         )
 
     # ------------------------------------------------------------------ #
@@ -846,6 +876,7 @@ class LoRASharedBaseAgent(Agent):
         n_tokens: int,
         temperature: float = 1.0,
         eos_token_ids: list[int] | None = None,
+        stop_strings: list[str] | None = None,
     ) -> tuple[list[list[int]], list[list[float]]]:
         """Batched autoregressive sampling — delegates to ``_generate_batch``.
 
@@ -857,6 +888,7 @@ class LoRASharedBaseAgent(Agent):
             self._backbone, self._tokenizer, self.device,
             contexts, n_tokens, temperature, eos_token_ids,
             cache_implementation=self._cache_impl,
+            stop_strings=stop_strings,
         )
 
     # ------------------------------------------------------------------ #

@@ -395,7 +395,25 @@ def plot_compute_utilization(exp_dir: Path, data: dict[str, np.ndarray]) -> Path
     if not (have_time or have_thru or have_gpu or have_cpu):
         return None
 
-    fig, axes = plt.subplots(3, 2, figsize=(11, 10), squeeze=False)
+    # Discover which GPU indices appear in the metrics so we can render
+    # per-GPU lines instead of treating gpu0 as the whole story.
+    import re as _re
+    gpu_idx_set: set[int] = set()
+    for k in data:
+        m = _re.match(r"(?:mem|util)/gpu(\d+)/", k)
+        if m:
+            gpu_idx_set.add(int(m.group(1)))
+    gpu_indices = sorted(gpu_idx_set)
+    # Distinct colour per GPU for cross-panel consistency.
+    _GPU_COLOURS = ["#4DBBD5", "#E64B35", "#F39B7F", "#55A868",
+                    "#8172B2", "#937860", "#DA8BC3", "#8C8C8C"]
+    gpu_colour = {idx: _GPU_COLOURS[k % len(_GPU_COLOURS)]
+                  for k, idx in enumerate(gpu_indices)}
+
+    have_sm_util = any(k.startswith("util/gpu") and k.endswith("/sm") for k in data)
+    n_rows = 4 if have_sm_util else 3
+    fig, axes = plt.subplots(n_rows, 2, figsize=(11, 10 + 3 * (n_rows - 3)),
+                             squeeze=False)
     fig.suptitle(f"{exp_dir.name} — compute utilisation",
                  fontsize=11, fontweight="bold")
 
@@ -477,28 +495,45 @@ def plot_compute_utilization(exp_dir: Path, data: dict[str, np.ndarray]) -> Path
     else:
         ax.set_visible(False)
 
-    # ── Row 2 col 0: GPU memory ────────────────────────────────────────────
+    # ── Row 2 col 0: GPU memory — NVML peak (background sampler) ──────────
+    # NVML peak captures all tenants on the GPU (all training ranks +
+    # vLLM + any sibling processes) sampled every ~200ms during the
+    # iteration, so it sees the true per-iter spike — not the
+    # post-empty_cache low-water mark that the snapshot path reads.
+    # Falls back to the log-time snapshot (``nvml_used_gb``) for runs
+    # that predate the background sampler.
     ax = axes[2, 0]
-    gpu_total = None
     plotted = False
-    if "mem/gpu0/total_gb" in data and len(data["mem/gpu0/total_gb"]) > 0:
-        gpu_total = float(np.nanmax(data["mem/gpu0/total_gb"]))
-    pairs = [
-        ("mem/gpu0/alloc_gb",      "alloc",         "#4DBBD5"),
-        ("mem/gpu0/reserved_gb",   "reserved",      "#F39B7F"),
-        ("mem/gpu0/peak_alloc_gb", "peak alloc",    "#E64B35"),
-    ]
-    for key, label, color in pairs:
-        if key in data:
-            ax.plot(iters, smooth(data[key]), color=color, label=label)
+    gpu_total = None
+    for idx in gpu_indices:
+        peak_key  = f"mem/gpu{idx}/nvml_peak_used_gb"
+        snap_key  = f"mem/gpu{idx}/nvml_used_gb"
+        proc_key  = f"mem/gpu{idx}/peak_alloc_gb"
+        if peak_key in data:
+            ax.plot(iters, smooth(data[peak_key]),
+                    color=gpu_colour[idx], linewidth=1.4,
+                    label=f"GPU {idx} NVML peak (sampled)")
             plotted = True
+        elif snap_key in data:
+            ax.plot(iters, smooth(data[snap_key]),
+                    color=gpu_colour[idx], linewidth=1.4, linestyle="--",
+                    label=f"GPU {idx} NVML snapshot")
+            plotted = True
+        if proc_key in data:
+            ax.plot(iters, smooth(data[proc_key]),
+                    color=gpu_colour[idx], linewidth=0.8, linestyle=":",
+                    alpha=0.7, label=f"GPU {idx} rank-0 alloc")
+            plotted = True
+        total_key = f"mem/gpu{idx}/total_gb"
+        if total_key in data and len(data[total_key]) > 0 and gpu_total is None:
+            gpu_total = float(np.nanmax(data[total_key]))
     if gpu_total is not None and gpu_total > 0:
-        ax.axhline(gpu_total, color="grey", linestyle=":", linewidth=0.8,
+        ax.axhline(gpu_total, color="grey", linestyle="--", linewidth=0.8,
                    label=f"GPU total {gpu_total:.0f} GiB")
     if plotted:
-        ax.set_title("GPU memory")
+        ax.set_title("GPU memory — NVML per-iter peak (200ms sampler)")
         ax.set_ylabel("GiB")
-        ax.legend(loc="lower right", fontsize=7)
+        ax.legend(loc="lower right", fontsize=6)
     else:
         ax.set_visible(False)
 
@@ -523,6 +558,55 @@ def plot_compute_utilization(exp_dir: Path, data: dict[str, np.ndarray]) -> Path
         ax.set_title("CPU memory + utilisation")
     else:
         ax.set_visible(False)
+
+    # ── Row 3: per-GPU SM and memory-bandwidth utilisation (NVML) ─────────
+    if have_sm_util:
+        ax = axes[3, 0]
+        plotted = False
+        for idx in gpu_indices:
+            mean_key = f"util/gpu{idx}/sm_mean"
+            max_key  = f"util/gpu{idx}/sm_max"
+            snap_key = f"util/gpu{idx}/sm"
+            if mean_key in data:
+                ax.plot(iters, smooth(data[mean_key]),
+                        color=gpu_colour[idx], linewidth=1.3,
+                        label=f"GPU {idx} mean")
+                if max_key in data:
+                    ax.plot(iters, smooth(data[max_key]),
+                            color=gpu_colour[idx], linewidth=0.8,
+                            linestyle=":", alpha=0.7,
+                            label=f"GPU {idx} max")
+                plotted = True
+            elif snap_key in data:
+                ax.plot(iters, smooth(data[snap_key]),
+                        color=gpu_colour[idx], linestyle="--",
+                        label=f"GPU {idx} snapshot")
+                plotted = True
+        if plotted:
+            ax.set_ylim(0, 100)
+            ax.set_title("GPU SM utilisation (200ms sampler: mean + max)")
+            ax.set_ylabel("% busy")
+            ax.axhline(50, color="grey", linestyle=":", linewidth=0.8)
+            ax.legend(loc="lower right", fontsize=6)
+        else:
+            ax.set_visible(False)
+
+        ax = axes[3, 1]
+        plotted = False
+        for idx in gpu_indices:
+            key = f"util/gpu{idx}/mem_bw"
+            if key in data:
+                ax.plot(iters, smooth(data[key]),
+                        color=gpu_colour[idx], label=f"GPU {idx}")
+                plotted = True
+        if plotted:
+            ax.set_ylim(0, 100)
+            ax.set_title("GPU memory-bandwidth utilisation (NVML)")
+            ax.set_ylabel("% of peak")
+            ax.axhline(50, color="grey", linestyle=":", linewidth=0.8)
+            ax.legend(loc="lower right", fontsize=7)
+        else:
+            ax.set_visible(False)
 
     # X labels
     for ax_row in axes:

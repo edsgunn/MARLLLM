@@ -98,6 +98,7 @@ class CCSMLoss(Loss):
         lm_head_ref: Callable[[torch.Tensor], torch.Tensor] | None = None,
         perception_source_indices: list[int] | None = None,
         seq_ids: torch.Tensor | None = None,
+        act_log_probs_old: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict]:
         # Single chunked pass through lm_head produces shifted per-token
         # log p(input_ids[t+1] | hidden[t]). Both surprises and act log-probs
@@ -173,7 +174,34 @@ class CCSMLoss(Loss):
             shifted_act_mask = act_mask[:, 1:]
             act_log_probs = token_lp[shifted_act_mask]  # flat (N_act,)
 
-            policy_loss = -(act_log_probs * advantages.detach()).mean()
+            # On-policy (REINFORCE) vs off-policy (PPO-clipped importance
+            # weighting). The PPO path is required under async rollout
+            # because action tokens were sampled under a stale policy
+            # version. The behaviour log-probs are stored per-token in
+            # ``batch.act_log_probs_old`` (0 at non-ACT positions); we
+            # gather the same positions used for ``act_log_probs`` above.
+            ppo_clip = float(getattr(config, "ppo_clip", 0.0) or 0.0)
+            if ppo_clip > 0.0 and act_log_probs_old is not None:
+                act_lp_old_flat = act_log_probs_old[:, 1:][shifted_act_mask]  # (N_act,)
+                # ratio = π_θ(a|s) / π_θ_old(a|s) at action tokens
+                ratio = (act_log_probs - act_lp_old_flat.detach()).exp()
+                adv_det = advantages.detach()
+                unclipped = ratio * adv_det
+                clipped = torch.clamp(ratio, 1.0 - ppo_clip, 1.0 + ppo_clip) * adv_det
+                # PPO surrogate: take the *pessimistic* (min) — for both
+                # signs of advantage, this is the correct "discourage
+                # off-policy drift" bound.
+                policy_loss = -torch.min(unclipped, clipped).mean()
+                # Diagnostics: surface ratio stats + clip-fraction so we
+                # can verify staleness isn't blowing the ratio horizon out.
+                clip_frac = ((ratio < 1.0 - ppo_clip) | (ratio > 1.0 + ppo_clip)).float().mean().item()
+                ratio_mean = ratio.detach().mean().item()
+                ratio_max = ratio.detach().abs().max().item()
+            else:
+                policy_loss = -(act_log_probs * advantages.detach()).mean()
+                clip_frac = 0.0
+                ratio_mean = 1.0
+                ratio_max = 1.0
 
             # Entropy bonus: H[p_θ] at action positions (§6.1).
             # We index hidden states at the act positions first, then push only
@@ -202,6 +230,9 @@ class CCSMLoss(Loss):
             entropy = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
             act_returns = torch.zeros(0, device=last_hidden.device, dtype=last_hidden.dtype)
             act_hidden_cur = None
+            clip_frac = 0.0
+            ratio_mean = 1.0
+            ratio_max = 1.0
 
         # ---- KL penalty ----
         # KL(π_θ || π_ref) at ACT positions, using the causal shift.
@@ -247,6 +278,9 @@ class CCSMLoss(Loss):
             "act_loss": l_act.item(),
             "value_loss": l_val.item(),
             "kl": kl.item(),
+            "ppo/clip_frac": clip_frac,
+            "ppo/ratio_mean": ratio_mean,
+            "ppo/ratio_max": ratio_max,
         }
 
         total = (

@@ -1,0 +1,90 @@
+{
+  "name": "ashbourne_school",
+  "description": "Ashbourne Community School, a comprehensive in the English Midlands, on a Wednesday afternoon after the last bell. The Study Group — the after-school maths club — has nominally booked the maths classroom for the evening, but in practice people drift between the maths classroom, the sixth-form common room next door, and the small school library at the end of the corridor. Mr Davies, who runs the club, has gone home; the room is theirs until the caretaker locks up. The club exists because a handful of pupils wanted to go a bit beyond what the syllabus covers — number theory, combinatorics, basic group theory, BMO/UKMT problem-solving, the occasional puzzle. Members range from Year 10 to Year 13. The tone is friendly, occasionally chaotic, and people genuinely care about getting things right even when they're being silly about it. It's 2026.",
+  "character_pack": "study_group_ashbourne",
+  "places": {
+    "maths_classroom": {
+      "title": "Maths Classroom",
+      "description": "Mr Davies's room on the first floor. Rows of desks pushed slightly out of order from last lesson, a large whiteboard at the front, a battered Pearson Year 12 textbook lying open on the front desk. The window looks onto the staff car park, now mostly empty. Someone has left half a packet of biscuits on the radiator.",
+      "exits": {
+        "common room": "common_room",
+        "library": "library"
+      },
+      "objects": {
+        "whiteboard": {
+          "title": "whiteboard",
+          "description": "A large classroom whiteboard. Anyone can add a line; lines stay until the room is cleaned.",
+          "content": "",
+          "editable": true,
+          "append_only": true
+        },
+        "problem_sheet": {
+          "title": "today's problem sheet",
+          "description": "The handout Mr Davies left for the club. Read-only — it's printed paper.",
+          "content": "Wednesday Club, week 8. Problem 1: For n >= 1, how many subsets of {1, 2, ..., n} contain no two consecutive integers? Conjecture and prove a closed form. Problem 2: Show that the sum of the n-th roots of unity is 0 for n >= 2, and find the sum of their k-th powers. Problem 3 (harder): n students sit around a round table; in how many ways can they be paired up for partner-work so that no pair sits adjacent?",
+          "editable": false,
+          "append_only": false
+        }
+      }
+    },
+    "common_room": {
+      "title": "Sixth-Form Common Room",
+      "description": "A long room with mismatched sofas, a low table covered in mug rings, a kettle that takes too long, and a chalkboard on one wall that the sixth form has been using as a chat-and-jokes board for most of the term. Someone has left a Year 13 jumper draped over the back of the sofa.",
+      "exits": {
+        "maths classroom": "maths_classroom",
+        "library": "library"
+      },
+      "objects": {
+        "chalkboard": {
+          "title": "common-room chalkboard",
+          "description": "The common-room chalkboard. People scribble jokes, problems, and the occasional reminder. New lines go at the bottom.",
+          "content": "[earlier] Whoever keeps moving the kettle: stop it.\n[earlier] anyone got Hana's lost glove? — found, with Sam",
+          "editable": true,
+          "append_only": true
+        },
+        "kettle": {
+          "title": "kettle",
+          "description": "An old plastic kettle. Boils, eventually, when nobody is waiting for it.",
+          "content": "It is half-full and lukewarm.",
+          "editable": false,
+          "append_only": false
+        }
+      }
+    },
+    "library": {
+      "title": "School Library",
+      "description": "The small school library at the corridor's end. Three tables, low shelves of paperbacks, a more serious shelf of textbooks at the back. Mrs Ahmed, the librarian, has gone home but left a desk lamp on. There is a small noticeboard above the borrowing desk.",
+      "exits": {
+        "maths classroom": "maths_classroom",
+        "common room": "common_room"
+      },
+      "objects": {
+        "library_noticeboard": {
+          "title": "library noticeboard",
+          "description": "A cork board over the borrowing desk. Anyone can pin a note. New notes go at the bottom.",
+          "content": "[earlier] Quiet please during exam season — Mrs Ahmed.\n[earlier] Book club: Wuthering Heights, Thursday at lunch.",
+          "editable": true,
+          "append_only": true
+        },
+        "reference_shelf": {
+          "title": "reference shelf",
+          "description": "The back shelf of textbooks. Someone has pulled one out and left it open on a table — read-only, it's the school's copy.",
+          "content": "Open at a chapter titled 'Recurrences and generating functions'. The page shows the Fibonacci recurrence F_{n} = F_{n-1} + F_{n-2}, and an example deriving a closed form via the generating function F(x) = x / (1 - x - x^2). A previous reader has lightly pencilled in the margin: 'so this is why so many counting problems are Fibonacci'.",
+          "editable": false,
+          "append_only": false
+        }
+      }
+    }
+  },
+  "agents": [
+    {"name": "Priya Shah",     "short": "Priya",    "start": "maths_classroom"},
+    {"name": "Tom Whitaker",   "short": "Tom",      "start": "maths_classroom"},
+    {"name": "Hana Yilmaz",    "short": "Hana",     "start": "maths_classroom"},
+    {"name": "Olu Adeyemi",    "short": "Olu",      "start": "common_room"},
+    {"name": "Beatrice Okafor","short": "Beatrice", "start": "common_room"},
+    {"name": "Sam Pritchard",  "short": "Sam",      "start": "common_room"},
+    {"name": "Imogen Carter",  "short": "Imogen",   "start": "library"},
+    {"name": "Marcus Webb",    "short": "Marcus",   "start": "library"}
+  ],
+  "system_prompt_template": "You are {character_name}, a member of The Study Group, the after-school maths club at Ashbourne Community School.\n\n{scenario_description}\n\nYour background and beliefs:\n{character_description_bullets}\n\nYou are about to take one turn in the school. Do not narrate your actions and do not include role labels or speaker prefixes — just write what {character_name} would think and then the tool tag(s) for what they do."
+}

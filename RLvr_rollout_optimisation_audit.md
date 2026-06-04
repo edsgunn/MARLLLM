@@ -234,6 +234,33 @@ We had to learn this from OOMs at long sequences with native-thinking RL. Two fi
 6. **Task 4 (flash_attention_2)**: a one-line config change once `flash-attn` is in the venv; ships with packing.
 7. **Length controller** (Task 7 extension): the regime tracker already gives us length visibility; if length grows while reward stays flat, add a mild length penalty or per-trajectory token budget. Don't add it pre-emptively — only when the signal demands it.
 
+### Re-prioritisation (May 15)
+
+Per-phase wall-time measurements on the live Qwen3 runs show **rollout is
+~85% of iter wall time** across all 4 configs (4B / 8B × 8 / 16 agents),
+and **loss is only 3-7%**. The audit's original "highest leverage = packing"
+prediction is wrong for our setup; packing is now a secondary win (it
+speeds up the 3-7% slice). The real bottleneck is rollout, gated by the
+longest episode in every iter and shrinking-batch tail compute.
+
+→ **Task 1 (async rollout/train) is now the headline.** Implemented in
+this pass under `async_rollout: true`. The CCSM-specific off-policy
+adjustments described in
+`A Guide to Training Agentic LLMs on Off-Policy Surprise Minimisation.md`
+are the principled way to absorb the resulting mild staleness:
+
+- §2.1 — Returns recomputed under current θ at consumption time: already
+  the case in `compute_loss` / `compute_loss_chunked`; no change.
+- §2.2 — PPO-clip on action loss with stored behaviour log-probs:
+  implemented via `ppo_clip` config (`act_log_probs_old` was already on
+  `RolloutBatch`).
+- §3 — Bootstrapped n-step / V-trace correction: deferred. With shallow
+  staleness budget (default `max_staleness=1`) the variance is bounded
+  enough that the simple PPO ratio is sufficient as a first move.
+- §4 — Perception loss off-policy bias: addressed by capping
+  `max_staleness`. The §4.4 ablation (importance-weight observation
+  tokens) is left as the next experimental decision point.
+
 ### What changed in this audit pass
 
 - `_extract_tagged` in `envs/forum/env.py` rewritten so only outermost tags are functional (a `<post>` inside `<think>` is now just text).
@@ -245,3 +272,11 @@ We had to learn this from OOMs at long sequences with native-thinking RL. Two fi
   - Boundary-aware reductions in `marlllm/loss.py`: `_compute_returns` resets the running discount sum at trajectory boundaries; the cross-boundary shifted ACT position is excluded from policy/value losses; the cross-boundary OBS position is kept in `obs_mask` but its surprise is zeroed so the mean denominator matches the padded path (verified bit-exact equivalence in `tests/test_packed_vs_padded.py` style probe).
   - Constraint: mutually exclusive with `seq_chunk_size` in this release — chunked + packed together needs cu_seqlens-aware per-chunk masks, follow-up work.
   - Constraint: needs `transformers ≥ 4.55` (legacy `.venv` ships 4.57 → ok; flagged for the qwen3p5 venv at 5.8 → ok).
+- **Task 1 (async rollout/train, mild staleness)** implemented with opt-in `async_rollout: true`:
+  - `marlllm/rollout_buffer.py` — `RolloutBuffer` (bounded FIFO + policy-version stamps) and `RolloutWorker` (background thread, surfaces exceptions via sentinel).
+  - `marlllm/population.py` — `_train_loop` consumes from buffer when async; bumps `_policy_version` after each `optimizer.step + sync_all_adapters`.
+  - `marlllm/loss.py` — `compute_loss` gains `act_log_probs_old` + PPO-clipped surrogate loss (`-min(ρ·A, clip(ρ, 1-ε, 1+ε)·A).mean()`); emits `ppo/{clip_frac, ratio_mean, ratio_max}` for diagnostics. REINFORCE preserved as `ppo_clip=0`.
+  - `marlllm/vllm_engine.py` — adapter dir cleanup switched from "immediate predecessor rmtree" to a per-name ring of recent dirs (`MARLLLM_VLLM_ADAPTER_RING_KEEP`, default 4). Async-safe because the worker can hold a `LoRARequest` to a previous dir while the trainer publishes a new one.
+  - Race-avoidance: the worker owns `self._rollout_stats` exclusively while running `_collect_episodes_batched`; the trainer reads `item.rollout_stats` (captured copy) instead of overwriting the attribute. peft_model train/eval mode toggles are skipped under vLLM (it doesn't use peft_model for inference).
+  - Metrics surfaced: `async/{staleness, policy_version, buffer_size}` + `ppo/{clip_frac, ratio_mean, ratio_max}`.
+  - Recommended config: `async_rollout=true, replay_buffer_size=2, max_staleness=1, ppo_clip=0.2` together with the existing `kl_coef` anchor (off-policy guide §5).

@@ -69,9 +69,21 @@ class ContextFormatter:
         """Wrap an observation as a user turn and append the assistant primer."""
         return ids
 
+    def action_close_tokens(self, ids: list[int]) -> list[int]:
+        """Tokens the framework *inserts* to close the assistant turn.
+
+        These were not sampled by the model, so under the observation
+        principle (generated → ACT/σ=0; inserted → OBS/σ=1) they belong on
+        the observation side of the OBS/ACT boundary. ``wrap_action`` is
+        ``ids`` followed by exactly these tokens, so the live context stream
+        and the training trajectory stay byte-identical while the σ label of
+        the close differs based solely on who emitted it. Base formatter
+        inserts nothing."""
+        return []
+
     def wrap_action(self, ids: list[int]) -> list[int]:
-        """Wrap action tokens (typically a no-op)."""
-        return ids
+        """Wrap action tokens (generated tokens + any inserted turn-close)."""
+        return list(ids) + self.action_close_tokens(ids)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -128,15 +140,19 @@ class ChatMLFormatter(ContextFormatter):
     def wrap_observation(self, ids: list[int]) -> list[int]:
         return self._user_prefix + ids + self._user_suffix
 
-    def wrap_action(self, ids: list[int]) -> list[int]:
-        """Close the assistant turn with ``<|im_end|>\\n`` if it's not already
-        closed, so the chat-template structure stays canonical regardless of
-        whether the model emitted EOS itself."""
+    def action_close_tokens(self, ids: list[int]) -> list[int]:
+        """Framework-inserted tokens that close the assistant turn (σ=1/OBS).
+
+        Whether ``<|im_end|>`` is here depends solely on who generated it: if
+        the model emitted it (it's the last sampled token), only the separator
+        ``\\n`` is inserted; if generation was cut short (e.g. stopped at an
+        information-returning tag like ``</read>``), the full ``<|im_end|>\\n``
+        is inserted. Either way these tokens were authored by the framework,
+        not sampled by the policy, so they are perception, not action."""
         if ids and self._im_end_id is not None and ids[-1] == self._im_end_id:
-            # Model stopped on <|im_end|>; just append the separator newline.
-            return list(ids) + [tid for tid in self._action_close
-                                if tid != self._im_end_id]
-        return list(ids) + list(self._action_close)
+            # Model stopped on <|im_end|>; only the separator newline is ours.
+            return [tid for tid in self._action_close if tid != self._im_end_id]
+        return list(self._action_close)
 
 
 class Llama3Formatter(ContextFormatter):
@@ -171,13 +187,14 @@ class Llama3Formatter(ContextFormatter):
     def wrap_observation(self, ids: list[int]) -> list[int]:
         return self._user_prefix + ids + self._user_suffix
 
-    def wrap_action(self, ids: list[int]) -> list[int]:
-        """Close the assistant turn with ``<|eot_id|>`` if not already closed."""
-        if ids and self._eot_id is not None and ids[-1] == self._eot_id:
-            return list(ids)
+    def action_close_tokens(self, ids: list[int]) -> list[int]:
+        """Framework-inserted ``<|eot_id|>`` turn-close (σ=1/OBS), if the model
+        didn't already emit it. Inserted ⇒ perception, not action."""
         if self._eot_id is None:
-            return list(ids)
-        return list(ids) + [self._eot_id]
+            return []
+        if ids and ids[-1] == self._eot_id:
+            return []
+        return [self._eot_id]
 
 
 # ── Registry and factory ──────────────────────────────────────────────────────

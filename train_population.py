@@ -148,7 +148,56 @@ def _build_env_from_spec(spec_dict: dict, tokenizer: Any, default_seed: int, *, 
         return _build_concordia_env(spec_dict, tokenizer, base_model_name=base_model_name, base_dtype=base_dtype, default_seed=default_seed, shared_backbone=shared_backbone, shared_backbone_device=shared_backbone_device)
     if env_type == 'forum':
         return _build_forum_env(spec_dict, tokenizer, default_seed=default_seed)
-    raise ValueError(f"Unknown env type {env_type!r} in environments spec. Supported: 'deal_or_no_deal', 'concordia', 'forum'.")
+    if env_type == 'social_terminal':
+        return _build_social_terminal_env(spec_dict, tokenizer, default_seed=default_seed)
+    raise ValueError(f"Unknown env type {env_type!r} in environments spec. Supported: 'deal_or_no_deal', 'concordia', 'forum', 'social_terminal'.")
+
+def _build_social_terminal_env(spec_dict: dict, tokenizer: Any, *, default_seed: int) -> Any:
+    """Build a SocialTerminalEnv from a YAML env-spec dict.
+
+    Required keys:
+      ``scenario``       : name of a scenario JSON at
+                           ``envs/social_terminal/scenarios/<scenario>.json``.
+
+    Optional keys:
+      ``max_turns``           : total turns across all agents (default 24).
+      ``action_token_budget`` : tokens per turn — thinking + <act> combined
+                                (default 384).
+      ``act_token_budget``    : cap the agent is told to stay under for the
+                                <act> block itself (default = action_token_budget).
+      ``whisper_visible``     : if True (default), bystanders see that a
+                                whisper happened (content stays private).
+      ``stop_at_info_actions``: if True (default), expose read/where/look
+                                close tags as sampler stop-strings so a turn
+                                halts when the actor commits to waiting on
+                                perception (auto-disabled for thinking models).
+      ``seed``                : per-env RNG seed (default ``args.seed``).
+    """
+    from envs.social_terminal import SocialTerminalEnv, load_scenario
+    if 'scenario' not in spec_dict:
+        raise ValueError(
+            "social_terminal env spec must set 'scenario: <name>' to select a "
+            "scenario from envs/social_terminal/scenarios/."
+        )
+    scenario_name = spec_dict['scenario']
+    try:
+        scenario = load_scenario(scenario_name)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"Unknown social_terminal scenario {scenario_name!r}: no JSON at "
+            f"envs/social_terminal/scenarios/{scenario_name}.json."
+        ) from exc
+    seed = int(spec_dict.get('seed', default_seed))
+    return SocialTerminalEnv(
+        scenario=scenario,
+        tokenizer=tokenizer,
+        max_turns=int(spec_dict.get('max_turns', 24)),
+        action_token_budget=int(spec_dict.get('action_token_budget', 384)),
+        act_token_budget=spec_dict.get('act_token_budget'),
+        whisper_visible=bool(spec_dict.get('whisper_visible', True)),
+        stop_at_info_actions=bool(spec_dict.get('stop_at_info_actions', True)),
+        seed=seed,
+    )
 
 def _build_forum_env(spec_dict: dict, tokenizer: Any, *, default_seed: int) -> Any:
     """Build a ForumEnv from a YAML env-spec dict.
@@ -282,6 +331,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--gradient-checkpointing', action='store_true')
     p.add_argument('--seq-chunk-size', type=int, default=None, help='Chunk the loss-step forward+backward along the sequence axis into chunks of this many tokens. Reduces peak activation memory ~T/chunk_size. Cross-chunk attention gradients are dropped (each chunk attends over a detached KV cache from prior chunks). None = disabled (single-shot path).')
     p.add_argument('--pack-sequences', action=argparse.BooleanOptionalAction, default=False, help='Concatenate one agent\'s K trajectories into a single (1, T_total) packed row with a block-diagonal causal attention mask, instead of right-padding to T_max. Removes pad-token FLOPs (~40-60%% of compute at typical length variance) at the cost of a 4D additive mask kept live on the autograd graph. Mutually exclusive with --seq-chunk-size in this release; flash-attn varlen integration is a follow-up. See RLvr_rollout_optimisation_audit.md.')
+    p.add_argument('--async-rollout', action=argparse.BooleanOptionalAction, default=False, help='Run rollout collection on a background thread, feeding a bounded buffer the training thread consumes from. Trajectories carry a policy_version stamp; loss path applies PPO-clip importance correction. Recommended with --ppo-clip>0 (off-policy correction) and the existing --kl-coef anchor.')
+    p.add_argument('--replay-buffer-size', type=int, default=2, help='Max iter-batches buffered ahead of the trainer. With size=2 and max-staleness=1, rollout for iter k+1 runs in parallel with training on iter k.')
+    p.add_argument('--max-staleness', type=int, default=1, help='Drop trajectory batches sampled more than this many policy versions ago. The off-policy guide recommends keeping this small (≤4); 1 maximises overlap with minimal off-policy bias.')
+    p.add_argument('--ppo-clip', type=float, default=0.0, help='PPO importance-ratio clip ε. 0 = REINFORCE (sync only). Set to 0.2 (or similar) when --async-rollout is on. The pretrained-KL anchor (kl_coef) already constrains drift, so loosening from canonical 0.2 may be safe — sweep jointly.')
     p.add_argument('--dialogue-turns', type=int, default=10)
     p.add_argument('--token-budget', type=int, default=64, help='Generation budget per turn (includes thinking tokens).')
     p.add_argument('--env-token-budget', type=int, default=None, help='Communication budget: max tokens passed to the env after thinking tokens are stripped. None = no stripping (default). Should be <= --token-budget.')
@@ -447,7 +500,7 @@ def main() -> None:
             pct = 100 * spec.weight / total_w
             print(f'  {spec.name:30s}  weight={spec.weight:.2f}  ({pct:.0f}%)')
     flat_prompts = {name: p[0] if isinstance(p, list) else p for name, p in character_prompts.items()}
-    config = TrainingConfig(model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, use_8bit_adam=args.use_8bit_adam, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, snapshot_eval_path=args.snapshot_eval_path, snapshot_samples_per_context=args.snapshot_samples_per_context, snapshot_max_new_tokens=args.snapshot_max_new_tokens, var_decomp_enabled=args.var_decomp_enabled, var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path, var_decomp_n_contexts=args.var_decomp_n_contexts, var_decomp_K=args.var_decomp_K, var_decomp_M=args.var_decomp_M, var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps, var_decomp_n_eval_early=args.var_decomp_n_eval_early, var_decomp_n_eval_late=args.var_decomp_n_eval_late, var_decomp_switch_iter=args.var_decomp_switch_iter, output_dir=args.output_dir, device=device, seed=args.seed, kl_coef=args.kl_coef, always_log_kl=args.always_log_kl, beta=args.beta, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, seq_chunk_size=args.seq_chunk_size, pack_sequences=args.pack_sequences, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
+    config = TrainingConfig(model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, use_8bit_adam=args.use_8bit_adam, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, snapshot_eval_path=args.snapshot_eval_path, snapshot_samples_per_context=args.snapshot_samples_per_context, snapshot_max_new_tokens=args.snapshot_max_new_tokens, var_decomp_enabled=args.var_decomp_enabled, var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path, var_decomp_n_contexts=args.var_decomp_n_contexts, var_decomp_K=args.var_decomp_K, var_decomp_M=args.var_decomp_M, var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps, var_decomp_n_eval_early=args.var_decomp_n_eval_early, var_decomp_n_eval_late=args.var_decomp_n_eval_late, var_decomp_switch_iter=args.var_decomp_switch_iter, output_dir=args.output_dir, device=device, seed=args.seed, kl_coef=args.kl_coef, always_log_kl=args.always_log_kl, beta=args.beta, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, seq_chunk_size=args.seq_chunk_size, pack_sequences=args.pack_sequences, async_rollout=args.async_rollout, replay_buffer_size=args.replay_buffer_size, max_staleness=args.max_staleness, ppo_clip=args.ppo_clip, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
     tokeniser = TextTokeniser(first_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

@@ -89,6 +89,15 @@ class VLLMSamplingEngine:
         # staging dir grows by ~(num_adapters * adapter_size) every step
         # and eventually fills /dev/shm.
         self._current_id_dirs: dict[str, Path] = {}
+        # Per-adapter ring of recent on-disk dirs. We keep the K most-recent
+        # to make async rollout safe (the worker may hold a LoRARequest to
+        # a previous dir while the trainer is publishing a new one). K is
+        # set by ``_adapter_ring_keep`` and overridden via env so deployments
+        # with deeper buffers can keep more.
+        self._id_dir_ring: dict[str, list[Path]] = {}
+        self._adapter_ring_keep: int = int(
+            os.environ.get("MARLLLM_VLLM_ADAPTER_RING_KEEP", "4")
+        )
 
         # Prefer /dev/shm for adapter staging (tmpfs → fast write+read).
         if adapter_dir is None:
@@ -256,15 +265,26 @@ class VLLMSamplingEngine:
                         f"under {path} (checked {path}/ and {actual_path}/). "
                         f"Contents: {list(path.rglob('*'))[:20]}"
                     )
-            prev_id_dir = self._current_id_dirs.get(name)
             self._current_ids[name] = int_id
             self._current_paths[name] = actual_path
             self._current_id_dirs[name] = path
-            # vLLM caches LoRAs by lora_int_id and we only ever hand it the
-            # newest id, so the previous on-disk copy is unreferenced and
-            # safe to drop. Without this the staging dir grows unbounded.
-            if prev_id_dir is not None and prev_id_dir != path:
-                shutil.rmtree(prev_id_dir, ignore_errors=True)
+            # Maintain a small ring of recent adapter dirs per name. Under
+            # synchronous rollout the previous dir is unreferenced the moment
+            # we publish a new id, so a ring of 2 (current + previous) is
+            # generous. Under async rollout the worker thread may still hold
+            # a LoRARequest pointing at an older dir while training already
+            # published a newer one; keep ring_size at least max_staleness+2
+            # to be safe. We do the eviction via the ring rather than
+            # rm-ing the immediate predecessor: a single rmtree of an in-
+            # use dir would corrupt the live vLLM generate that loaded its
+            # config.json on first request.
+            ring = self._id_dir_ring.setdefault(name, [])
+            ring.append(path)
+            keep = max(2, int(self._adapter_ring_keep))
+            while len(ring) > keep:
+                old_path = ring.pop(0)
+                if old_path != path:
+                    shutil.rmtree(old_path, ignore_errors=True)
         finally:
             if prev_active is not None and prev_active != name:
                 try:
@@ -309,6 +329,7 @@ class VLLMSamplingEngine:
         temperature: float,
         eos_token_ids: list[int] | None,
         adapter_name: str,
+        stop_strings: list[str] | None = None,
     ) -> tuple[list[list[int]], list[list[float]]]:
         """Drop-in replacement for ``Agent.act_batch``.
 
@@ -316,6 +337,11 @@ class VLLMSamplingEngine:
         emitted token is the log-probability of *that token* under the
         sampling distribution at that step (after temperature scaling),
         which matches the contract of the existing HF act_batch path.
+
+        ``stop_strings`` (optional) are literal strings that halt generation
+        when emitted; the stop string is *kept* in the output
+        (``include_stop_str_in_output``) so the env still receives the tag
+        it stopped on (e.g. ``</read>``) to parse.
         """
         from vllm import SamplingParams
         from vllm.inputs import TokensPrompt
@@ -326,6 +352,8 @@ class VLLMSamplingEngine:
             top_k=-1,
             max_tokens=int(n_tokens),
             stop_token_ids=list(eos_token_ids) if eos_token_ids else None,
+            stop=list(stop_strings) if stop_strings else None,
+            include_stop_str_in_output=bool(stop_strings),
             logprobs=0,  # 0 → only the chosen token's logprob is returned
             ignore_eos=False,
         )

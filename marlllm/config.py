@@ -100,6 +100,29 @@ class TrainingConfig:
     #     over the packed row), so total tokens per agent must fit memory.
     pack_sequences: bool = False
 
+    # Async rollout (off-policy with mild staleness). When True a background
+    # thread continuously fills a bounded buffer; the training thread
+    # consumes whatever's ready. Trajectories carry a policy_version stamp
+    # so the loss path can apply PPO importance correction.
+    #
+    # See "A Guide to Training Agentic LLMs on Off-Policy Surprise
+    # Minimisation.md" for the math. Key correctness items:
+    #   * Returns are recomputed under current θ at consumption time — we
+    #     already do this in compute_loss (and compute_loss_chunked) so no
+    #     extra change is required.
+    #   * Action loss must use PPO-clip on the stored behaviour log-probs
+    #     (act_log_probs_old). Set ppo_clip > 0 to enable.
+    #   * Perception loss has no importance-weighting story; keep staleness
+    #     shallow (default max_staleness=1) per the guide's §4.3.
+    async_rollout: bool = False
+    replay_buffer_size: int = 2  # max iter-batches queued ahead of trainer
+    max_staleness: int = 1       # drop batches sampled >= this many policy versions ago
+    # PPO clip threshold on action log-prob ratios. 0 = REINFORCE (sync only).
+    # Recommended starting value: 0.2, but the doc notes our pretrained-KL
+    # anchor (kl_coef) already constrains drift, so we may be able to run
+    # looser — sweep jointly with kl_coef.
+    ppo_clip: float = 0.0
+
     # LoRA (PEFT) — set lora_r > 0 to enable; requires `peft` package
     lora_r: int = 0                    # LoRA rank; 0 = full fine-tuning
     lora_alpha: int = 16               # LoRA scaling factor
