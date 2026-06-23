@@ -34,7 +34,7 @@ vllm_max_num_seqs: 8
 vllm_max_model_len: 32768
 vllm_quantization: fp8
 
-seq_chunk_size: 8192
+seq_chunk_size: 4096
 lora_modules: q_proj,v_proj
 use_8bit_adam: true
 characters:
@@ -51,7 +51,7 @@ lora_r: 64
 lora_alpha: 128
 pairing_strategy: random_no_self
 iters: 300
-rollouts: 8
+rollouts: 4
 lr: 5e-6
 kl_coef: 0.05
 beta: 0.01
@@ -60,7 +60,7 @@ seed: 1
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
-max_episode_tokens: 49152
+max_episode_tokens: 32768
 environments:
 - name: ashbourne_school
   type: social_terminal

@@ -116,14 +116,21 @@ _TAG_NAMES = ("say", "whisper", "emote", "look", "where", "go", "read",
 # because the policy could not have conditioned on information it has not
 # yet perceived. (Productive verbs — say/emote/whisper/write — return nothing
 # to the actor, so they remain freely stackable.)
+#
+# Every turn-ending verb is also a generation stop-point: once the actor
+# commits to one it is waiting on perception, so there is nothing useful
+# left to sample this turn. ``<go>`` very much included — without it the
+# policy keeps generating actions for (and confabulating the contents of)
+# the room it just walked into but has not yet seen.
 _TURN_ENDING = {"go", "read", "where", "look"}
 
-# Subset of the turn-ending verbs whose closing tag we also expose as a
-# generation stop-string (see ``generation_stop_strings``): emitting the
-# close means the actor is now waiting on perception, so there is no point
-# sampling further tokens this turn. ``go`` is excluded — it has no inbox
-# payload to confabulate, and stopping at ``</go>`` would save nothing.
-_STOP_AT_CLOSE = {"read", "where", "look"}
+# Argless info verbs are usually written self-closing (``<where/>``,
+# ``<look/>``); verbs that take an argument carry it in the body and so end
+# at the close tag (``<read>x</read>``, ``<go>x</go>``). We can't form a
+# reliable stop-string for the bare-arg variants (``<read x>``, ``<go x>``),
+# which have no terminator — the env-level turn-ending in ``step`` is the
+# backstop for those.
+_ARGLESS_INFO_VERBS = {"where", "look"}
 
 # Pattern matching a ``<think>...</think>`` block, including the
 # truncated-open case (``<think>...`` with no close, cut off by the token
@@ -451,22 +458,30 @@ class SocialTerminalEnv(AECEnv):
     def generation_stop_strings(self) -> list[str]:
         """Literal strings whose emission should halt generation this turn.
 
-        These are the close tags of the information-returning verbs (see
-        ``_STOP_AT_CLOSE``): once the model writes ``</read>`` it is
-        committing to wait for perception it can't see until next turn, so
-        there is nothing useful left to sample. The trainer passes these to
-        the sampler with ``include_stop_str_in_output=True`` so the env still
-        receives the close tag to parse.
+        Covers every information-returning verb (``_TURN_ENDING``): once the
+        model writes ``</read>`` or ``</go>`` it is committing to wait for
+        perception it can't see until next turn, so there is nothing useful
+        left to sample — and anything it *did* sample would be confabulated
+        (e.g. the contents of the room it just walked into). The trainer
+        passes these to the sampler with ``include_stop_str_in_output=True``
+        so the env still receives the close tag to parse.
 
-        Best-effort prevention only: it catches the canonical body forms but
-        not the liberal variants the parser also accepts (bare-arg
-        ``<read board>`` has no close tag). The env-level turn-ending logic
-        in ``step`` is the authoritative backstop for everything the
-        stop-strings miss. Empty when disabled.
+        For the argless verbs we also stop on the self-closing form
+        (``<look/>``, ``<look />``), which is how they're usually written.
+
+        Best-effort prevention only: it catches the close-tag and
+        self-closing forms but not the bare-arg variants the parser also
+        accepts (``<read board>``, ``<go library>`` have no terminator). The
+        env-level turn-ending in ``step`` is the authoritative backstop for
+        everything the stop-strings miss. Empty when disabled.
         """
         if not self._stop_at_info_actions:
             return []
-        return [f"</{v}>" for v in sorted(_STOP_AT_CLOSE)]
+        stops: list[str] = [f"</{v}>" for v in sorted(_TURN_ENDING)]
+        for v in sorted(_ARGLESS_INFO_VERBS):
+            stops.append(f"<{v}/>")
+            stops.append(f"<{v} />")
+        return stops
 
     # ── PettingZoo required surface ──────────────────────────────────
 
