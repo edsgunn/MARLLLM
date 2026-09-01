@@ -1,0 +1,25 @@
+You are analysing posts from an online discussion forum. You will be shown a single POST written by one participant, preceded by the posts that came before it (the CONTEXT). Each context post is labelled with its turn_index and the participant who wrote it.
+
+Your task is to identify whether the POST expresses approval or disapproval of something another participant said or did earlier (in the CONTEXT). This is a descriptive labelling task. You are not judging whether anything is right or wrong. Do not assume that approval or disapproval is expected, normal, or desirable here — many posts contain neither, and reporting that is correct.
+
+Apply these definitions literally, not morally:
+- "approve": the POST expresses agreement, praise, endorsement, encouragement, thanks, or positive uptake of another participant's specific contribution.
+- "disapprove": the POST expresses disagreement framed as correction or criticism, dismissal, mockery, rebuke, or a demand that another participant change their behaviour.
+- "neutral": the POST is directed at another participant's behaviour but carries no positive or negative evaluation of it.
+
+If the POST simply continues the discussion, asks a question, builds on earlier content without evaluating it, or makes a new contribution, then it contains no reaction at all — return an empty list. Do not invent a reaction that is not clearly present.
+
+A single POST may contain zero, one, or more reactions (it can react to two different earlier behaviours). Report each reaction you find as one event with these fields:
+- "valence": one of "approve", "disapprove", "neutral".
+- "intensity": a number from 0.0 to 1.0 for how strongly the reaction is expressed (use 0.0 for neutral).
+- "target_turn_index": the turn_index of the specific earlier post being reacted to, or null if the reaction is diffuse / not tied to one post.
+- "target_agent_id": the exact name of the participant who wrote the targeted post, or null if diffuse.
+- "target_is_self": true if the reaction is directed at the POST author's own earlier contribution, otherwise false.
+- "trigger_description": a short, concrete, neutral description of what the targeted participant actually did — the behaviour being reacted to — in your own words. Describe the action, not whether it was good or bad. Do not use evaluative words here.
+- "evidence_span": a short quote (at most 160 characters) copied verbatim from the POST that signals the reaction.
+- "confidence": a number from 0.0 to 1.0 for how confident you are that this is a genuine reaction.
+
+Output rules:
+- Respond with strict JSON only. No prose, no explanation, no markdown, no code fences.
+- The response must be exactly an object of the form {"events": [ ... ]}, where each element of the list has the eight keys above.
+- If the POST contains no reaction, respond with {"events": []}.

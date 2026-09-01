@@ -1,0 +1,53 @@
+# Sanctioning Measurement Framework (Rungs 0-1) — pipeline config.
+# Drives: extract / cluster / rung0 / rung1 / validate / label.
+# Run with the hand-built venv:  .venv/bin/python -m sanctioning <cmd> --config configs/sanctioning.yaml
+
+judge:
+  provider: openai               # anthropic | openai
+  model: gpt-4.1-mini            # judge model (instrument — keep fixed once validated)
+  temperature: 0.0               # reproducibility
+  max_tokens: 1024
+  window_k: 6                    # preceding posts shown as CONTEXT
+  concurrency: 4                 # parallel judge calls (keep low)
+  max_retries: 4
+  json_mode: true                # OpenAI json_object mode (enforces JSON); no-op on Anthropic
+
+embedding:
+  provider: openai               # tfidf (no API key) | openai (needs OPENAI_API_KEY)
+  model: text-embedding-3-small
+
+clustering:
+  method: agglomerative          # agglomerative | hdbscan (hdbscan only if installed)
+  # Cosine-distance merge threshold. NOTE: dense (OpenAI) embeddings put random
+  # pairs near ~0.74, so anything >=0.8 collapses to one cluster. Meaningful
+  # granularity is ~0.45-0.65; >=0.8 over-merges, <=0.3 is mostly noise.
+  # (For sparse tfidf embeddings the right range is much higher, ~0.9-1.0.)
+  distance_threshold: 0.55
+  min_cluster_size: 8
+  sweep: [0.45, 0.50, 0.55, 0.60, 0.65]   # MI sensitivity sweep over the threshold
+
+validation:
+  presence_f1_min: 0.65          # Rung-1 gate: per-post presence detection F1 floor
+  valence_kappa_min: 0.6         # Rung-1 gate: valence agreement (Cohen's kappa) floor
+  n_label_samples: 200           # hand-label sample size
+
+paths:
+  traces_root: runs/cultural_emergence
+  output_dir: runs/sanctioning
+  # events / clusters / figures / cache_db / labels / validation derive from output_dir
+
+# The two 5-seed forum families (confirmed against on-disk traces).
+# run_id = seed-level run dir name; substrate = behaviour family.
+corpus:
+  # --- Ashbourne study-group group-chat (16-agent), 5 seeds ---
+  - {run_id: ashbourne_gc_s1, substrate: ashbourne_gc, path: runs/cultural_emergence/run8_16agent_7B_study_group_ashbourne_gc}
+  - {run_id: ashbourne_gc_s2, substrate: ashbourne_gc, path: runs/cultural_emergence/run8_16agent_7B_study_group_ashbourne_gc_seed2}
+  - {run_id: ashbourne_gc_s3, substrate: ashbourne_gc, path: runs/cultural_emergence/run8_16agent_7B_study_group_ashbourne_gc_seed3}
+  - {run_id: ashbourne_gc_s4, substrate: ashbourne_gc, path: runs/cultural_emergence/run8_16agent_7B_study_group_ashbourne_gc_seed4}
+  - {run_id: ashbourne_gc_s5, substrate: ashbourne_gc, path: runs/cultural_emergence/run8_16agent_7B_study_group_ashbourne_gc_seed5}
+  # --- Margin Notes (8-agent), 5 seeds ---
+  - {run_id: margin_notes_s1, substrate: margin_notes, path: runs/cultural_emergence/run7_8agent_7B_margin_notes}
+  - {run_id: margin_notes_s2, substrate: margin_notes, path: runs/cultural_emergence/run7_8agent_7B_margin_notes_seed2}
+  - {run_id: margin_notes_s3, substrate: margin_notes, path: runs/cultural_emergence/run7_8agent_7B_margin_notes_seed3}
+  - {run_id: margin_notes_s4, substrate: margin_notes, path: runs/cultural_emergence/run7_8agent_7B_margin_notes_seed4}
+  - {run_id: margin_notes_s5, substrate: margin_notes, path: runs/cultural_emergence/run7_8agent_7B_margin_notes_seed5}
