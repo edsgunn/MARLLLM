@@ -1,0 +1,122 @@
+# STATUS: QUEUED as job 6260363 on 2026-09-02.
+#
+# C1 -- SEED REPLICATE OF THE SMALL-POPULATION CORNER.
+# 2-agent Ashbourne, seed 5 (seed value 123).
+#
+# WHAT THIS CHANGES
+#   Nothing but the seed. Field-for-field identical to
+#   configs/cultural_emergence/run10_2agent_7B_study_group_ashbourne_gc.yaml,
+#   which ran once at seed 1 on 2026-05-06 and is the sole occupant of the
+#   N=2 cell of the population-size figure. Two edits that are not changes:
+#
+#   * `thinking_enabled` dropped. train_population.py builds ForumEnv from
+#     explicit spec_dict.get() calls and no longer reads that key, so it was
+#     already inert when the seed-1 run executed -- that run's traces carry the
+#     `<post>`/`<python>` instruction text, byte-identical to what the current
+#     env emits, and contain no `<think>` tag. Keeping a dead key would
+#     misdescribe the substrate. See REWRITE.md B6.
+#   * async_rollout / ppo_clip / pack_sequences pinned to the values implied by
+#     the seed-1 run's config.json, which predates all three keys and so ran the
+#     synchronous, single-shot, plain-REINFORCE path. seq_chunk_size is left
+#     unset (None = single-shot, as the reference). These are also the current
+#     defaults: pinning changes no behaviour, it stops a later change of default
+#     from silently moving the replicate off the reference pathway.
+#
+# WHY SEED 1 IS RE-RUN RATHER THAN REUSED
+#   The 2026-05-06 runs executed against a working tree ahead of the last
+#   commit -- their configs use the characters/environments split that was not
+#   committed until 7ca25a6 on 05-11 -- so git cannot establish what code they
+#   ran. Five fresh seeds make this family self-contained, and the 05-06 run
+#   becomes a free code-drift check instead of a load-bearing member of it.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether the 2-agent Ashbourne cell of Figure 1 is a property of the
+#   cell or a property of one seed. At seed 1 it ended:
+#
+#   alive 0.00 at iterations 25 and 100 (text_degenerate 2), 1.00 at
+#   150-200, then both agents in policy_collapse at 300. Perception
+#   loss 2.501 -> 1.293, KL from base 0.008 -> 0.679, entropy
+#   0.564 -> 0.115.
+#
+#   The quantity of interest is the spread of `alive` across the five seeds at
+#   iterations 100/150/200/300, read against the between-cell differences the
+#   figure presents as a population-size effect -- 2-agent Strathearn 0.00 vs
+#   4-agent Strathearn 0.75 at iteration 300, on one seed each.
+#
+# WHAT WOULD FALSIFY THE FIGURE'S READING
+#   A within-cell spread of `alive` comparable to that between-cell difference.
+#   That would mean the N=2 and N=4 points carry no information about
+#   population size and the corner has to come out of the figure. REWRITE.md
+#   Tier D has already withdrawn the causal claim ("population size determines
+#   which regime is accessible"); this decides whether the descriptive one
+#   survives.
+#
+# WHAT WOULD VOID THE RUN
+#   Fewer than 300 iterations reached, or a `tool/post_*` accounting that
+#   differs structurally from the seed-1 run's -- the substrate has to be the
+#   same substrate for the replication to mean anything.
+#
+name: run10_2agent_7B_study_group_ashbourne_gc_seed5
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 123
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 32768
+
+# --- rollout pathway: pinned to match the seed-1 reference run ---
+# The seed-1 reference run predates these three keys and ran the synchronous
+# path with a single-shot loss and plain REINFORCE. Pinned rather than
+# inherited so a change of default cannot silently move this replicate off
+# the pathway it is compared against.
+# seq_chunk_size is deliberately left unset (None = single-shot).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: canonical_2
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/cultural_emergence/c1_small_population_replicates/run10_2agent_7B_study_group_ashbourne_gc_seed5
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

@@ -312,10 +312,10 @@ pre-registration; two of the eight overturned a claim already written here.
 
 | # | Experiment | Scale | Answers |
 |---|---|---|---|
-| C1 | N=2 and N=4 replicates, 5 seeds × 2 substrates × 2 sizes, to iteration 300 with checkpoints at 100/150/200/300 | 20 runs, small | Task 2; the unreplicated corner of Figure 1 |
+| **C1** | N=2 and N=4 replicates, 5 seeds × 2 substrates × 2 sizes, to iteration 300 with checkpoints at 100/150/200/300. Implemented and configured: [`configs/cultural_emergence/c1_small_population_replicates/`](configs/cultural_emergence/c1_small_population_replicates/README.md). Seed 1 is re-run rather than reused — the 2026-05-06 originals ran against an uncommitted tree, so the family is made self-contained and the old run becomes a code-drift check | 20 runs, small — the cheapest item in this tier | Task 2; the unreplicated corner of Figure 1 |
 | C2 | Population-size decomposition (§6.3) | 15–20 runs | Task 3 — the causal question |
 | C3 | Frozen-population, solo-agent, static-transcript controls | 6–9 runs | Task 7; 5MAX's remaining empirical objection |
-| C4 | Public-tokens-only arm (`thinking_enabled: false`, or thinking typed as neither ACT nor OBS) | 2–4 runs | §3.5; ZLns Q4 |
+| C4 | Public-tokens-only arm. **Not via `thinking_enabled: false`** — `train_population.py` builds `ForumEnv` from explicit `spec_dict.get()` calls and never reads that key, so it has been inert in every config that sets it (B6 again). The working levers are blanking the post tags, as [`configs/env_likelihood_bias/`](configs/env_likelihood_bias/README.md) does, or typing thinking as neither ACT nor OBS | 2–4 runs | §3.5; ZLns Q4 |
 | C5 | Restored-`p_env` arm (§5) | 2–4 runs | Removes the dark-room incentive from the objective, if §5 holds |
 | C6 | One existing dataset extended past 300 iterations | 1–2 runs | Does divergence plateau; does the decline bottom out |
 | C7 | **B5b — the action↔future-environment-entropy covariance**, moved here from Tier B: no logged artefact carries per-token log-probs, so it needs a scoring pass over checkpoints | GPU, no new training | 5MAX's remaining theoretical objection; §5.1 |

@@ -400,6 +400,7 @@ time, because every published analysis evaluates at a fixed iteration.*
 |---|---|---|
 | 6256587 | `configs/env_likelihood_bias/A_surrogate_seed1.yaml` | Arm A of the environment-likelihood experiment: the usual surrogate return, with `ln p_env` logged but unused, so the dropped term's size and its effect on the update direction can be measured. |
 | 6256588 | `configs/env_likelihood_bias/B_corrected_seed1.yaml` | Arm B: identical but for the return, which becomes `R_t = Σ γ^(s-t)(E_s − M_s)`, with the value head fitted to it. |
+| 6260359–6260378 | [`configs/cultural_emergence/c1_small_population_replicates/`](configs/cultural_emergence/c1_small_population_replicates/README.md) | Tier C item C1: twenty seed replicates of the N=2 and N=4 corner of the population-size figure, where every cell is currently n=1. |
 
 Both on `study_group_ashbourne_gc`, 8 agents, with the post tags blanked so
 nothing an agent emits is discarded and `p_env` is exact rather than estimated.
@@ -408,6 +409,18 @@ conditions hold — `envlp/obs_tokens_measured_frac` 1.0 and both
 `envlp/misaligned_observations` and `envlp/provenance_misses` at 0. —
 [`configs/env_likelihood_bias/README.md`](configs/env_likelihood_bias/README.md),
 `environment_likelihood_derivation.md` §9a
+
+C1 is 5 seeds × 2 substrates × 2 population sizes at 300 iterations, and it
+replicates the one corner of the population-size figure where every cell is
+n=1. Seed 1 is re-run rather than reused: the 2026-05-06 originals executed
+against a working tree ahead of the last commit, so git cannot establish what
+code they ran, and the old run becomes a code-drift check instead of a
+load-bearing member of the comparison. Pre-registered falsification: if the
+within-cell spread of `alive` across seeds is comparable to the between-cell
+difference the figure reads as a population-size effect, the corner comes out
+of the figure. —
+[`configs/cultural_emergence/c1_small_population_replicates/README.md`](configs/cultural_emergence/c1_small_population_replicates/README.md),
+[`REWRITE.md`](REWRITE.md) C1
 
 ---
 

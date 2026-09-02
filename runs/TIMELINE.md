@@ -66,6 +66,7 @@ directories, not jobs — several directories were submitted more than once.
 | 09-01 | Retrospective documentation | `STATE.md`, `PROCESS.md`, this file, and a `NOTES.md` for every live run. Two readings in the existing reports were corrected against the runs' own metrics; see `STATE.md`. |
 | 09-01 | Tier-B analyses ([`_tier_b/`](_tier_b/README.md)) | Eight pre-registered re-analyses, no compute. The public channel closes in 63/65 runs and leads the regime decline by up to 200 iterations; the policy-distance headline survives a collapse control on 2 of 3 datasets; no Qwen3 agent ever reaches KL ≥ 1. Two claims written down the same morning were overturned: `thinking_frac` does not measure private deliberation, and restoring the dropped environment term is not free. |
 | 09-02 | Environment-likelihood experiment ([`configs/env_likelihood_bias/`](../configs/env_likelihood_bias/README.md)) | Implemented and submitted: jobs 6256587 (arm A, surrogate return with the environment term logged) and 6256588 (arm B, corrected return). Post tags blanked so nothing an agent emits is discarded and `p_env` is computed rather than estimated. Seeds 2-5 written and held. |
+| 09-02 | Tier C item C1 ([`configs/cultural_emergence/c1_small_population_replicates/`](../configs/cultural_emergence/c1_small_population_replicates/README.md)) | Implemented and submitted as jobs 6260359-6260378: 5 seeds × 2 substrates × 2 population sizes, replicating the N=2/N=4 corner of the population-size figure where every cell is n=1. Seed 1 re-run rather than reused — the 05-06 originals ran against an uncommitted tree. Verified in the process that `thinking_enabled` has been an inert key since 05-05; REWRITE.md C4 corrected accordingly. |
 
 ---
 
@@ -75,7 +76,12 @@ directories, not jobs — several directories were submitted more than once.
 |---|---|---|
 | 6256587 | 2026-09-02 | `A_surrogate_seed1` — environment-likelihood experiment, arm A |
 | 6256588 | 2026-09-02 | `B_corrected_seed1` — arm B, corrected return |
+| 6260359–6260378 | 2026-09-02 | C1 — twenty seed replicates of the N=2/N=4 corner of the population-size figure |
 
 The first job submitted since 2026-06-23. Seeds 2-5 of each arm are written and
 held until the provenance void conditions are confirmed —
 [`configs/env_likelihood_bias/README.md`](../configs/env_likelihood_bias/README.md).
+
+The C1 replicates are twenty single-node jobs of 2.5-5.5 h each, queued behind
+the two environment-likelihood arms —
+[`configs/cultural_emergence/c1_small_population_replicates/README.md`](../configs/cultural_emergence/c1_small_population_replicates/README.md).
