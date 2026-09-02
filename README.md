@@ -8,6 +8,19 @@ The framework uses [PettingZoo](https://pettingzoo.farama.org/) as its environme
 
 ---
 
+> **Where the results are.** This file is the machinery — how to run things and
+> what the code does. What the project has *learned* is in
+> [STATE.md](STATE.md); how that document is kept true is
+> [PROCESS.md](PROCESS.md); what ran and when is
+> [runs/TIMELINE.md](runs/TIMELINE.md); and what lives where is
+> [runs/README.md](runs/README.md).
+>
+> Run data is not in git. `.gitignore` keeps `runs/**` out and lets
+> `runs/**/*.md` back in, so a clone carries every write-up and none of the
+> ~28 TB it describes.
+
+---
+
 ## Contents
 
 - [Installation](#installation)
