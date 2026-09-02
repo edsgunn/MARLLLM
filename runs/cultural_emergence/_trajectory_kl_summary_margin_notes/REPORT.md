@@ -23,7 +23,7 @@ Within-population diagonal: 0.000000 across all (seed, iter).
 
 **No plateau by iter 150.** The growth from 100 → 125 → 150 is 0.084 → 0.181 → 0.287 — still accelerating (in fact, the inter-iter increment at the latest gap is the largest yet). Parallel populations are still actively diverging at the latest measured checkpoint.
 
-## Per-character correlation with end-KL-from-base ([kl_vs_endkl_scatter.png](kl_vs_endkl_scatter.png))
+## Per-character correlation with end-KL-from-base ([kl_vs_endkl.png](kl_vs_endkl.png))
 
 | Subset | r | n |
 |---|---:|---:|

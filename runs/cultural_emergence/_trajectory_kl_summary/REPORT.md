@@ -31,7 +31,7 @@ Cross-population KL contribution at iter 100, broken down by which character slo
 
 This is a structural property of committed agents and not an artefact: their own LoRA has moved into a region of policy space where its own samples carry high NLL under it, while less-drifted same-slot adapters from other seeds (which sit closer to base) assign those same tokens lower NLL. In short, **committed agents converge across seeds**: they drift far but they drift in similar directions, so their final policies score each other's outputs relatively well.
 
-## Relationship to existing per-character KL-from-base ([kl_vs_endkl_scatter.png](kl_vs_endkl_scatter.png))
+## Relationship to existing per-character KL-from-base ([kl_vs_endkl.png](kl_vs_endkl.png))
 
 The single quantitative question the spec wanted answered: does trajectory-level cross-population KL track per-character end-of-training KL from base, or is it independent?
 

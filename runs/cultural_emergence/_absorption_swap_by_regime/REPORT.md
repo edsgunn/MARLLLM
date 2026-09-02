@@ -72,7 +72,7 @@ The differential is positive in most (env, regime) cells. Negative cells are sma
 
 - Partner bullets are pulled from the same iter's traces. If a partner character drifted into a degenerate regime by that iter, their bullets text is still the original character description (the bullets live in the system prompt, not the agent's outputs), so this isn't a concern.
 - Swap pairing is cyclic over the alphabetised character list within each population. A different deterministic pairing would give numerically different rows but the same regime-level story; this was checked indirectly by noticing that *every* pairing yields a swap NLL near the no-character NLL at iter 25, regardless of partner identity (means the pairing is not exploiting any character pair with anomalously high mutual information).
-- We use the **contemporaneous** regime for the headline table (matching the convention in [`analyse_absorption_by_regime.py`](../../scripts/analyse_absorption_by_regime.py)). The end-of-training-regime version is in [`endpoint_table_by_endregime.csv`](endpoint_table_by_endregime.csv) and tells the same story.
+- We use the **contemporaneous** regime for the headline table (matching the convention in [`analyse_absorption_by_regime.py`](../../../scripts/analyse_absorption_by_regime.py)). The end-of-training-regime version is in [`endpoint_table_by_endregime.csv`](endpoint_table_by_endregime.csv) and tells the same story.
 
 ## Inputs
 

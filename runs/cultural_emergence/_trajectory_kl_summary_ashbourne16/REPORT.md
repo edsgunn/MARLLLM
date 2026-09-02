@@ -25,7 +25,7 @@ Within-population diagonal: 0.000000 across all (seed, iter).
 
 **Strictly positive off-diagonal minimums by iter 75 onward.** Unlike Margin Notes (which had min ≤ 0 at every iter) or Inner Loop's iter-100 entry, *every* (source, target) pair from iter 75 onward has $\hat{D}(\text{source} \to \text{target}) > 0$. The cross-population divergence is universal, not localised to a few pairs.
 
-## Per-character correlation with end-KL-from-base ([kl_vs_endkl_scatter.png](kl_vs_endkl_scatter.png))
+## Per-character correlation with end-KL-from-base ([kl_vs_endkl.png](kl_vs_endkl.png))
 
 **r = −0.779 across n = 80 (seed, char) pairs.**
 
