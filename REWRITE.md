@@ -319,6 +319,7 @@ pre-registration; two of the eight overturned a claim already written here.
 | C5 | Restored-`p_env` arm (§5) | 2–4 runs | Removes the dark-room incentive from the objective, if §5 holds |
 | C6 | One existing dataset extended past 300 iterations | 1–2 runs | Does divergence plateau; does the decline bottom out |
 | C7 | **B5b — the action↔future-environment-entropy covariance**, moved here from Tier B: no logged artefact carries per-token log-probs, so it needs a scoring pass over checkpoints | GPU, no new training | 5MAX's remaining theoretical objection; §5.1 |
+| C8 | **The private-prefix correction `I(z; y \| u)`**, pre-registered with falsification conditions in `scripts/tier_b/c7_env_likelihood_bias.py` (dry-run works; scoring pass unimplemented) | GPU, ~2k passes per run | Whether the naive cross-agent substitution is usable as-is |
 
 ### Tier D — dropped, and say so
 
@@ -408,6 +409,18 @@ distribution was *j*'s policy conditioned on *j*'s context. These are the same
 event with different conditioning sets — and B5 shows they are not even the same
 token sequence. For measuring the bias this is fine; the paper should state which
 object it is reporting.
+
+**Now formalised.** [`environment_likelihood_derivation.md`](environment_likelihood_derivation.md)
+works out the conditioning problem properly and the answer is better than
+expected: **the adjustment is generator-specific, not observer-specific.** Under
+full observability every observer of a post shares one `p_env`, because an
+agent's own persona and private state are conditionally independent of what
+others emit given the public thread. The single correction is to marginalise the
+generator's private prefix, it equals `I(z; y | u)` exactly, it is non-negative,
+it is **zero when the generator emits no private tokens** — which B6 measures as
+the case at every early checkpoint — and it is bounded above by the term being
+dropped, so substituting is never worse than dropping. Fog-of-war substrates
+(`social_terminal`) are the exception and need separate treatment.
 
 ### 5.2 Restore the term (the ambitious version)
 
@@ -712,8 +725,12 @@ to move) · C7 the covariance measurement (GPU scoring, no training).
 **Then, the block that decides the paper:** C2 population-size decomposition
 (15–20 runs, needs one new pairing strategy).
 
-**Optional, high upside:** C5 restored-`p_env` arm — only if §5.1 verifies, and
-never on the critical path.
+**Optional, high upside:** C8 the private-prefix correction (cheap, and it
+decides whether C5 needs marginalising at all), then C5 the restored-`p_env`
+arm. §5.1 has verified; the open risk is now §8 of the derivation — the corrected
+return is a proper divergence whose optimum is flat across worlds, so the action
+gradient may self-extinguish where the surrogate's does not. Never on the
+critical path.
 
 **Sequencing note.** C1 and C3 are independent of everything else and are the
 cheapest runs in the project; start them while the Tier B analyses run. C2 is

@@ -84,6 +84,19 @@ maximises and what we want are related only by argument.*
   *not* the receiver's, so its stored log-probs do not align: restoring the term
   costs a forward pass per agent per episode, not a lookup. — *established* —
   `runs/_tier_b/b5_env_likelihood/NOTES.md`
+- 🆕 (2026-09-01) **The environment conditional is observer-independent under
+  full observability.** An agent's own persona and private deliberation are
+  conditionally independent of what other agents emit, given the public thread,
+  so every observer of a post shares one `p_env`. The correction is a property of
+  the *generator's* turn, computed once per post rather than once per
+  (post, observer) pair. — *established* (derivation) —
+  `environment_likelihood_derivation.md`
+- 🆕 (2026-09-01) **The single adjustment needed is the mutual information
+  between the generator's private prefix and its public post.** Exact pointwise
+  identity; non-negative; zero when the generator emits no private tokens; and
+  bounded above by the term currently being dropped, so substituting the
+  generator's log-probs is never worse than dropping and is *exact* early in
+  training. — *established* (derivation), unmeasured — same
 - 🆕 (2026-09-01) **The committed-vs-coherent absorption contrast is
   horizon-sensitive.** Intact at +0.160 on the Inner Loop seed replication, whose
   window ends before any decline; falls from +0.199 to +0.024 on the
@@ -445,6 +458,13 @@ time, because every published analysis evaluates at a fixed iteration.*
   surprise that follows it. The measurement is now known to be well posed —
   provenance resolves at 100% — and needs a GPU scoring pass that has not been
   run. — `runs/_tier_b/b5_env_likelihood/NOTES.md`
+- **How large is the private-prefix correction?** Predicted near zero early and
+  growing with the pre-post region; pre-registered with its falsification
+  conditions in `scripts/tier_b/c7_env_likelihood_bias.py`, not yet run.
+- **Does the corrected return still produce policy movement?** Restoring `p_env`
+  makes the return a proper divergence whose optimum is flat across worlds, so
+  advantages may vanish at convergence where the surrogate's do not. That may be
+  why the surrogate moves policies at all. — `environment_likelihood_derivation.md`
 - **Does absorption survive a horizon-clean window on more than one dataset?**
   It does on the Inner Loop seed replication and largely does not on the
   cross-environment pool, where restricting to healthy-window measurements also

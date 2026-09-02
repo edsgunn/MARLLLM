@@ -13,7 +13,10 @@ The framework uses [PettingZoo](https://pettingzoo.farama.org/) as its environme
 > [STATE.md](STATE.md); how that document is kept true is
 > [PROCESS.md](PROCESS.md); what ran and when is
 > [runs/TIMELINE.md](runs/TIMELINE.md); and what lives where is
-> [runs/README.md](runs/README.md).
+> [runs/README.md](runs/README.md). The objective is derived in
+> [surprise_minimisation_derivation.md](surprise_minimisation_derivation.md) and
+> the environment term it drops is recovered in
+> [environment_likelihood_derivation.md](environment_likelihood_derivation.md).
 >
 > Run data is not in git. `.gitignore` keeps `runs/**` out and lets
 > `runs/**/*.md` back in, so a clone carries every write-up and none of the
