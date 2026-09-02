@@ -1,3 +1,7 @@
+# STATUS: ARCHIVED. The only run under this config is in runs/old_trainer/,
+# which predates population-based training.
+# See runs/old_trainer/README.md
+#
 name: concordia_round_robin_72b_lora_r64
 description: >
   Two-agent round-robin with Qwen2.5-72B + LoRA r=64.  Higher-rank adapters

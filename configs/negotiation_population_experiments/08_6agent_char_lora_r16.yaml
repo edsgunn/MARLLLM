@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. Ran 2 times and every copy is invalidated
+# (no_context_management, then old_delimiters). The latest is under
+# runs/old_delimiters/.
+# See runs/old_delimiters/README.md
+#
 name: 6agent_char_lora_r16
 description: >
   Six character agents (Marcus, Sophia, Viktor, Chen, Amara, Leon) with LoRA r=16.

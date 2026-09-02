@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. Ran 3 times and every copy is invalidated (old_trainer,
+# no_context_management, then old_delimiters). The latest is under
+# runs/old_delimiters/.
+# See runs/old_delimiters/README.md
+#
 name: lsb_bare_shuffle_r16
 description: >
   LoRA shared base, Qwen3-8B, r=16, bare prompts, role shuffle ON. Direct

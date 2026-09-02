@@ -1,3 +1,6 @@
+# STATUS: NO DATA. The job wrote no metrics.jsonl.
+# See runs/cultural_emergence_32B/README.md
+#
 # 32B variant of run7_8agent_7B_study_group_ashbourne_gc.
 # Uses FSDP FULL_SHARD across the 4 GH200s on a single node so the bf16
 # trainer backbone (≈64 GB) is sharded into ~16 GB shards per GPU. Without

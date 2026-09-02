@@ -1,3 +1,6 @@
+# STATUS: NO DATA. The job wrote no metrics.jsonl.
+# See runs/cultural_emergence_qwen3_packed/README.md
+#
 # Qwen3-4B 16-agent variant of the packed 4B run. With 16 agents in
 # random_no_self pairing and 16 rollouts/iter, each agent participates in
 # ~2 episodes per iter (vs ~4 for the 8-agent variant) — so per-agent

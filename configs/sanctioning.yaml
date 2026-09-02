@@ -1,3 +1,7 @@
+# STATUS: OPEN. Rung 0 is complete over both five-seed forum families (79
+# cells, 6,403 judged posts); `cluster` and `label` have run. `validate` has
+# NOT run, and `rung1` is gated on it. See runs/sanctioning/NOTES.md.
+#
 # Sanctioning Measurement Framework (Rungs 0-1) — pipeline config.
 # Drives: extract / cluster / rung0 / rung1 / validate / label.
 # Run with the hand-built venv:  .venv/bin/python -m sanctioning <cmd> --config configs/sanctioning.yaml

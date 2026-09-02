@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 123 of 300.
+# See runs/cultural_emergence_qwen3_async/run7_8agent_8B_study_group_ashbourne_gc_async/NOTES.md
+#
 # Qwen3-8B 8-agent async-rollout variant. Same memory recipe as the sync
 # sibling (vllm_gpu_mem_util 0.25 + enforce_eager + seq_chunk_size 8192).
 # Async adds no per-iter memory overhead — the buffer is bounded by

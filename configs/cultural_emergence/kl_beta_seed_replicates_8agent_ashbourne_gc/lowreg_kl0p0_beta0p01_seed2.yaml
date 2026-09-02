@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/kl_beta_seed_replicates_8agent_ashbourne_gc/lowreg_kl0p0_beta0p01_seed2/NOTES.md
+#
 # Follow-up: seed-replicate of kl=0.0, beta=0.01 (seed 2).
 name: replicate_8agent_7B_ashbourne_gc_lowreg_kl0p0_beta0p01_seed2
 script: train_population

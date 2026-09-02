@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/run10_2agent_7B_study_group_ashbourne_gc/NOTES.md
+#
 # Run 10 — 2-agent variant of run10_4agent_7B_study_group_ashbourne_gc.
 # Uses the `canonical_2` Ashbourne roster.
 # 300-iter fresh run from scratch.

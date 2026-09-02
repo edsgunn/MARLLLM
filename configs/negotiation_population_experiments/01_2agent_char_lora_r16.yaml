@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 389 of 500.
+# See runs/negotiation_population_experiments/01_2agent_char_lora_r16/NOTES.md
+#
 name: 2agent_char_lora_r16
 description: >
   Baseline population experiment: two characters (Marcus and Sophia) with LoRA r=16

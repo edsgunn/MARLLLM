@@ -1,3 +1,6 @@
+# STATUS: NEVER RUN. The supporting condition; the focal-vs-frozen arms
+# (condition 2) ran instead.
+#
 name: phase_a_symmetric_ccsm_cooperative
 description: >
   Phase A condition 5 — symmetric CCSM (both agents trained simultaneously).

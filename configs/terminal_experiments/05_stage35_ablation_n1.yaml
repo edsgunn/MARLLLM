@@ -1,3 +1,6 @@
+# STATUS: NEVER RUN. The N=1 control for the embodiment config, which also
+# never ran.
+#
 name: terminal_stage35_ablation_n1
 description: >
   Stage 3.5 ablation — N=1, shared scratch stage, single agent.

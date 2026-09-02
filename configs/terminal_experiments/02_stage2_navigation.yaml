@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. Gated on Stage 1, which produced no data.
+#
 name: terminal_stage2_navigation
 description: >
   Stage 2 — read-only navigation: ls, cat, head, tail, wc, grep, find,

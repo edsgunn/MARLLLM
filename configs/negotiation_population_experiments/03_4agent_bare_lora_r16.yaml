@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. Ran 2 times and every copy is invalidated
+# (no_context_management, then old_delimiters). The latest is under
+# runs/old_delimiters/.
+# See runs/old_delimiters/README.md
+#
 name: 4agent_bare_lora_r16
 description: >
   Four agents with minimal "Agent A/B/C/D" prompts instead of rich character

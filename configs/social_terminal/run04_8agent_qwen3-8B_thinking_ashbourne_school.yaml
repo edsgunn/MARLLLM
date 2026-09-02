@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/social_terminal/run04_8agent_qwen3-8B_thinking_ashbourne_school/NOTES.md
+#
 # Qwen3-8B variant with native thinking on. Sister to run02 (Qwen2.5-7B
 # without thinking): same scenario, same agents, same KL/lr/beta/episode
 # length, only the model and the thinking-aware budgets change.

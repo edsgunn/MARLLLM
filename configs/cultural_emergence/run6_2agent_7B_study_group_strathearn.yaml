@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 100 of 100.
+# See runs/cultural_emergence/run6_2agent_7B_study_group_strathearn/NOTES.md
+#
 # Run 6 — 2-agent thinking-tokens variant on the Strathearn Study Group scenario.
 # Twin of run7_8agent_7B_study_group_strathearn; the only difference is 2 vs 8 agents.
 name: run6_2agent_7B_study_group_strathearn

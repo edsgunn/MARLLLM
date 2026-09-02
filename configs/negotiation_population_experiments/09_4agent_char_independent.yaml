@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. Ran 2 times and every copy is invalidated
+# (no_context_management, then old_delimiters). The latest is under
+# runs/old_delimiters/.
+# See runs/old_delimiters/README.md
+#
 name: 4agent_char_independent
 description: >
   Four character agents each with a fully independent copy of the model weights

@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc/NOTES.md
+#
 # Run 7 — 8-agent thinking-tokens variant on the Ashbourne characters, this
 # time framed by the 'gc' environment prompt (study_group_ashbourne_gc) instead
 # of the original Study Group description. Fresh 300-iter run from scratch.

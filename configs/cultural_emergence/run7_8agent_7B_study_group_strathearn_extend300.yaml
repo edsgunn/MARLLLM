@@ -1,3 +1,6 @@
+# STATUS: NEVER RUN under this name; run7_8agent_7B_study_group_strathearn
+# itself reached iteration 300.
+#
 # Run 7 — 8-agent Strathearn study-group, extension of
 # run7_8agent_7B_study_group_strathearn from its latest checkpoint
 # (iter_000075, after the prior 100-iter run failed at iter ~94 due to an

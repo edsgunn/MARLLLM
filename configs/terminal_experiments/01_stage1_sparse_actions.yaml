@@ -1,3 +1,8 @@
+# STATUS: NO DATA. Started twice on 2026-04-27 and 2026-04-28 and wrote no
+# metrics either time. See
+# runs/terminal_experiments/01_stage1_base_model/NOTES.md. THE TERMINAL LINE
+# STOPS HERE.
+#
 name: terminal_stage1_sparse_actions
 description: >
   Stage 1 — ls + cat only.  ~1–3% action tokens.

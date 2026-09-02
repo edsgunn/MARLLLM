@@ -1,3 +1,7 @@
+# STATUS: CLOSED. Evaluation only, no training. 64 episodes; agreement rate
+# 4.7%. See runs/phase_a_substrate_validation/01_pretrained_baseline_coopera
+# tive/NOTES.md.
+#
 name: phase_a_pretrained_baseline_cooperative
 description: >
   Phase A condition 1 — pretrained-baseline reference (cooperative prompt).

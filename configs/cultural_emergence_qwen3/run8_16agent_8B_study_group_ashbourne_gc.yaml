@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 81 of 300.
+# See runs/cultural_emergence_qwen3/run8_16agent_8B_study_group_ashbourne_gc/NOTES.md
+#
 # Qwen3.5-9B 16-agent variant of run8_16agent_7B_study_group_ashbourne_gc.
 # Same memory tuning as the 8-agent 9B sibling (vllm_gpu_mem_util 0.28).
 # +8 LoRA adapters at r=64 add ~80 MB params/grads/optim-state per GPU,

@@ -1,3 +1,7 @@
+# STATUS: NEVER RUN. Its own header calls this THE load-bearing experimental
+# config for the framework's core claim, and it has never been submitted.
+# Gated on Stage 3.
+#
 name: terminal_stage35_embodiment
 description: >
   Stage 3.5 — multi-agent shared scratch. N=2. ~25–45% action tokens.

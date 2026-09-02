@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/run9_8agent_7B_ashbourne_dual_env/NOTES.md
+#
 # Run 8 — 8 Ashbourne agents trained simultaneously on TWO environments:
 #
 #   * study_group_ashbourne_gc  (school maths forum, native framing)

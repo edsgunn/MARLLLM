@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 112 of 300.
+# See runs/cultural_emergence_qwen3_async/run7_8agent_4B_study_group_ashbourne_gc_async/NOTES.md
+#
 # Qwen3-4B 8-agent async-rollout variant. Phase 2 of the off-policy roadmap
 # (see RLvr_rollout_optimisation_audit.md and "A Guide to Training Agentic
 # LLMs on Off-Policy Surprise Minimisation.md").

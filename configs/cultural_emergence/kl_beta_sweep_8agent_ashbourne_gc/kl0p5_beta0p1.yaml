@@ -1,3 +1,11 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/kl0p5_beta0p1/NOTES.md
+#
+# WARNING: this configuration was run TWICE by accident -- here and in the
+# sibling directory -- differing only in run name, output dir and GPU. The two
+# runs ended at alive fraction 0.875 and 0.000. Do not treat either as the
+# result for this cell; see the family NOTES.md.
+#
 # 4x4 KL/entropy sweep on the 8-agent ashbourne_gc env.
 # kl_coef=0.5, beta=0.1. KL is always logged (always_log_kl: true) so
 # the kl_coef=0 cells still produce a KL trace.

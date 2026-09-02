@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 150 of 150.
+# See runs/migration_experiments/migration_callum_strathearn_server_to_ashbourne_gc/NOTES.md
+#
 # Migration experiment: Callum Reid (strathearn_server) ->
 # host population ashbourne_gc, replacing role-matched slot
 # Hana Yilmaz (positional index 2). Continues training the full

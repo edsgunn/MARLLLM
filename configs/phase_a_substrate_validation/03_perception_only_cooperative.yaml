@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 458 of 500.
+# See runs/phase_a_substrate_validation/03_perception_only_cooperative/NOTES.md
+#
 name: phase_a_perception_only_cooperative
 description: >
   Phase A condition 3 — perception-only ablation (cooperative prompt).

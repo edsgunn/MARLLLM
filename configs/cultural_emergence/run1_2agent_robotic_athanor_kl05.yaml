@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. From the first cultural-emergence campaign, which ran
+# with the character prompt typed PAD -- outside every loss. Whatever ran
+# under this config is in runs/prompts_as_padding/ or was never submitted;
+# either way it cannot be cited.
+#
 # Hyperparameter ablation: stronger KL anchor + no entropy bonus.
 # Hypothesis: with mean_return ~0, the original kl_coef=0.05 + beta=0.01
 # was too weak to anchor each LoRA adapter against value-loss / perception-loss

@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. Gated on Stage 3.5.
+#
 name: terminal_stage4_open_use
 description: >
   Stage 4 — open computer use with network access.  curl and wget added.

@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. See 14_haggling_72b_lora.yaml.
+#
 name: concordia_haggling_72b_kl
 description: >
   Haggling scenario with Qwen2.5-72B + LoRA r=16 + KL regularisation.

@@ -1,3 +1,6 @@
+# STATUS: NO DATA. The job wrote no metrics.jsonl.
+# See runs/cultural_emergence_qwen3_packed/README.md
+#
 # Qwen3-4B 8-agent variant with sequence packing on (Task 3 of the
 # RLVR rollout optimisation audit). Concatenates all of one agent's
 # trajectories into a single (1, T_total) row with per-token seq_ids

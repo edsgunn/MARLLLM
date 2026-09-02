@@ -1,3 +1,7 @@
+# STATUS: NEVER RUN. The 72B Concordia arms were queued and never submitted;
+# the Concordia line ended with the old trainer. See
+# runs/old_trainer/README.md.
+#
 name: concordia_haggling_72b_lora
 description: >
   Haggling scenario with Qwen2.5-72B + LoRA r=16 as the trained merchants

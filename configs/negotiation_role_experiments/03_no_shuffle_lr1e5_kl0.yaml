@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. Ran 3 times and every copy is invalidated (old_trainer,
+# no_context_management, then old_delimiters). The latest is under
+# runs/old_delimiters/.
+# See runs/old_delimiters/README.md
+#
 name: no_shuffle_lr1e5_kl0
 description: >
   Reference: Qwen2.5-1.5B, separate weights, lr=1e-5, no KL, no role shuffle.

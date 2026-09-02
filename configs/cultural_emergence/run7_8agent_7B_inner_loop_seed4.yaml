@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 100 of 100.
+# See runs/cultural_emergence/run7_8agent_7B_inner_loop_seed4/NOTES.md
+#
 # Run 7 — 8-agent thinking-tokens variant on the Inner Loop scenario.
 # Twin of run7_8agent_7B_inner_loop with a different seed for variance.
 # Inner Loop is a programming forum where members can execute Python

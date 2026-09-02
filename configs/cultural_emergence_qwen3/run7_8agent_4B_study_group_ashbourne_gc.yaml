@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 102 of 300.
+# See runs/cultural_emergence_qwen3/run7_8agent_4B_study_group_ashbourne_gc/NOTES.md
+#
 # Qwen3.5-4B variant of run7_8agent_7B_study_group_ashbourne_gc.
 # Identical experimental setup; switches the base to a Qwen3.5 dense model
 # with native thinking. The ChatML primer is auto-extended with `<think>\n`

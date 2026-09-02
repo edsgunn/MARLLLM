@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. See 04_action_only_cooperative.yaml.
+#
 name: phase_a_action_only_competitive
 description: >
   Phase A condition 4 — action-only ablation (competitive prompt). Pair

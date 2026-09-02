@@ -1,3 +1,8 @@
+# STATUS: NEVER RUN. This is the ablation that would say what the action
+# term buys; condition 3 (perception-only) ran and shows the action term is
+# what collapses policy entropy. Still outstanding — see 'What we have not
+# run' in STATE.md.
+#
 name: phase_a_action_only_cooperative
 description: >
   Phase A condition 4 — action-only ablation (cooperative prompt). Optional

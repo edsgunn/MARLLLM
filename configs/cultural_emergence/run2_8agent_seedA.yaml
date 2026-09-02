@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. The only run under this config is in
+# runs/prompts_as_padding/, which ran with the character prompt typed PAD,
+# outside every loss.
+# See runs/prompts_as_padding/README.md
+#
 name: run2_8agent_seedA
 script: train_population
 model: Qwen/Qwen2.5-1.5B-Instruct

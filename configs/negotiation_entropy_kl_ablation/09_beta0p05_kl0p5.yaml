@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. The only run under this config is in
+# runs/old_delimiters/, which ran with special tokens in the wrong
+# positions.
+# See runs/old_delimiters/README.md
+#
 name: 09_beta0p05_kl0p5
 description: >
   Ablation cell β=0.05, λ_KL=0.5: entropy bonus β=0.05; KL penalty λ=0.5.

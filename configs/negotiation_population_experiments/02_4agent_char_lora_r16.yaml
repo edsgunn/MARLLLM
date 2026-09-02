@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 264 of 500.
+# See runs/negotiation_population_experiments/02_4agent_char_lora_r16/NOTES.md
+#
 name: 4agent_char_lora_r16
 description: >
   Four distinct character personas (Marcus, Sophia, Viktor, Chen) each with a LoRA

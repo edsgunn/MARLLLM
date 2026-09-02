@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 112 of 300.
+# See runs/social_terminal/run01_8agent_7B_ashbourne_school/NOTES.md
+#
 # Social-terminal substrate, first training run.
 #
 # 8 students (extended_8 subset of study_group_ashbourne) move between

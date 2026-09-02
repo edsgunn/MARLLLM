@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. From the first cultural-emergence campaign, which ran
+# with the character prompt typed PAD -- outside every loss. Whatever ran
+# under this config is in runs/prompts_as_padding/ or was never submitted;
+# either way it cannot be cited.
+#
 name: run1_2agent_robotic_athanor
 script: train_population
 model: Qwen/Qwen2.5-1.5B-Instruct

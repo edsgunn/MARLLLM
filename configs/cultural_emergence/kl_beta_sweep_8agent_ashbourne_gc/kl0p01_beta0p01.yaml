@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/kl0p01_beta0p01/NOTES.md
+#
 # 4x4 KL/entropy sweep on the 8-agent ashbourne_gc env.
 # kl_coef=0.01, beta=0.01. KL is always logged (always_log_kl: true) so
 # the kl_coef=0 cells still produce a KL trace.

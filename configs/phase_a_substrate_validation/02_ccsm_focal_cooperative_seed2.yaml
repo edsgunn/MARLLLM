@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 500 of 500.
+# See runs/phase_a_substrate_validation/02_ccsm_focal_cooperative_seed2/NOTES.md
+#
 name: phase_a_ccsm_focal_cooperative_seed2
 description: >
   Seed replicate of the headline 02_ccsm_focal_cooperative run. Same model,

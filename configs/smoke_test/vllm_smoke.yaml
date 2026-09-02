@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 2 of 2.
+# See runs/smoke_test/vllm_smoke/NOTES.md
+#
 # Smoke test for the vLLM rollout integration. Mirrors run1_2agent_robotic_athanor
 # but with iters=2, log_every=1 and a much shorter env so the whole run fits in
 # a few minutes. Designed to exercise:

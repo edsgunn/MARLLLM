@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 150 of 150.
+# See runs/cultural_emergence/run7_8agent_7B_margin_notes_seed3/NOTES.md
+#
 # Run 7 — 8-agent margin notes, seed variant.
 # Twin of run7_8agent_7B_margin_notes; differs only in seed and iters.
 name: run7_8agent_7B_margin_notes_seed3

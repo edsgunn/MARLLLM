@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 100.
+# See runs/cultural_emergence/run7_8agent_7B_study_group/NOTES.md
+#
 # Run 7 — 8-agent thinking-tokens variant on the Study Group scenario.
 # Twin of run6_2agent_7B_study_group; the only difference is 2 vs 8 agents.
 name: run7_8agent_7B_study_group

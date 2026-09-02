@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/run12_32agent_7B_study_group_ashbourne_gc/NOTES.md
+#
 # Run 12 — 32-agent variant of run8_16agent_7B_study_group_ashbourne_gc.
 # Uses the new `extended_32` Ashbourne roster (16 original + 16 new chars).
 # All other hyperparameters identical to run8. max_posts/max_episode_tokens

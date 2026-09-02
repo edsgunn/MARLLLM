@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 92 of 300.
+# See runs/cultural_emergence_qwen3/run8_16agent_4B_study_group_ashbourne_gc/NOTES.md
+#
 # Qwen3.5-4B 16-agent variant of run8_16agent_7B_study_group_ashbourne_gc.
 # Same setup as the 8-agent 4B sibling but with the extended_16 Ashbourne
 # roster. ChatML primer is auto-extended with `<think>\n` (Qwen3 native CoT).

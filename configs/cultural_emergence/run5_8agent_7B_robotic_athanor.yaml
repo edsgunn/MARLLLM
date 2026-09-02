@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. From the first cultural-emergence campaign, which ran
+# with the character prompt typed PAD -- outside every loss. Whatever ran
+# under this config is in runs/prompts_as_padding/ or was never submitted;
+# either way it cannot be cited.
+#
 # 8-agent counterpart to run4_2agent_7B. rollouts kept at 16 (NOT 32) to leave
 # memory headroom on the 7B base — per-rank batch will still be 4 with 4-GPU
 # DDP, matching the 2-agent run4.

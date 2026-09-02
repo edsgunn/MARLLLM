@@ -1,3 +1,6 @@
+# STATUS: CLOSED — TRUNCATED at iteration 102 of 300.
+# See runs/cultural_emergence_qwen3/run7_8agent_8B_study_group_ashbourne_gc/NOTES.md
+#
 # Qwen3.5-9B variant of run7_8agent_7B_study_group_ashbourne_gc.
 # 9B sits between the 7B and 14B siblings memory-wise — bf16 backbone ~18 GB,
 # vLLM fp8 weights ~9 GB. The 7B settings (vllm_gpu_mem_util 0.30) leave

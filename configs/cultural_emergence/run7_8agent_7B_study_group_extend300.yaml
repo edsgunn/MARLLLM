@@ -1,3 +1,6 @@
+# STATUS: NEVER RUN under this name; run7_8agent_7B_study_group itself
+# reached iteration 300.
+#
 # Run 7 — 8-agent study-group, extension of run7_8agent_7B_study_group by 200
 # more iterations (100 -> 300) starting from the iter_000100 checkpoints.
 #

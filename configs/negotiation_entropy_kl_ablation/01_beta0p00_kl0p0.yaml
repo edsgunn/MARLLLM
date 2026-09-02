@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. The only run under this config is in
+# runs/old_delimiters/, which ran with special tokens in the wrong
+# positions.
+# See runs/old_delimiters/README.md
+#
 name: 01_beta0p00_kl0p0
 description: >
   Ablation cell β=0.0, λ_KL=0.0: no entropy bonus (pure policy gradient); no KL regularisation.

@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. Gated on Stage 2.
+#
 name: terminal_stage3_write_access
 description: >
   Stage 3 — write access in private scratch.  ~15–35% action tokens.

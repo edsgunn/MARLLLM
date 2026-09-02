@@ -1,3 +1,8 @@
+# STATUS: NEVER RUN under this name. The 300-iteration Inner Loop run that
+# exists is run7_8agent_7B_inner_loop_post_format, which is confounded with
+# a format change. See
+# runs/cultural_emergence/run7_8agent_7B_inner_loop_post_format/NOTES.md.
+#
 # Run 7 — 8-agent inner-loop, extension of run7_8agent_7B_inner_loop by 200
 # more iterations (100 -> 300) starting from the iter_000100 checkpoints.
 #

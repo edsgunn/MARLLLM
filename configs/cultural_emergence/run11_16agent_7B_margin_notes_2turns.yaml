@@ -1,3 +1,6 @@
+# STATUS: NO DATA. The job wrote no metrics.jsonl.
+# See runs/cultural_emergence/run11_16agent_7B_margin_notes_2turns/NOTES.md
+#
 # Run 11 — duplicate of run8_16agent_7B_margin_notes with double the
 # episode length so each of the 16 agents gets 2 turns instead of 1
 # (max_posts 16 → 32). max_episode_tokens doubled to 65536 to fit; loss

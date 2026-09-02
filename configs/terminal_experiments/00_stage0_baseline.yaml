@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 500 of 500.
+# See runs/terminal_experiments/00_stage0_baseline/NOTES.md
+#
 name: terminal_stage0_baseline
 description: >
   Stage 0 — pure observation baseline.

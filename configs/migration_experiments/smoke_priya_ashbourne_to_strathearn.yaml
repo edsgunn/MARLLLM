@@ -1,3 +1,6 @@
+# STATUS: NEVER RUN as its own job. The migration batch went straight to the
+# full runs; see runs/migration_experiments/NOTES.md.
+#
 # Migration experiment: Priya Shah (ashbourne) ->
 # host population strathearn, replacing role-matched slot
 # Mhairi Buchanan (positional index 0). Continues training the full

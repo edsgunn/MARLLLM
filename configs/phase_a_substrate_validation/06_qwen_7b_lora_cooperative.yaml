@@ -1,3 +1,6 @@
+# STATUS: NEVER RUN. The 7B scale datapoint for Phase A; compute went to the
+# forum campaign instead.
+#
 name: phase_a_qwen_7b_lora_cooperative
 description: >
   Phase A optional 7B scale datapoint — Qwen2.5-7B with LoRA (r=16) under

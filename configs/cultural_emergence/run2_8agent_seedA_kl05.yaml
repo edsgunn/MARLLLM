@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. From the first cultural-emergence campaign, which ran
+# with the character prompt typed PAD -- outside every loss. Whatever ran
+# under this config is in runs/prompts_as_padding/ or was never submitted;
+# either way it cannot be cited.
+#
 # Hyperparameter ablation: stronger KL anchor + no entropy bonus.
 # 8-agent counterpart to run1_2agent_robotic_athanor_kl05. With 8 LoRA adapters
 # the original (kl_coef=0.05, beta=0.01) was insufficient — KL grew to 1-2 by

@@ -1,3 +1,8 @@
+# STATUS: ARCHIVED. Ran 3 times and every copy is invalidated (old_trainer,
+# no_context_management, then old_delimiters). The latest is under
+# runs/old_delimiters/.
+# See runs/old_delimiters/README.md
+#
 name: llama_3b
 description: >
   Llama-3.2-3B (3B). Paired with Qwen2.5-3B (exp 04) to control for model

@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 500 of 500.
+# See runs/phase_a_substrate_validation/02_ccsm_focal_competitive/NOTES.md
+#
 name: phase_a_ccsm_focal_competitive
 description: >
   Phase A condition 2 — full CCSM training, asymmetric, competitive prompt.

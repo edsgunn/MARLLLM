@@ -1,3 +1,7 @@
+# STATUS: NEVER RUN. The 2-agent Inner Loop cell of the substrate screen is
+# missing; the other four substrates ran. See
+# runs/cultural_emergence/run6_2agent_7B_conjecture/NOTES.md.
+#
 # Run 6 — 2-agent thinking-tokens variant on the Inner Loop scenario.
 # Twin of run7_8agent_7B_inner_loop; the only difference is 2 vs 8 agents.
 # Inner Loop is a programming forum where members can execute Python

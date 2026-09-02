@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/run8_16agent_7B_study_group_strathearn_server/NOTES.md
+#
 # Run 8 — 16-agent variant of run7_8agent_7B_study_group_strathearn_server.
 # Uses the new `extended_16` Strathearn roster (8 original + 8 new chars).
 # 300-iter fresh run from scratch.

@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/run8_16agent_7B_margin_notes/NOTES.md
+#
 # Run 8 — 16-agent variant of run7_8agent_7B_margin_notes.
 # Uses the new `extended_16` inner_loop roster (8 original + 8 new chars).
 # 300-iter fresh run from scratch with the <post>/<python> tag format

@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. A template, not an experiment.
+#
 experiment_name: distillation_ablation_v1
 
 small_model:

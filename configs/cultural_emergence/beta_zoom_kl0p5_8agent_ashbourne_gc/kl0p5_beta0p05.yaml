@@ -1,3 +1,6 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300.
+# See runs/cultural_emergence/beta_zoom_kl0p5_8agent_ashbourne_gc/kl0p5_beta0p05/NOTES.md
+#
 # Follow-up: beta zoom at kl=0.5 (beta=0.05).
 name: betazoom_8agent_7B_ashbourne_gc_kl0p5_beta0p05
 script: train_population

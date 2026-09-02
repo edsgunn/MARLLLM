@@ -1,3 +1,5 @@
+# STATUS: NEVER RUN. See 05_symmetric_ccsm_cooperative.yaml.
+#
 name: phase_a_symmetric_ccsm_competitive
 description: >
   Phase A condition 5 — symmetric CCSM, competitive prompt. Both agents
