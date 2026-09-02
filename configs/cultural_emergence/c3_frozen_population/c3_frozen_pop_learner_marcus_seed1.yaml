@@ -1,0 +1,128 @@
+# STATUS: QUEUED as job 6260985 on 2026-09-02.
+#
+# C3 -- ONE LEARNER IN A FIXED POPULATION. Learner: Marcus Webb. Seed 1.
+#
+# WHAT THIS CHANGES
+#   Against runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc:
+#   the substrate, the roster, the hyperparameters and the horizon are
+#   identical, and seven of the eight members are frozen. They still post, and
+#   the learner still reads their posts as observations, so the learner's
+#   rollouts are the same shape as in the reference run. They just do not
+#   learn.
+#
+#   Frozen at a fresh LoRA adapter, which is the identity: the seven present
+#   the base model under their character prompts, and that presentation is
+#   stationary for all 300 iterations.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether the decline needs the population to be moving. Every failure this
+#   project documents was measured in a co-adapting population, so "the agents
+#   drove each other into it" and "surprise minimisation does this to any agent
+#   against any population" are not currently separated. This separates them,
+#   because here the environment cannot move.
+#
+#   The reference run's decline is the comparison: its public channel closes
+#   (99% -> 28% of turns delivering a well-formed post) and its population
+#   declines from iteration ~200. The learner here is one agent, so read it
+#   against the reference run's *per-agent* traces, not its population means.
+#
+# WHAT WOULD FALSIFY THE CO-ADAPTATION READING
+#   If the lone learner's public channel closes on the same schedule and its
+#   entropy collapses to the same place, co-adaptation is not doing the work.
+#   The decline is then single-agent surprise minimisation against any
+#   population, the multi-agent framing has no causal role in the failure, and
+#   REWRITE.md 3.5's mechanism is the whole story.
+#
+#   If the learner stays healthy where the reference agents did not, the
+#   failure requires a moving population and that is a result about
+#   multi-agent dynamics rather than about the objective alone.
+#
+# WHAT WOULD VOID THE RUN
+#   Any gradient reaching a frozen member -- the trainer raises rather than
+#   continues, so this shows up as a crash, not a silent confound. Also void
+#   if fewer than 300 iterations are reached, or if `pop/n_frozen` in
+#   metrics.jsonl is not 7.
+#
+# NOTE ON READING THE METRICS
+#   Population means average over trainable members only, so here they are the
+#   learner's own numbers rather than a mean over eight. `pop/n_trainable` and
+#   `pop/n_frozen` are logged every iteration so the denominator is visible.
+#
+name: c3_frozen_pop_learner_marcus_seed1
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+- Marcus Webb
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+
+# --- rollout pathway: pinned to match the reference run ---
+# The reference run predates these three keys and ran the synchronous path
+# with a single-shot loss and plain REINFORCE. Pinned rather than inherited
+# so a change of default cannot silently move this run off the pathway it is
+# compared against. seq_chunk_size is left unset (None = single-shot).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+frozen_agents:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/cultural_emergence/c3_frozen_population/c3_frozen_pop_learner_marcus_seed1
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

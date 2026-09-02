@@ -401,6 +401,9 @@ time, because every published analysis evaluates at a fixed iteration.*
 | 6256587 | `configs/env_likelihood_bias/A_surrogate_seed1.yaml` | Arm A of the environment-likelihood experiment: the usual surrogate return, with `ln p_env` logged but unused, so the dropped term's size and its effect on the update direction can be measured. |
 | 6256588 | `configs/env_likelihood_bias/B_corrected_seed1.yaml` | Arm B: identical but for the return, which becomes `R_t = Σ γ^(s-t)(E_s − M_s)`, with the value head fitted to it. |
 | 6260359–6260378 | [`configs/cultural_emergence/c1_small_population_replicates/`](configs/cultural_emergence/c1_small_population_replicates/README.md) | Tier C item C1: twenty seed replicates of the N=2 and N=4 corner of the population-size figure, where every cell is currently n=1. |
+| 6260985–6260987 | [`c3_frozen_population/`](configs/cultural_emergence/c3_frozen_population/README.md) | C3: one learner training against seven frozen members on the reference substrate — the control that separates co-adaptation from single-agent surprise minimisation. |
+| 6260988–6260989 | [`c6_extended_horizon/`](configs/cultural_emergence/c6_extended_horizon/README.md) | C6: the 8- and 16-agent reference populations resumed past iteration 300, to 900 and 600. |
+| 6261085–6261088 | [`c10_term_ablation/`](configs/cultural_emergence/c10_term_ablation/README.md) | C10: perception-only and action-only on the reference population, two seeds each. |
 
 Both on `study_group_ashbourne_gc`, 8 agents, with the post tags blanked so
 nothing an agent emits is discarded and `p_env` is exact rather than estimated.
@@ -421,6 +424,42 @@ difference the figure reads as a population-size effect, the corner comes out
 of the figure. —
 [`configs/cultural_emergence/c1_small_population_replicates/README.md`](configs/cultural_emergence/c1_small_population_replicates/README.md),
 [`REWRITE.md`](REWRITE.md) C1
+
+**C3 — one learner in a fixed population.** `frozen_agents` is now honoured by
+`PopulationTrainer`, so seven of eight members can post without learning while
+the eighth trains against them. Every failure this project documents was
+measured in a co-adapting population, which leaves "the agents drove each other
+into it" and "surprise minimisation does this to any agent against any
+population" unseparated. Here the environment cannot move, so the separation is
+clean. Three arms — two learners × two seeds, because the full loss is
+seed-unstable at exactly the level that decides survival, and because agents in
+this project are not interchangeable. —
+[`configs/cultural_emergence/c3_frozen_population/README.md`](configs/cultural_emergence/c3_frozen_population/README.md),
+[`REWRITE.md`](REWRITE.md) C3
+
+**C6 — extended horizon.** The 8-agent reference population resumed from its
+iteration-300 checkpoint to 900, and the 16-agent one to 600, into new
+directories so the originals stay as the existing analyses found them. Answers
+whether divergence plateaus and whether the decline bottoms out, neither of
+which is visible at any horizon this project has run. Void condition: a step
+change at iteration 301 is code drift rather than dynamics, and is checkable by
+comparing iterations 295–300 against 301–306. —
+[`configs/cultural_emergence/c6_extended_horizon/README.md`](configs/cultural_emergence/c6_extended_horizon/README.md),
+[`REWRITE.md`](REWRITE.md) C6
+
+**C10 — which term does the damage?** Perception-only and action-only on the
+reference population. The dark-room incentive reaches behaviour through the
+action term alone, so `alpha_act` = 0 removes the mechanism rather than a term,
+and the channel-closes-first association becomes a causal claim or dies.
+Absorption is carried by the perception term, so the arm can separate the
+framework's learning signal from its pathology. The alphas were honoured by the
+loss but unreachable from a population config, so every forum run in this
+project has been at 1/1/1 with no way to say otherwise. Stated in advance: if
+perception-only barely moves the policy, "it did not collapse" is trivially
+true and the arm carries no result — the precondition is that it still absorbs
+and still diverges. —
+[`configs/cultural_emergence/c10_term_ablation/README.md`](configs/cultural_emergence/c10_term_ablation/README.md),
+[`REWRITE.md`](REWRITE.md) C10
 
 ---
 

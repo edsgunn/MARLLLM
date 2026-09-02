@@ -67,6 +67,7 @@ directories, not jobs — several directories were submitted more than once.
 | 09-01 | Tier-B analyses ([`_tier_b/`](_tier_b/README.md)) | Eight pre-registered re-analyses, no compute. The public channel closes in 63/65 runs and leads the regime decline by up to 200 iterations; the policy-distance headline survives a collapse control on 2 of 3 datasets; no Qwen3 agent ever reaches KL ≥ 1. Two claims written down the same morning were overturned: `thinking_frac` does not measure private deliberation, and restoring the dropped environment term is not free. |
 | 09-02 | Environment-likelihood experiment ([`configs/env_likelihood_bias/`](../configs/env_likelihood_bias/README.md)) | Implemented and submitted: jobs 6256587 (arm A, surrogate return with the environment term logged) and 6256588 (arm B, corrected return). Post tags blanked so nothing an agent emits is discarded and `p_env` is computed rather than estimated. Seeds 2-5 written and held. |
 | 09-02 | Tier C item C1 ([`configs/cultural_emergence/c1_small_population_replicates/`](../configs/cultural_emergence/c1_small_population_replicates/README.md)) | Implemented and submitted as jobs 6260359-6260378: 5 seeds × 2 substrates × 2 population sizes, replicating the N=2/N=4 corner of the population-size figure where every cell is n=1. Seed 1 re-run rather than reused — the 05-06 originals ran against an uncommitted tree. Verified in the process that `thinking_enabled` has been an inert key since 05-05; REWRITE.md C4 corrected accordingly. |
+| 09-02 | Tier C items C3, C6 and C10 ([`c3_frozen_population/`](../configs/cultural_emergence/c3_frozen_population/README.md), [`c6_extended_horizon/`](../configs/cultural_emergence/c6_extended_horizon/README.md), [`c10_term_ablation/`](../configs/cultural_emergence/c10_term_ablation/README.md)) | Nine jobs submitted, 6260985-6260989 and 6261085-6261088. Two config keys that the loss and trainer honoured but no population config could reach were wired: `frozen_agents` (implemented in `PopulationTrainer`) and the three `alpha_*` term weights — so every forum run in this project until now was at 1/1/1 with no way to say otherwise. C3 trains one learner against seven frozen members; C6 resumes the 8- and 16-agent references past 300; C10 is the perception-only/action-only dissociation on the reference population. |
 
 ---
 
@@ -77,6 +78,9 @@ directories, not jobs — several directories were submitted more than once.
 | 6256587 | 2026-09-02 | `A_surrogate_seed1` — environment-likelihood experiment, arm A |
 | 6256588 | 2026-09-02 | `B_corrected_seed1` — arm B, corrected return |
 | 6260359–6260378 | 2026-09-02 | C1 — twenty seed replicates of the N=2/N=4 corner of the population-size figure |
+| 6260985–6260987 | 2026-09-02 | C3 — one learner against seven frozen members, two learners × two seeds |
+| 6260988–6260989 | 2026-09-02 | C6 — reference populations extended to 900 (8-agent) and 600 (16-agent) |
+| 6261085–6261088 | 2026-09-02 | C10 — perception-only and action-only term ablations, two seeds each |
 
 The first job submitted since 2026-06-23. Seeds 2-5 of each arm are written and
 held until the provenance void conditions are confirmed —
@@ -85,3 +89,7 @@ held until the provenance void conditions are confirmed —
 The C1 replicates are twenty single-node jobs of 2.5-5.5 h each, queued behind
 the two environment-likelihood arms —
 [`configs/cultural_emergence/c1_small_population_replicates/README.md`](../configs/cultural_emergence/c1_small_population_replicates/README.md).
+
+Thirty-one jobs in total, the largest batch since the May campaign. All are
+single-node and inside the 24 h limit; the deepest is C6's 8-agent extension at
+an estimated 10.5 h.

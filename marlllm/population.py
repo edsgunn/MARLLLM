@@ -467,14 +467,9 @@ class PopulationTrainer:
                 [val] if isinstance(val, str) else list(val)
             )
 
-        # Single optimizer over all unique parameters across the population.
-        seen_ids: set[int] = set()
-        all_params: list = []
-        for agent in population.values():
-            for p in agent.parameters():
-                if id(p) not in seen_ids:
-                    seen_ids.add(id(p))
-                    all_params.append(p)
+        # Resolve frozen vs trainable members and build the parameter list the
+        # optimizer gets. See _setup_frozen_agents.
+        all_params = self._setup_frozen_agents(population, config)
         if getattr(config, "use_8bit_adam", False):
             import bitsandbytes as bnb
             self.optimizer = bnb.optim.AdamW8bit(all_params, lr=config.lr)
@@ -776,6 +771,82 @@ class PopulationTrainer:
             out[f"{p}/max_episode_total_tokens"] = float(a["max_episode_total_tokens"])
         return out
 
+    def _setup_frozen_agents(self, population, config) -> list:
+        """Resolve ``config.frozen_agents`` and return the trainable parameters.
+
+        Names listed in ``frozen_agents`` take part in rollouts exactly as they
+        otherwise would — they post, and the learner reads their posts as
+        observations — but they receive no gradient: their parameters are kept
+        out of the optimizer here, and their forward+backward is skipped in the
+        per-agent update. So a population with one learner and N-1 frozen
+        members presents the learner with a *fixed* culture instead of a
+        co-adapting one, at roughly 1/N of the backward cost of training all of
+        them.
+
+        Freezing is at whatever weights the member starts with: a fresh LoRA
+        adapter is the identity, so an unresumed run freezes members at the base
+        model under their character prompt, while resuming from a completed
+        run's checkpoint freezes them at that run's trained culture instead.
+
+        Sets ``frozen_agents``, ``trainable_agents`` and ``_frozen_params``.
+        See marlllm/trainer.py for the negotiation trainer's equivalent
+        (Phase A §2.4) — this is the population-level counterpart.
+        """
+        self.frozen_agents: set[str] = set(
+            getattr(config, "frozen_agents", None) or []
+        )
+        unknown = sorted(self.frozen_agents - set(population.keys()))
+        if unknown:
+            raise ValueError(
+                f"frozen_agents references unknown population member(s) "
+                f"{unknown}; the population is {sorted(population.keys())}."
+            )
+        self.trainable_agents: list[str] = [
+            name for name in population if name not in self.frozen_agents
+        ]
+        if not self.trainable_agents:
+            raise ValueError(
+                "No trainable parameters: every population member is listed in "
+                "frozen_agents."
+            )
+
+        # One optimizer over all unique parameters across the population,
+        # frozen members excluded so no step can reach them.
+        seen_ids: set[int] = set()
+        all_params: list = []
+        for name, agent in population.items():
+            if name in self.frozen_agents:
+                continue
+            for p in agent.parameters():
+                if id(p) not in seen_ids:
+                    seen_ids.add(id(p))
+                    all_params.append(p)
+
+        # Parameters that must not move, kept for the per-iteration assertion
+        # that they did not. With LoRA-shared-base each member's adapter is a
+        # disjoint parameter set, so this cannot overlap all_params; the
+        # overlap check catches a future agent type where it might, because
+        # there freezing would be unenforceable rather than merely awkward.
+        self._frozen_params: list = [
+            p
+            for name in self.frozen_agents
+            for p in population[name].parameters()
+            if id(p) not in seen_ids
+        ]
+        overlap = sum(
+            1
+            for name in self.frozen_agents
+            for p in population[name].parameters()
+            if id(p) in seen_ids
+        )
+        if overlap:
+            raise ValueError(
+                f"{overlap} parameter(s) are shared between a frozen and a "
+                "trainable population member, so freezing cannot be honoured. "
+                "This agent type does not support frozen_agents."
+            )
+        return all_params
+
     def train(self, start_iteration: int = 1) -> None:
         pop_names = list(self.population.keys())
         env_names = [s.name for s in self.environments]
@@ -785,6 +856,13 @@ class PopulationTrainer:
                 len(pop_names), pop_names, env_names, self.pairing_strategy,
                 self.config.num_iterations, self.ddp_world_size,
             )
+            if self.frozen_agents:
+                self._logger.info(
+                    "Frozen population: %d of %d members receive no gradient "
+                    "%s | training %s",
+                    len(self.frozen_agents), len(pop_names),
+                    sorted(self.frozen_agents), self.trainable_agents,
+                )
             self._logger.info("Output directory: %s", self.config.output_dir)
 
         # When running data-parallel, each rank only collects 1/world_size of the
@@ -921,6 +999,13 @@ class PopulationTrainer:
             per_agent_timings: dict[str, dict[str, float]] = {}
 
             for pop_name, agent in self.population.items():
+                # Frozen members posted during the rollout and their posts are
+                # in the learner's observation stream; they just do not learn.
+                # Skipping before the forward is what makes the control cheap,
+                # and it is why per-agent loss metrics below exist only for the
+                # trainable members.
+                if pop_name in self.frozen_agents:
+                    continue
                 _t_agent = time.perf_counter()
                 agent_episodes = [
                     ep for ep in raw_episodes if pop_name in ep[2]
@@ -1100,6 +1185,21 @@ class PopulationTrainer:
 
             # ── 3. Optimizer step ─────────────────────────────────────────
             _t_phase = time.perf_counter()
+            # The control's validity condition: nothing reached a frozen
+            # member. Skipping its forward should leave every one of its
+            # parameters out of the graph, so a populated .grad means the
+            # freeze leaked and the run is void — fail loudly rather than
+            # silently train a "frozen" population.
+            if self._frozen_params:
+                leaked = sum(
+                    1 for p in self._frozen_params if p.grad is not None
+                )
+                if leaked:
+                    raise RuntimeError(
+                        f"{leaked} parameter(s) of frozen population members "
+                        f"received a gradient at iteration {iteration}. The "
+                        "freeze is not being honoured; this run is void."
+                    )
             if self.ddp and not self._fsdp:
                 # Average gradients across ranks before stepping. We don't wrap
                 # in DistributedDataParallel because PEFT swaps the wrapped
@@ -1188,6 +1288,11 @@ class PopulationTrainer:
 
             pairings = [ep[2] for ep in raw_episodes]
             all_metrics["unique_pairings"] = len(set(pairings))
+            # Population means below average over the *trainable* members only,
+            # since frozen ones contribute no loss row. Logged so a reader of
+            # metrics.jsonl can see the denominator rather than infer it.
+            all_metrics["pop/n_trainable"] = float(len(self.trainable_agents))
+            all_metrics["pop/n_frozen"] = float(len(self.frozen_agents))
 
             # Per-env episode counts
             env_counts: dict[str, int] = {}

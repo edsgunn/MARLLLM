@@ -1,0 +1,145 @@
+# STATUS: QUEUED as job 6261085 on 2026-09-02.
+#
+# C10 -- ACTION-ONLY ABLATION on the reference forum population. Seed 1.
+#
+# WHAT THIS CHANGES
+#   Against runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc:
+#   the three term weights, and nothing else. Same substrate, same roster,
+#   same hyperparameters, same horizon, same rollout pathway.
+#
+#   alpha_perc 0, alpha_act 1, alpha_val 1 — no next-token loss on
+#   observation tokens; policy and value head train as usual.
+#
+#   Two things that do NOT change, and would be easy to assume otherwise:
+#   * The KL anchor survives at full weight. `kl_coef * kl` is a separate,
+#     un-gated term in marlllm/loss.py — the alphas do not reach it — so both
+#     arms keep kl_coef 0.05 exactly as the reference run had it.
+#   * The entropy bonus lives INSIDE the action term
+#     (`alpha_act * (l_policy - beta * l_ent)`), so beta is inert whenever
+#     alpha_act is 0. That is the correct reading of this arm rather than an
+#     oversight: with no policy gradient there is no entropy to bonus.
+#
+# WHY THIS IS WORTH RUNNING AGAIN
+#   The perception-only result the project already has was measured on the
+#   Phase A negotiation substrate in 2026-05, on an early and since-rebuilt
+#   environment, in a two-agent setting with no population. It says the
+#   perception term does the world-modelling and the action term collapses
+#   entropy. Nothing has re-tested that where the paper's claims actually live.
+#
+#   And there is a sharper reason than staleness. The dark-room incentive
+#   REWRITE.md 3.5 blames for the decline reaches behaviour through the action
+#   term ALONE: the return enters the loss as the policy gradient's weight, and
+#   the value head cannot move behaviour. So alpha_act = 0 removes the
+#   mechanism, not merely a term. Everything the decline consists of — the
+#   public channel closing in 63 of 65 runs, entropy collapsing, populations
+#   dying from iteration ~200 — is currently pinned on that mechanism by an
+#   ASSOCIATION: the channel closes first, by up to 200 iterations, in 9 of 12
+#   runs where both are observable. This is the arm that turns the association
+#   into a causal claim or kills it.
+#
+#   The second prediction is the one that would change the paper's shape.
+#   Absorption is carried by the PERCEPTION term: prompt_as_observation types
+#   character-prompt tokens OBS, so they enter L_perc and never the policy
+#   gradient. If perception-only keeps absorption and drops the collapse, then
+#   the framework's learning signal and the framework's pathology are in
+#   different terms, and that is a far better result than "the objective works
+#   but kills its populations".
+#
+# WHAT WE EXPECT TO LEARN
+#   The complement of the perception-only arm, and together with it and the
+#   reference run a three-cell dissociation rather than a single contrast.
+#
+#   Predicted: the dark-room incentive runs undiluted, so the public channel
+#   closes at least as fast as the reference and probably faster, entropy
+#   collapses, and absorption DISAPPEARS — with alpha_perc = 0 the OBS-typed
+#   character-prompt tokens receive no loss of any kind, so the mechanism
+#   absorption is measured through is gone.
+#
+# WHAT WOULD FALSIFY IT
+#   Absorption surviving with alpha_perc = 0 would mean the PMI gap is not
+#   measuring what REWRITE.md says it measures, and the absorption results
+#   would need re-grounding. A public channel that stays open here would mean
+#   the perception term, not the action term, drives the closure — the
+#   opposite of the prediction and a more interesting result.
+#
+# WHAT WOULD VOID THE RUN
+#   Divergence so fast that the run dies before iteration 100. With no
+#   next-token loss there is nothing anchoring the model to fluent text except
+#   the KL term, and REWRITE.md Tier D already records that the KL anchor is
+#   close to orthogonal to collapse. A run that produces only token soup by
+#   iteration 50 answers nothing; if that happens, the arm needs a higher
+#   kl_coef and a note that it is no longer matched to the reference.
+#
+name: c10_action_only_8agent_ashbourne_gc_seed1
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+- Marcus Webb
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+
+# --- rollout pathway: pinned to match the reference run ---
+# The reference run predates these three keys and ran the synchronous path
+# with a single-shot loss and plain REINFORCE. Pinned rather than inherited
+# so a change of default cannot silently move this run off the pathway it is
+# compared against. seq_chunk_size is left unset (None = single-shot).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+alpha_perc: 0.0
+alpha_act: 1.0
+alpha_val: 1.0
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/cultural_emergence/c10_term_ablation/c10_action_only_8agent_ashbourne_gc_seed1
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50
