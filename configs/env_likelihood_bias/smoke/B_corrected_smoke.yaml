@@ -1,0 +1,48 @@
+# STATUS: SMOKE TEST. Not an experiment — a 2-iteration CPU run on a 0.5B model
+# that exercises the whole environment-likelihood path end to end before any
+# GPU job is submitted. Never cite its numbers.
+name: B_corrected_smoke
+script: train_population
+model: Qwen/Qwen2.5-0.5B-Instruct
+dtype: float32
+device: cpu
+attn_impl: eager
+use_vllm: false
+characters:
+- Priya Shah
+- Tom Whitaker
+lora_shared_base: true
+lora_r: 8
+lora_alpha: 16
+lora_modules: q_proj,v_proj
+pairing_strategy: random_no_self
+iters: 2
+rollouts: 1
+lr: 5e-6
+kl_coef: 0.0
+beta: 0.01
+grad_accum: 1
+seed: 1
+log_every: 1
+checkpoint_every: 1000
+num_checkpoint_traces: 1
+max_episode_tokens: 2048
+env_likelihood_logging: true
+use_env_likelihood_return: true
+bias_probe_enabled: true
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_open_tag: ""
+  post_close_tag: ""
+  provenance: true
+  post_token_budget: 48
+  total_token_budget: 48
+  character_set: canonical_2
+  max_posts: 4
+  post_order: round_robin
+output_dir: /tmp/envlp_smoke/B_corrected
+gradient_checkpointing: false
+var_decomp_enabled: false

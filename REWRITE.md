@@ -320,6 +320,7 @@ pre-registration; two of the eight overturned a claim already written here.
 | C6 | One existing dataset extended past 300 iterations | 1–2 runs | Does divergence plateau; does the decline bottom out |
 | C7 | **B5b — the action↔future-environment-entropy covariance**, moved here from Tier B: no logged artefact carries per-token log-probs, so it needs a scoring pass over checkpoints | GPU, no new training | 5MAX's remaining theoretical objection; §5.1 |
 | C8 | **The private-prefix correction `I(z; y \| u)`**, pre-registered with falsification conditions in `scripts/tier_b/c7_env_likelihood_bias.py` (dry-run works; scoring pass unimplemented) | GPU, ~2k passes per run | Whether the naive cross-agent substitution is usable as-is |
+| **C9** | **The environment-likelihood experiment.** Two arms on `study_group_ashbourne_gc` with the post tags blanked, so nothing an agent emits is discarded and `p_env` is exact rather than estimated. A logs the term without using it; B trains on the corrected return. Implemented and configured: [`configs/env_likelihood_bias/`](configs/env_likelihood_bias/README.md) | 8-agent runs, 10 configs, seed 1 of each first | How large the dropped term is, whether it changes the update direction, and what the corrected objective does |
 
 ### Tier D — dropped, and say so
 
@@ -725,9 +726,15 @@ to move) · C7 the covariance measurement (GPU scoring, no training).
 **Then, the block that decides the paper:** C2 population-size decomposition
 (15–20 runs, needs one new pairing strategy).
 
-**Optional, high upside:** C8 the private-prefix correction (cheap, and it
-decides whether C5 needs marginalising at all), then C5 the restored-`p_env`
-arm. §5.1 has verified; the open risk is now §8 of the derivation — the corrected
+**Superseded by C9.** C8's estimator turns out to be ill-posed on a substrate
+with private thinking: contexts persist, so the latent is the accumulated
+private history and marginalising it is a filtering problem that degenerates
+over an episode (`environment_likelihood_derivation.md` §6a). C9 removes the
+private channel instead, which makes the correction exactly zero and `p_env`
+computable rather than estimable. Run C9; keep C8 only if a *thinking* substrate
+ever needs the number.
+
+**Optional, high upside:** C5 the restored-`p_env` arm — now the B arm of C9. §5.1 has verified; the open risk is now §8 of the derivation — the corrected
 return is a proper divergence whose optimum is flat across worlds, so the action
 gradient may self-extinguish where the surrogate's does not. Never on the
 critical path.

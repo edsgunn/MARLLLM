@@ -417,6 +417,17 @@ class PopulationTrainer:
         self.loss = loss
         self.tokeniser = tokeniser
         self.config = config
+        # Environment-likelihood logging (environment_likelihood_derivation.md).
+        # Off by default; requires an env exposing observation provenance.
+        self._log_env_likelihood = bool(
+            getattr(config, "env_likelihood_logging", False)
+            or getattr(config, "use_env_likelihood_return", False))
+        self._env_lp_misalignments = 0
+        self._provenance_misses_total = 0
+        if getattr(config, "bias_probe_enabled", False):
+            for _a in population.values():
+                if hasattr(_a, "enable_bias_probe"):
+                    _a.enable_bias_probe()
         self.pairing_strategy = pairing_strategy
         # Optional vLLM sampling engine (rollout-only). When set, _collect_episodes_batched
         # routes generation through it instead of agent.act_batch, and the trainer
@@ -1000,6 +1011,12 @@ class PopulationTrainer:
                             target_agent_idx=agent_idx,
                             config=self.config,
                             backward_scale=scale,
+                            env_log_probs=(
+                                batch.env_log_probs[micro_start:micro_end].to(dev)
+                                if batch.env_log_probs is not None else None),
+                            env_lp_known=(
+                                batch.env_lp_known[micro_start:micro_end].to(dev)
+                                if batch.env_lp_known is not None else None),
                         )
                         total_loss_scalar += loss_scalar / num_micros
                     else:
@@ -1012,6 +1029,13 @@ class PopulationTrainer:
                         mb_lp_old = batch.act_log_probs_old[micro_start:micro_end].to(dev)
                         if not batch.packed:
                             mb_lp_old = mb_lp_old[:, :actual_len]
+                        mb_env_lp, mb_env_known = None, None
+                        if batch.env_log_probs is not None:
+                            mb_env_lp = batch.env_log_probs[micro_start:micro_end].to(dev)
+                            mb_env_known = batch.env_lp_known[micro_start:micro_end].to(dev)
+                            if not batch.packed:
+                                mb_env_lp = mb_env_lp[:, :actual_len]
+                                mb_env_known = mb_env_known[:, :actual_len]
 
                         loss_val, metrics = self.loss.compute_loss(
                             last_hidden=last_hidden,
@@ -1026,6 +1050,9 @@ class PopulationTrainer:
                             lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
                             seq_ids=mb_seq_ids,
                             act_log_probs_old=mb_lp_old,
+                            env_log_probs=mb_env_lp,
+                            env_lp_known=mb_env_known,
+                            bias_values=agent.bias_values(last_hidden),
                         )
 
                         (loss_val * scale).backward()
@@ -1054,6 +1081,14 @@ class PopulationTrainer:
             # Surface per-agent wall-time as flat metrics so plot_results
             # picks them up automatically. Also emit population-level
             # aggregates for at-a-glance dashboard reading.
+            if self._log_env_likelihood:
+                # Provenance health. Both should stay at zero; a non-zero value
+                # means some observation tokens carry no measured ln p_env and
+                # were treated as deterministic-unknown rather than guessed.
+                all_metrics["envlp/misaligned_observations"] = float(
+                    self._env_lp_misalignments)
+                all_metrics["envlp/provenance_misses"] = float(
+                    self._provenance_misses_total)
             if per_agent_timings:
                 for pn, t in per_agent_timings.items():
                     for k, v in t.items():
@@ -1347,6 +1382,9 @@ class PopulationTrainer:
 
         # Per-episode bookkeeping
         histories:    list[list[EpisodeStep]]      = [[] for _ in range(n)]
+        # post index -> the generating agent's per-token log-probs for that
+        # post, so ln p_env can be attached when it reaches an observer.
+        post_lps:     list[dict[int, list[float]]] = [{} for _ in range(n)]
         contexts:     list[dict[str, list[int]]]   = [{} for _ in range(n)]
         prompt_ids:   list[dict[str, list[int]]]   = [{} for _ in range(n)]
         ep_infos:     list[dict]                   = [{} for _ in range(n)]
@@ -1402,12 +1440,16 @@ class PopulationTrainer:
 
                 obs_ids = self.tokeniser.encode_observation(obs)
                 if obs_ids:
+                    env_lps, env_known = self._env_log_probs_for_obs(
+                        env, env_role, len(obs_ids), post_lps[k])
                     histories[k].append(EpisodeStep(
                         agent_id=pop_name,
                         token_ids=obs_ids,
                         token_type=TokenType.OBS,
                         log_probs=[],
                         info={},
+                        env_log_probs=env_lps,
+                        env_lp_known=env_known,
                     ))
                     if _full_ctx:
                         contexts[k][env_role] = list(obs_ids)
@@ -1526,11 +1568,23 @@ class PopulationTrainer:
                     ))
                     contexts[k][env_role].extend(formatter.wrap_action(act_ids))
                     token_counts[k] += len(act_ids)
+                    # The post index this action is about to be given, so the
+                    # log-probs can be found again when the post lands in
+                    # another agent's observation stream.
+                    _post_idx = getattr(envs[k], "_post_count", None)
                     _t_env = time.perf_counter()
                     envs[k].step(act_ids)
+                    if self._log_env_likelihood and _post_idx is not None:
+                        post_lps[k][_post_idx] = act_lps
                     self._rollout_stats["env_step_time_s"] += time.perf_counter() - _t_env
                     if not envs[k].agents:
                         active[k] = False
+
+        if self._log_env_likelihood:
+            # envs[k] are the per-episode deep copies; self.environments holds
+            # EnvironmentSpec templates, which never run and so never miss.
+            self._provenance_misses_total += sum(
+                int(getattr(e, "_provenance_misses", 0)) for e in envs)
 
         context_snapshots = [
             {env_role: list(contexts[k][env_role]) for env_role in contexts[k]}
@@ -1546,6 +1600,59 @@ class PopulationTrainer:
     # ------------------------------------------------------------------ #
     # Trajectory building for training                                    #
     # ------------------------------------------------------------------ #
+
+    def _env_log_probs_for_obs(
+        self, env, agent: str, n_tokens: int, post_lps: dict[int, list[float]]
+    ) -> tuple[list[float] | None, list[bool] | None]:
+        """ln p_env per observation token, using the environment's provenance.
+
+        Scaffolding, tool output and persona text are deterministic given what
+        the observer can already see, so ln p_env = 0 there exactly. Another
+        agent's post carries that agent's own sampled log-probs, spliced token
+        for token — the environment guarantees the ids are the ones it sampled,
+        so no alignment or re-encoding is involved.
+
+        Returns ``(None, None)`` when the environment cannot supply provenance,
+        which leaves the term dropped exactly as before.
+        See environment_likelihood_derivation.md.
+        """
+        if not self._log_env_likelihood:
+            return None, None
+        seg_fn = getattr(env, "observation_segments", None)
+        if seg_fn is None:
+            return None, None
+        segs = seg_fn(agent)
+        if not segs:
+            return None, None
+        lps: list[float] = []
+        known: list[bool] = []
+        for kind, _speaker, n_tok, post_idx in segs:
+            if kind == "post" and post_idx is not None and post_idx in post_lps:
+                src = getattr(env, "_post_token_provenance", {}).get(post_idx, {})
+                positions = src.get("src_positions") or []
+                gen_lps = post_lps[post_idx]
+                vals = [
+                    float(gen_lps[i]) if 0 <= i < len(gen_lps) else 0.0
+                    for i in positions
+                ]
+                if len(vals) == n_tok:
+                    lps.extend(vals)
+                    known.extend([True] * n_tok)
+                    continue
+                # Length disagreement: refuse to guess. Counted, not silent.
+                self._env_lp_misalignments += 1
+                lps.extend([0.0] * n_tok)
+                known.extend([False] * n_tok)
+            elif kind == "scaffold":
+                lps.extend([0.0] * n_tok)          # deterministic: ln p_env = 0
+                known.extend([True] * n_tok)
+            else:
+                lps.extend([0.0] * n_tok)          # sampled but unrecoverable
+                known.extend([False] * n_tok)
+        if len(lps) != n_tokens:
+            self._env_lp_misalignments += 1
+            return None, None
+        return lps, known
 
     def _build_agent_trajectories(
         self,

@@ -31,6 +31,17 @@ class EpisodeStep:
     token_type: TokenType
     log_probs: list[float]  # sampled log-probs for ACT tokens; [] for OBS
     info: dict = field(default_factory=dict)
+    # ln p_env per token, for OBS steps only. Populated when the environment
+    # can say where an observation token came from and the generating agent's
+    # sampled log-prob is available (see environment_likelihood_derivation.md).
+    #   * a float  — the generating agent's log-prob for that token
+    #   * 0.0      — a deterministic environment token (scaffolding, tool
+    #                output given its code, persona): ln p_env = 0 exactly
+    #   * None (whole field) — not logged; the term stays dropped as before
+    env_log_probs: list[float] | None = None
+    # True where the corresponding env_log_probs entry is a real measurement
+    # rather than the deterministic-zero default. Diagnostics only.
+    env_lp_known: list[bool] | None = None
 
 
 @dataclass
@@ -72,6 +83,35 @@ class Trajectory:
                 result.extend([0.0] * len(step.token_ids))
         return result
 
+    def env_log_probs_flat(self) -> list[float]:
+        """Flat ln p_env aligned to token positions; 0.0 wherever unknown or
+        at non-OBS. Zero is also the correct value at deterministic OBS tokens,
+        so use ``env_lp_known_flat`` to tell the two cases apart."""
+        result = []
+        for step in self.steps:
+            n = len(step.token_ids)
+            lp = step.env_log_probs
+            if step.token_type == TokenType.OBS and lp is not None and len(lp) == n:
+                result.extend(float(x) for x in lp)
+            else:
+                result.extend([0.0] * n)
+        return result
+
+    def env_lp_known_flat(self) -> list[bool]:
+        """Flat mask: True where env_log_probs carries a measurement."""
+        result = []
+        for step in self.steps:
+            n = len(step.token_ids)
+            known = step.env_lp_known
+            if step.token_type == TokenType.OBS and known is not None and len(known) == n:
+                result.extend(bool(x) for x in known)
+            else:
+                result.extend([False] * n)
+        return result
+
+    def has_env_log_probs(self) -> bool:
+        return any(s.env_log_probs is not None for s in self.steps)
+
 
 @dataclass
 class RolloutBatch:
@@ -101,6 +141,12 @@ class RolloutBatch:
     token_type_mask: torch.Tensor    # same shape — TokenType ints
     agent_id_mask: torch.Tensor      # same shape — agent index; -1 for PROMPT/pad
     act_log_probs_old: torch.Tensor  # same shape, float — 0 at non-ACT positions
+    # ln p_env per token; 0 at non-OBS and at deterministic OBS tokens. None
+    # when the environment term was not logged (legacy behaviour).
+    env_log_probs: torch.Tensor | None = None
+    # bool, same shape: True where env_log_probs is a measurement rather than
+    # the deterministic-zero default.
+    env_lp_known: torch.Tensor | None = None
 
     # Packed-mode only (None in padded mode):
     seq_ids: torch.Tensor | None = None          # (1, T_total) long; trajectory index per token
@@ -120,6 +166,8 @@ class RolloutBatch:
             token_type_mask=self.token_type_mask.to(device),
             agent_id_mask=self.agent_id_mask.to(device),
             act_log_probs_old=self.act_log_probs_old.to(device),
+            env_log_probs=_maybe(self.env_log_probs),
+            env_lp_known=_maybe(self.env_lp_known),
             seq_ids=_maybe(self.seq_ids),
             position_ids=_maybe(self.position_ids),
             cu_seqlens=_maybe(self.cu_seqlens),
@@ -152,6 +200,9 @@ class RolloutBatch:
         token_type_mask = torch.zeros(K, T_max, dtype=torch.long)  # PROMPT=0 as pad
         agent_id_mask = torch.full((K, T_max), -1, dtype=torch.long)
         act_log_probs_old = torch.zeros(K, T_max, dtype=torch.float)
+        want_env = any(t.has_env_log_probs() for t in trajectories)
+        env_log_probs = torch.zeros(K, T_max, dtype=torch.float) if want_env else None
+        env_lp_known = torch.zeros(K, T_max, dtype=torch.bool) if want_env else None
 
         for i, (seq, tm, am, lp) in enumerate(zip(seqs, type_masks, agent_masks, lp_lists)):
             L = len(seq)
@@ -162,6 +213,11 @@ class RolloutBatch:
                 [agent_index.get(a, -1) for a in am], dtype=torch.long
             )
             act_log_probs_old[i, :L] = torch.tensor(lp, dtype=torch.float)
+            if want_env:
+                env_log_probs[i, :L] = torch.tensor(
+                    trajectories[i].env_log_probs_flat(), dtype=torch.float)
+                env_lp_known[i, :L] = torch.tensor(
+                    trajectories[i].env_lp_known_flat(), dtype=torch.bool)
 
         return RolloutBatch(
             input_ids=input_ids,
@@ -169,6 +225,8 @@ class RolloutBatch:
             token_type_mask=token_type_mask,
             agent_id_mask=agent_id_mask,
             act_log_probs_old=act_log_probs_old,
+            env_log_probs=env_log_probs,
+            env_lp_known=env_lp_known,
         )
 
     @staticmethod
@@ -201,6 +259,9 @@ class RolloutBatch:
         token_type_mask = torch.zeros((1, T_total), dtype=torch.long)
         agent_id_mask = torch.full((1, T_total), -1, dtype=torch.long)
         act_log_probs_old = torch.zeros((1, T_total), dtype=torch.float)
+        want_env = any(t.has_env_log_probs() for t in trajectories)
+        env_log_probs = torch.zeros((1, T_total), dtype=torch.float) if want_env else None
+        env_lp_known = torch.zeros((1, T_total), dtype=torch.bool) if want_env else None
         seq_ids = torch.zeros((1, T_total), dtype=torch.long)
         position_ids = torch.zeros((1, T_total), dtype=torch.long)
 
@@ -217,6 +278,11 @@ class RolloutBatch:
                 [agent_index.get(a, -1) for a in am], dtype=torch.long
             )
             act_log_probs_old[0, sl] = torch.tensor(lp, dtype=torch.float)
+            if want_env:
+                env_log_probs[0, sl] = torch.tensor(
+                    trajectories[i].env_log_probs_flat(), dtype=torch.float)
+                env_lp_known[0, sl] = torch.tensor(
+                    trajectories[i].env_lp_known_flat(), dtype=torch.bool)
             seq_ids[0, sl] = i
             position_ids[0, sl] = torch.arange(L, dtype=torch.long)
             offset += L
@@ -230,6 +296,8 @@ class RolloutBatch:
             token_type_mask=token_type_mask,
             agent_id_mask=agent_id_mask,
             act_log_probs_old=act_log_probs_old,
+            env_log_probs=env_log_probs,
+            env_lp_known=env_lp_known,
             seq_ids=seq_ids,
             position_ids=position_ids,
             cu_seqlens=cu_seqlens,

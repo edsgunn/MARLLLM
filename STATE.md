@@ -355,6 +355,13 @@ time, because every published analysis evaluates at a fixed iteration.*
   agents in `policy_collapse`. A population can get better at predicting itself
   by becoming deterministic. — *established* —
   `runs/cultural_emergence/run10_2agent_7B_study_group_ashbourne_gc/NOTES.md`
+- 🆕 (2026-09-02) **`thinking_enabled` is a dead config key.** No code reads it,
+  in the env or the trainer, and 86 configs set it — including the run billed as
+  "Qwen3-8B with native thinking". The forum env always extracts `<post>`, so
+  the private channel exists by construction whatever the key says. Native
+  thinking, where it happens, comes from the chat template via
+  `marlllm/context_formatter.py`, not from this. — *established* —
+  `scripts/build_migration_configs.py` line 41 records the same fact
 - 🆕 (2026-09-01) **`thinking_frac` measures the environment's private channel
   correctly, and its name is wrong twice over.** It includes `<python>`, which is
   *public* — 68–80% of early non-post tokens on the two tool substrates — and it
@@ -389,7 +396,18 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ## What we are running
 
-**Nothing.** No job has been submitted since 2026-06-23.
+| job | config | what it is for |
+|---|---|---|
+| 6256587 | `configs/env_likelihood_bias/A_surrogate_seed1.yaml` | Arm A of the environment-likelihood experiment: the usual surrogate return, with `ln p_env` logged but unused, so the dropped term's size and its effect on the update direction can be measured. |
+| 6256588 | `configs/env_likelihood_bias/B_corrected_seed1.yaml` | Arm B: identical but for the return, which becomes `R_t = Σ γ^(s-t)(E_s − M_s)`, with the value head fitted to it. |
+
+Both on `study_group_ashbourne_gc`, 8 agents, with the post tags blanked so
+nothing an agent emits is discarded and `p_env` is exact rather than estimated.
+Seeds 2–5 of each are written and held; release them only once the void
+conditions hold — `envlp/obs_tokens_measured_frac` 1.0 and both
+`envlp/misaligned_observations` and `envlp/provenance_misses` at 0. —
+[`configs/env_likelihood_bias/README.md`](configs/env_likelihood_bias/README.md),
+`environment_likelihood_derivation.md` §9a
 
 ---
 

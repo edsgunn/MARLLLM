@@ -217,6 +217,7 @@ class ForumEnv(AECEnv):
         post_length_note: str | None = None,
         post_open_tag: str = "<post>",
         post_close_tag: str = "</post>",
+        provenance: bool = False,
         post_token_budget: int | None = None,
         total_token_budget: int | None = None,
         python_tool_enabled: bool = False,
@@ -295,6 +296,30 @@ class ForumEnv(AECEnv):
         # append-only path is unchanged); only the public output is filtered.
         self._post_open_tag = post_open_tag
         self._post_close_tag = post_close_tag
+        # No-tag mode. With the post tags blank there is no private channel:
+        # the whole generation is the public post, so nothing an agent emits
+        # is discarded and p_env has no latent to marginalise (see
+        # environment_likelihood_derivation.md, section 4.1a). The python tool
+        # is unavailable in this mode — its blocks would have nowhere to hide.
+        self._no_tag_mode = not (post_open_tag and post_close_tag)
+        if self._no_tag_mode and python_tool_enabled:
+            raise ValueError(
+                "python_tool_enabled requires post tags: in no-tag mode the "
+                "whole generation is the post, so a <python> block cannot be "
+                "separated from it.")
+        # Carry each delivered post's generating-agent token ids through to
+        # observers, so the trainer can attach ln p_env per token without
+        # re-encoding. Off by default: it changes how observations are
+        # tokenised (segment-wise rather than as one string) and must not
+        # alter runs that predate it.
+        self._provenance = bool(provenance)
+        # agent -> segments of its most recent observe(), each
+        #   ("scaffold", None, ids) or ("post", speaker, ids, post_index)
+        self._last_obs_segments: dict[str, list[tuple]] = {}
+        # post_index -> {speaker, token_ids, src_positions}
+        self._post_token_provenance: dict[int, dict] = {}
+        # posts whose token ids could not be recovered exactly
+        self._provenance_misses = 0
 
         # Optional ``pybot`` python-execution tool.  When enabled, any code
         # the agent puts inside ``<python>...</python>`` tags is stripped
@@ -398,6 +423,7 @@ class ForumEnv(AECEnv):
             post_length_note=self._post_length_note,
             post_open_tag=self._post_open_tag,
             post_close_tag=self._post_close_tag,
+            provenance=self._provenance,
             post_token_budget=self._post_token_budget,
             total_token_budget=self._total_token_budget,
             python_tool_enabled=self._python_tool_enabled,
@@ -434,6 +460,9 @@ class ForumEnv(AECEnv):
             order_rng = random.Random(order_seed) if order_seed is not None else self._rng
             order_rng.shuffle(self.agents)
         self._pending_posts = {a: [] for a in self.agents}
+        self._last_obs_segments = {a: [] for a in self.agents}
+        self._post_token_provenance = {}
+        self._provenance_misses = 0
         self._initial_delivered = {a: False for a in self.agents}
         self._post_count = 0
         self._thread = []
@@ -502,9 +531,61 @@ class ForumEnv(AECEnv):
 
         if not body_parts:
             return []
+        if self._provenance:
+            return self._observe_with_provenance(agent, body_parts, posts)
         text = "\n\n".join(body_parts)
         ids = self._tok.encode(text, add_special_tokens=False)
         return [int(t) for t in ids]
+
+    def _observe_with_provenance(self, agent, body_parts, posts) -> list[int]:
+        """Tokenise the observation segment-wise so every token's origin is known.
+
+        Scaffolding is encoded here (deterministic: ln p_env = 0). Another
+        agent's post is spliced in as the exact ids that agent sampled, never
+        re-encoded, so the observer's tokens ARE the generator's tokens and its
+        stored log-prob attaches to each one without alignment.
+
+        The cost is a segment-wise rather than canonical tokenisation: BPE will
+        not merge across a segment boundary. That is the point — merging is
+        precisely what would mix a scaffold token with a post token.
+
+        ``self._last_obs_segments[agent]`` records, per segment,
+        ``(kind, speaker, n_tokens, post_index)`` for the trainer to consume.
+        """
+        enc = lambda t: [int(x) for x in self._tok.encode(t, add_special_tokens=False)]
+        segs: list[tuple] = []
+        # body_parts were joined with "\n\n"; rebuild that structure exactly.
+        n_before_posts = len(body_parts) - (1 if posts else 0)
+        for n in range(n_before_posts):
+            if n:
+                segs.append(("scaffold", None, enc("\n\n"), None))
+            segs.append(("scaffold", None, enc(body_parts[n]), None))
+        if posts:
+            if n_before_posts:
+                segs.append(("scaffold", None, enc("\n\n"), None))
+            for kind, sp, txt, idx, ids in self._frame_post_segments(posts):
+                if kind == "post" and ids:
+                    segs.append(("post", sp, [int(x) for x in ids], idx))
+                elif kind == "post":
+                    # No recoverable ids (e.g. a tool post, or a text/token
+                    # mismatch). Encode it, and mark it unmeasured rather than
+                    # asserting ln p_env = 0 for something that was sampled.
+                    segs.append(("post_unknown", sp, enc(txt), idx))
+                else:
+                    segs.append(("scaffold", None, enc(txt), None))
+        self._last_obs_segments[agent] = [
+            (k, sp, len(i), idx) for k, sp, i, idx in segs
+        ]
+        out: list[int] = []
+        for _k, _sp, i, _idx in segs:
+            out.extend(i)
+        return out
+
+    def observation_segments(self, agent: str) -> list[tuple]:
+        """``(kind, speaker, n_tokens, post_index)`` for the agent's last
+        observation. ``kind`` is "scaffold" (ln p_env = 0), "post" (the
+        generating agent's log-probs apply) or "post_unknown"."""
+        return list(self._last_obs_segments.get(agent, []))
 
     def step(self, action: Any) -> None:
         speaker = self.agent_selection
@@ -566,10 +647,28 @@ class ForumEnv(AECEnv):
         })
         self._post_count += 1
 
+        # Provenance: keep the generating agent's token ids for this post, and
+        # the positions they occupied in its action sequence, so the trainer
+        # can attach that agent's own log-prob to each token when the post
+        # lands in someone else's context (environment_likelihood_derivation.md).
+        post_idx = self._post_count - 1
+        content_ids = None
+        if self._provenance and text:
+            content_ids, src_pos = self._content_token_ids(action, text)
+            if content_ids is not None:
+                self._post_token_provenance[post_idx] = {
+                    "speaker": speaker,
+                    "token_ids": content_ids,
+                    "src_positions": src_pos,
+                }
+            else:
+                self._provenance_misses += 1
+
         # Deliver this post to every OTHER agent's pending buffer.
         for other in self.agents:
             if other != speaker:
-                self._pending_posts[other].append((speaker, text))
+                self._pending_posts[other].append(
+                    (speaker, text, content_ids, post_idx))
 
         # Run any python blocks the speaker submitted and emit a pybot
         # post per block.  pybot posts are tool outputs, not turns, so
@@ -651,6 +750,32 @@ class ForumEnv(AECEnv):
     # Internals                                                           #
     # ------------------------------------------------------------------ #
 
+    def _content_token_ids(self, action, text: str):
+        """Ids within ``action`` that decode to exactly ``text``, and their
+        positions. Returns ``(None, None)`` if that cannot be established, so
+        the caller can fall back to re-encoding and mark those tokens as
+        having no measured ``ln p_env`` rather than guessing.
+
+        ``_decode_action`` drops special tokens, so the delivered text is the
+        decode of the non-special subsequence; this recovers that subsequence
+        and verifies the round trip before returning it.
+        """
+        try:
+            ids = [int(t) for t in action]
+        except (TypeError, ValueError):
+            return None, None
+        specials = set(getattr(self._tok, "all_special_ids", []) or [])
+        keep = [(n, t) for n, t in enumerate(ids) if t not in specials]
+        cand = [t for _, t in keep]
+        if not cand:
+            return None, None
+        try:
+            if self._tok.decode(cand, skip_special_tokens=True) != text:
+                return None, None
+        except Exception:
+            return None, None
+        return cand, [n for n, _ in keep]
+
     def _decode_action(self, action: Any) -> str:
         if action is None:
             self._log_event(
@@ -711,6 +836,12 @@ class ForumEnv(AECEnv):
           Unclosed python blocks are dropped (we will not run partial
           code) but counted via ``python_unclosed=True``.
         """
+        if self._no_tag_mode:
+            # Everything the agent generated is the post. One "closed" block,
+            # nothing unclosed, no code. Keeps every downstream counter
+            # (post_success / post_missing / post_blocks) meaningful.
+            body = text.strip()
+            return body, [], False, False, (1 if body else 0)
         po, pc = self._post_open_tag, self._post_close_tag
         yo, yc = self._python_open_tag, self._python_close_tag
         to, tc = self._THINK_OPEN, self._THINK_CLOSE
@@ -1055,42 +1186,79 @@ class ForumEnv(AECEnv):
                 f"so re-do your imports and re-define any functions or "
                 f"variables you need every time. "
             )
-        parts.append(
-            f"Each turn, write your reply inside {po}...{pc} tags — "
-            f"that is the text other forum members see.{tool_line}"
-            f"Anything outside {po} and {yo} tags is private "
-            f"reasoning: it stays in your own notes and is never shown "
-            f"to anyone else. If it helps, jot a quick note to yourself "
-            f"before the {po} — work through a case, check a step, or "
-            f"think about what someone said — then write the post. "
-            f"Two limits: the {po} content itself must stay under about "
-            f"{self._post_token_budget} tokens (~{post_words} words), "
-            f"and the total of thinking + post + tool calls combined "
-            f"must stay under about {self._total_token_budget} tokens "
-            f"(~{total_words} words) — anything past the total is cut "
-            f"off mid-sentence. Always close {pc} before you stop writing."
-        )
+        if self._no_tag_mode:
+            # No private channel: the whole turn is the post. Nothing is
+            # discarded, so the prompt must not promise a place to think.
+            parts.append(
+                f"Each turn, write your reply. Everything you write is the "
+                f"post other forum members see — there is no private space "
+                f"and nothing is hidden. Keep it under about "
+                f"{self._total_token_budget} tokens (~{total_words} words); "
+                f"anything past that is cut off mid-sentence."
+            )
+        else:
+            parts.append(
+                f"Each turn, write your reply inside {po}...{pc} tags — "
+                f"that is the text other forum members see.{tool_line}"
+                f"Anything outside {po} and {yo} tags is private "
+                f"reasoning: it stays in your own notes and is never shown "
+                f"to anyone else. If it helps, jot a quick note to yourself "
+                f"before the {po} — work through a case, check a step, or "
+                f"think about what someone said — then write the post. "
+                f"Two limits: the {po} content itself must stay under about "
+                f"{self._post_token_budget} tokens (~{post_words} words), "
+                f"and the total of thinking + post + tool calls combined "
+                f"must stay under about {self._total_token_budget} tokens "
+                f"(~{total_words} words) — anything past the total is cut "
+                f"off mid-sentence. Always close {pc} before you stop writing."
+            )
         return "\n\n".join(p for p in parts if p)
 
-    def _frame_posts(self, posts: list[tuple[str, str]]) -> str:
+    def _frame_post_segments(self, posts: list[tuple]) -> list[tuple]:
+        """Segment the framed partner posts into scaffolding and post bodies.
+
+        Returns ``[(kind, speaker, text, post_index, token_ids), ...]`` where
+        ``kind`` is ``"scaffold"`` — deterministic framing this environment
+        wrote, so ``ln p_env = 0`` — or ``"post"``, a token sequence another
+        agent sampled, whose ``ln p_env`` is that agent's own log-prob.
+
+        ``"".join(seg_text)`` reproduces :meth:`_frame_posts` exactly. The
+        string form is derived from this one so the two cannot drift.
+        """
+        def unpack(q):
+            sp, txt = q[0], q[1]
+            ids = q[2] if len(q) > 2 else None
+            idx = q[3] if len(q) > 3 else None
+            return sp, txt, ids, idx
+
+        segs: list[tuple] = []
+        if len(posts) == 1:
+            sp, txt, ids, idx = unpack(posts[0])
+            if txt:
+                segs.append(("scaffold", None, f"{sp} wrote:\n", None, None))
+                segs.append(("post", sp, txt, idx, ids))
+            else:
+                segs.append(("scaffold", None, f"{sp} wrote nothing.", None, None))
+            return segs
+        segs.append(("scaffold", None, "Several people posted on the forum:\n\n", None, None))
+        for n, q in enumerate(posts):
+            sp, txt, ids, idx = unpack(q)
+            if n:
+                segs.append(("scaffold", None, "\n\n", None, None))
+            if txt:
+                segs.append(("scaffold", None, f"{sp} wrote:\n", None, None))
+                segs.append(("post", sp, txt, idx, ids))
+            else:
+                segs.append(("scaffold", None, f"{sp} wrote nothing.", None, None))
+        return segs
+
+    def _frame_posts(self, posts: list[tuple]) -> str:
         """Render new partner posts as direct-speech narrative.
 
-        - Single post:   ``"<Speaker> wrote:\\n<text>"``
-        - Multiple:      ``"Several people posted:\\n\\n<framed1>\\n\\n<framed2>"``
-
-        Always direct-speech form — never wrapped in meta-instructions like
-        "Compose your next post".  The chat-template wrapping (added by the
-        trainer's formatter) provides all the structural framing the model
-        needs to know it should respond.
+        Derived from :meth:`_frame_post_segments` so the segmented and string
+        forms cannot disagree.
         """
-        if len(posts) == 1:
-            sp, txt = posts[0]
-            return f"{sp} wrote:\n{txt}" if txt else f"{sp} wrote nothing."
-        framed = []
-        for sp, txt in posts:
-            framed.append(f"{sp} wrote:\n{txt}" if txt else f"{sp} wrote nothing.")
-        return "Several people posted on the forum:\n\n" + "\n\n".join(framed)
-
+        return "".join(seg[2] for seg in self._frame_post_segments(posts))
     def _select_next_speaker(self, prev: str) -> str:
         if self._post_order == "round_robin":
             self._next_idx = (self._next_idx + 1) % len(self.agents)

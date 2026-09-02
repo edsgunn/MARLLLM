@@ -99,6 +99,9 @@ class CCSMLoss(Loss):
         perception_source_indices: list[int] | None = None,
         seq_ids: torch.Tensor | None = None,
         act_log_probs_old: torch.Tensor | None = None,
+        env_log_probs: torch.Tensor | None = None,
+        env_lp_known: torch.Tensor | None = None,
+        bias_values: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict]:
         # Single chunked pass through lm_head produces shifted per-token
         # log p(input_ids[t+1] | hidden[t]). Both surprises and act log-probs
@@ -160,8 +163,13 @@ class CCSMLoss(Loss):
         # prompt (as OBS or PAD depending on prompt_as_observation), so position 0
         # is never ACT. token_lp uses the causal shift (hidden[t] predicts
         # input_ids[t+1]), which matches act_mask[:,1:] — both exclude pos 0.
+        returns, env_ret, _envlp_metrics = _env_likelihood_terms(
+            returns, token_type_mask, act_mask, obs_mask, config,
+            seq_ids, env_log_probs, env_lp_known,
+        )
+
         if act_mask.any():
-            act_returns = returns[act_mask]  # G_t at act positions
+            act_returns = returns[act_mask]  # G_t (or the corrected R_t)
 
             if config.normalise_returns and act_returns.numel() > 1:
                 act_returns = (act_returns - act_returns.mean()) / (act_returns.std() + 1e-8)
@@ -282,12 +290,44 @@ class CCSMLoss(Loss):
             "ppo/ratio_mean": ratio_mean,
             "ppo/ratio_max": ratio_max,
         }
+        metrics.update(_envlp_metrics)
+
+        # ---- Bias probe ----
+        # A second value head fitted to the ENV part of the return alone, so
+        # that E_s can be centred on its history-conditioned mean. The gradient
+        # bias from dropping the environment term is a covariance between the
+        # action score and that centred residual, and the residual is not
+        # available without a baseline for it.
+        #
+        # ``bias_values`` comes from a head whose input is detached, exactly as
+        # the main value head's is, so this term reaches the probe's parameters
+        # and nothing else. It never touches the policy.
+        l_bias = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
+        if bias_values is not None and env_ret is not None and act_mask.any():
+            tgt = env_ret[act_mask].detach()
+            pred = bias_values[act_mask]
+            l_bias = F.mse_loss(pred, tgt)
+            resid = (tgt - pred.detach())
+            metrics["envlp/probe_loss"] = float(l_bias.detach())
+            metrics["envlp/env_resid_mean"] = float(resid.mean().detach())
+            metrics["envlp/env_resid_std"] = float(resid.std().detach()) if resid.numel() > 1 else 0.0
+            # The gradient bias is E[score * resid]; with advantages standing in
+            # for the score's scale, this correlation is its sign and strength.
+            if advantages.numel() > 2:
+                a = advantages.detach() - advantages.detach().mean()
+                r = resid - resid.mean()
+                d = a.norm() * r.norm()
+                metrics["envlp/bias_corr_adv_resid"] = (
+                    float((a @ r) / d) if float(d) > 0 else 0.0)
+                metrics["envlp/bias_rank_corr_adv_resid"] = _spearman(
+                    advantages.detach(), resid)
 
         total = (
             config.alpha_perc * l_perc
             + config.alpha_act * l_act
             + config.alpha_val * l_val
             + config.kl_coef * kl
+            + l_bias
         )
         return total, metrics
 
@@ -302,6 +342,8 @@ class CCSMLoss(Loss):
         config: TrainingConfig,
         backward_scale: float,
         perception_source_indices: list[int] | None = None,
+        env_log_probs: torch.Tensor | None = None,
+        env_lp_known: torch.Tensor | None = None,
     ) -> tuple[float, dict]:
         """Sequence-chunked counterpart of ``compute_loss``.
 
@@ -359,6 +401,10 @@ class CCSMLoss(Loss):
                 allowed = allowed | (agent_id_mask == idx)
             obs_mask = obs_mask & allowed
         act_mask = (token_type_mask == int(TokenType.ACT)) & (agent_id_mask == target_agent_idx)
+        returns, _env_ret_c, _envlp_metrics_c = _env_likelihood_terms(
+            returns, token_type_mask, act_mask, obs_mask, config,
+            None, env_log_probs, env_lp_known,
+        )
 
         # Shifted-view (positions 1..T-1) masks for slicing per-chunk
         # contributions. Note: ``n_obs_total`` matches the single-shot
@@ -547,6 +593,7 @@ class CCSMLoss(Loss):
             "value_loss": l_val_acc,
             "kl": kl_acc,
         }
+        metrics.update(_envlp_metrics_c)
         return total_loss_scalar, metrics
 
 
@@ -637,6 +684,101 @@ def _compute_returns(
         returns[:, t] = act_here * running
 
     return returns  # (B, T) — non-zero only at ACT positions
+
+
+def _env_returns(
+    env_log_probs: torch.Tensor,
+    token_type_mask: torch.Tensor,
+    gamma: float,
+    seq_ids: torch.Tensor | None,
+    dtype,
+) -> torch.Tensor:
+    """Discounted future ln p_env at ACT positions.
+
+    Same backward scan as ``_compute_returns``, applied to E_s instead of the
+    surprises. Position 0 is zeroed to match the surprise convention (the
+    character prompt occupies it and its shifted prediction does not exist).
+    """
+    e = env_log_probs.to(dtype=dtype)
+    if e.shape[1] > 0:
+        e = torch.cat([torch.zeros_like(e[:, :1]), e[:, 1:]], dim=1)
+    return _compute_returns(e, token_type_mask, gamma, seq_ids=seq_ids)
+
+
+def _spearman(a: torch.Tensor, b: torch.Tensor) -> float:
+    """Rank correlation between two flat tensors. 0.0 if degenerate."""
+    n = a.numel()
+    if n < 3:
+        return 0.0
+    ra = torch.argsort(torch.argsort(a.float())).float()
+    rb = torch.argsort(torch.argsort(b.float())).float()
+    ra = ra - ra.mean()
+    rb = rb - rb.mean()
+    denom = ra.norm() * rb.norm()
+    if denom.item() == 0.0:
+        return 0.0
+    return float((ra @ rb) / denom)
+
+
+def _env_likelihood_terms(
+    returns: torch.Tensor,
+    token_type_mask: torch.Tensor,
+    act_mask: torch.Tensor,
+    obs_mask: torch.Tensor,
+    config: TrainingConfig,
+    seq_ids: torch.Tensor | None,
+    env_log_probs: torch.Tensor | None,
+    env_lp_known: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor | None, dict]:
+    """Fold ln p_env into the return, and report what it did.
+
+    The implemented surrogate uses G_t = Sum_{s>t} gamma^(s-t) (-M_s), dropping
+    the environment term. The stated objective's return is
+    R_t = Sum_{s>t} gamma^(s-t) (E_s - M_s) = G_t + Sum gamma^(s-t) E_s.
+
+    Returns ``(returns_for_training, env_returns, metrics)``. The training
+    return is the corrected one only when ``use_env_likelihood_return`` is set;
+    otherwise it is unchanged and the corrected form is measured alongside.
+    See environment_likelihood_derivation.md.
+    """
+    m: dict = {}
+    if env_log_probs is None:
+        return returns, None, m
+    env_ret = _env_returns(
+        env_log_probs, token_type_mask, config.gamma, seq_ids, returns.dtype)
+    corrected = returns + env_ret
+    if act_mask.any():
+        # Diagnostics only — detach so nothing here touches the graph. The
+        # returns themselves carry grad from token_lp, but every consumer
+        # detaches at use (see the stop-gradient contract at the top).
+        g = returns[act_mask].detach()
+        er = env_ret[act_mask].detach()
+        cr = corrected[act_mask].detach()
+        m["envlp/return_surrogate_mean"] = float(g.mean())
+        m["envlp/return_env_mean"] = float(er.mean())
+        m["envlp/return_corrected_mean"] = float(cr.mean())
+        m["envlp/return_env_std"] = float(er.std()) if er.numel() > 1 else 0.0
+        # How much of the corrected return the dropped term accounts for.
+        denom = cr.abs().mean()
+        m["envlp/env_share_of_return"] = float(
+            er.abs().mean() / denom) if float(denom) > 0 else 0.0
+        # Do the two returns rank actions the same way? This is the quantity
+        # that decides whether the bias matters for learning, independent of
+        # its magnitude.
+        m["envlp/return_rank_corr"] = _spearman(g, cr)
+        if g.numel() > 1 and cr.numel() > 1:
+            gc = g - g.mean()
+            cc = cr - cr.mean()
+            d = gc.norm() * cc.norm()
+            m["envlp/return_pearson"] = float((gc @ cc) / d) if float(d) > 0 else 0.0
+    if env_lp_known is not None and obs_mask.any():
+        known_obs = env_lp_known[obs_mask]
+        m["envlp/obs_tokens_measured_frac"] = float(
+            known_obs.to(torch.float32).mean())
+    m["envlp/corrected_return_in_use"] = float(
+        bool(config.use_env_likelihood_return))
+    train_returns = corrected if config.use_env_likelihood_return else returns
+    return train_returns, env_ret, m
 
 
 def _seq_boundary_shifted(seq_ids: torch.Tensor) -> torch.Tensor:

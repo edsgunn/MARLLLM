@@ -188,7 +188,35 @@ tokenisation-marginalised string probability. So:
 This makes the per-token form of the objective a convenience rather than a
 definition, which it always was.
 
-## 7. The estimator
+## 6a. Private context is persistent, so the latent accumulates
+
+Everything above treats $z_s$ as the private prefix of the turn that produced
+$y_s$. That is too generous. **An agent's context persists across its turns
+within an episode**, so the private text it generated at turn 1 is still
+conditioning what it emits at turn $t$. The latent is not $z_t$ but the whole
+private history
+
+$$Z_t = (z_1, z_2, \ldots, z_t)$$
+
+The identity (2) survives unchanged with $z^\star \to Z^\star_t$, and so does the
+interpretation — the correction is still $I(Z_t; y_t \mid u_t)$ — but its *size*
+now grows with $t$, and the estimator in §7 no longer works. Drawing a fresh
+$z^{(k)}$ for the current turn only is a sample from the wrong distribution: the
+prior that matters is $P(Z_t \mid u_t)$, and a valid draw requires resampling the
+agent's entire private history conditioned on every post it has since made
+public.
+
+That is a sequential Monte Carlo problem — particles over private histories,
+reweighted by each observed post — and over the ~16 turns of a forum episode the
+weights degenerate. **So the correction is not merely larger when there is
+private thinking; it stops being estimable at all.**
+
+This is why the experiment in §9a removes the private channel rather than
+modelling it. With no discarded tokens, $Z_t$ is empty at every turn, the
+correction is identically zero, and $p_{\text{env}}$ is not estimated but
+*computed*.
+
+## 7. The estimator (only valid when the private prefix does not persist)
 
 For each delivered post $y_s$ by generator $j$:
 
@@ -205,6 +233,12 @@ biased by $O(1/K)$ through Jensen, so $\hat\beta$ is an **upper** estimate of th
 correction and small $K$ errs toward overstating it. Draw the $z^{(k)}$ from the
 prior, not including $z^\star$, or the estimate is biased toward the realised
 sample.
+
+**This estimator is only correct for a single turn's latent.** By §6a the real
+latent is the accumulated private history, so on a substrate with private
+thinking the procedure above understates the correction by whatever the earlier
+turns' private text still contributes. Treat it as a lower bound there, and as
+exact only where the private channel is absent.
 
 **Cost.** By §3 the estimate does not depend on the observer, so it is computed
 once per post rather than once per (post, observer) pair. A 16-agent episode has
@@ -253,6 +287,66 @@ Pre-registered in [`scripts/tier_b/c7_env_likelihood_bias.py`](scripts/tier_b/c7
 generations have token-loop private regions. A loop is highly predictive of more
 loop, so those spans will show large $I$ for an uninteresting reason. They should
 be reported separately or the aggregate will be misleading.
+
+## 9a. The experiment: two runs with the private channel removed
+
+The corrections above are all consequences of tokens the environment discards.
+Remove the discarding and they all vanish at once. Configs in
+[`configs/env_likelihood_bias/`](configs/env_likelihood_bias/).
+
+**Substrate.** `study_group_ashbourne_gc`, 8 agents, Qwen2.5-7B-Instruct — the
+campaign's reference setting, with the post tags blanked. Everything an agent
+generates is its post; the prompt no longer offers a private space; the whole
+384-token budget is postable. There is no `<python>` tool (the env refuses it in
+this mode, since a code block would have nowhere to hide).
+
+Then $Z_t$ is empty at every turn and, by §4.1(a),
+
+$$p_{\text{env}}(y_t \mid u_t, j) = p_{\theta_j}(y_t \mid u_t, c_j) \quad\text{exactly.}$$
+
+Better than exact — it is **already computed**. The generating agent's sampled
+per-token log-probs are stored at rollout, and the environment splices its exact
+token ids into every observer's context, so each observation token carries its
+generator's log-prob with no re-encoding and no alignment step.
+
+**Arm A — surrogate return, environment term measured.** Trains exactly as every
+run in this project has, on $-G_t$. $E_s$ is logged throughout, so the corrected
+return, the dropped term's share, and the disagreement between the two returns
+are all recorded per iteration without affecting training.
+
+**Arm B — corrected return.** Trains on $R_t = \sum \gamma^{s-t}(E_s - M_s)$,
+with the value head fitted to that return rather than to $-G_t$.
+
+Both arms carry a **probe head** fitted to the environment part of the return
+alone. Its input is detached, exactly as the main value head's is, so it trains
+only its own parameters. It supplies the history-conditioned mean needed to
+centre $E_s$, without which the gradient-bias covariance of §5 cannot be formed.
+
+**What is logged every iteration.** `envlp/return_surrogate_mean`,
+`envlp/return_env_mean`, `envlp/return_corrected_mean`,
+`envlp/env_share_of_return`, `envlp/return_rank_corr`, `envlp/return_pearson`,
+`envlp/probe_loss`, `envlp/env_resid_mean`, `envlp/env_resid_std`,
+`envlp/bias_corr_adv_resid`, `envlp/bias_rank_corr_adv_resid`,
+`envlp/obs_tokens_measured_frac`, `envlp/misaligned_observations`,
+`envlp/provenance_misses`.
+
+The rank correlation is the decision-relevant one: **if the two returns rank
+actions the same way, the bias does not matter for learning however large it
+is.** The magnitude questions are answered by the share and the residual.
+
+**Scale of the effect available to be seen.** Other agents' post content is
+about **32%** of an observer's context in a healthy 8-agent run and **73%** at 16
+agents; $E_s = 0$ on all remaining scaffolding. So an 8-agent run bounds the
+correction to roughly a third of the observation stream before it starts. Read
+as a bound on how large `env_share_of_return` can get.
+
+**Pre-registered.** `envlp/obs_tokens_measured_frac` must be 1.0 and both
+`misaligned_observations` and `provenance_misses` must be 0; anything else means
+the provenance path is broken and the run's numbers are void. Arm B is expected
+to drift toward the behaviour of perception-only training as its world model
+improves and the corrected return goes to zero (§8) — if it ends at low KL from
+base with entropy intact, that is the flat-optimum prediction confirmed, not the
+objective working, and the two must not be conflated.
 
 ## 10. Summary
 

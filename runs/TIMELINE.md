@@ -65,9 +65,17 @@ directories, not jobs — several directories were submitted more than once.
 |---|---|---|
 | 09-01 | Retrospective documentation | `STATE.md`, `PROCESS.md`, this file, and a `NOTES.md` for every live run. Two readings in the existing reports were corrected against the runs' own metrics; see `STATE.md`. |
 | 09-01 | Tier-B analyses ([`_tier_b/`](_tier_b/README.md)) | Eight pre-registered re-analyses, no compute. The public channel closes in 63/65 runs and leads the regime decline by up to 200 iterations; the policy-distance headline survives a collapse control on 2 of 3 datasets; no Qwen3 agent ever reaches KL ≥ 1. Two claims written down the same morning were overturned: `thinking_frac` does not measure private deliberation, and restoring the dropped environment term is not free. |
+| 09-02 | Environment-likelihood experiment ([`configs/env_likelihood_bias/`](../configs/env_likelihood_bias/README.md)) | Implemented and submitted: jobs 6256587 (arm A, surrogate return with the environment term logged) and 6256588 (arm B, corrected return). Post tags blanked so nothing an agent emits is discarded and `p_env` is computed rather than estimated. Seeds 2-5 written and held. |
 
 ---
 
 ## What is currently running
 
-Nothing. No job has been submitted since 2026-06-23.
+| job | started | what |
+|---|---|---|
+| 6256587 | 2026-09-02 | `A_surrogate_seed1` — environment-likelihood experiment, arm A |
+| 6256588 | 2026-09-02 | `B_corrected_seed1` — arm B, corrected return |
+
+The first job submitted since 2026-06-23. Seeds 2-5 of each arm are written and
+held until the provenance void conditions are confirmed —
+[`configs/env_likelihood_bias/README.md`](../configs/env_likelihood_bias/README.md).

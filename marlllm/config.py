@@ -24,6 +24,33 @@ class TrainingConfig:
     kl_coef: float = 0.0      # KL penalty weight: λ * KL(π_θ || π_ref) at ACT positions
     always_log_kl: bool = False  # If True, compute & log KL each step even when kl_coef == 0 (no gradient applied; requires keep_ref_model=True on agents).
 
+    # ---------------------------------------------------------------- #
+    # Environment likelihood (see environment_likelihood_derivation.md)   #
+    # ---------------------------------------------------------------- #
+    # The practical loss drops Sum_s sigma_s ln p_env(x_s | x_<s) because the
+    # environment "can be sampled but not evaluated". In a population of
+    # LoRA agents over one frozen base that is false for the only observation
+    # tokens carrying entropy — other agents' posts — whose per-token
+    # log-probs we already compute when sampling them.
+    #
+    # env_likelihood_logging: carry the generating agent's log-probs through
+    #   to every observer, so E_s = ln p_env(x_s) is available at training
+    #   time. Diagnostics only; the return is unchanged. Requires an env that
+    #   exposes observation provenance (forum env with provenance=True).
+    env_likelihood_logging: bool = False
+    # use_env_likelihood_return: put E_s back into the REINFORCE return, so
+    #   R_t = Sum_{s>t} gamma^(s-t) (E_s - M_s) instead of -G_t = Sum M_s.
+    #   Requires env_likelihood_logging.
+    use_env_likelihood_return: bool = False
+    # bias_probe_enabled: train a SECOND value head on the corrected return
+    #   while the policy trains on whichever return is configured. Its input
+    #   is detached, exactly as the main value head's is, so it cannot leak
+    #   into the trunk. Used to centre E_s when estimating the gradient bias.
+    bias_probe_enabled: bool = False
+    # bias_probe_every: iterations between the expensive gradient-direction
+    #   probe (two backward passes over the action loss). 0 disables it.
+    bias_probe_every: int = 25
+
     # Asymmetric multi-agent training (§2.4 of Phase A spec).
     # IDs in this list participate in rollouts but receive NO gradient updates.
     # E.g. frozen_agents=["agent_1"] turns agent_1 into a fixed pretrained

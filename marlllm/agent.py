@@ -309,6 +309,7 @@ class Agent(ABC):
     @abstractmethod
     def parameters(self) -> Iterable[nn.Parameter]: ...
 
+
     def train_mode(self) -> None:
         """Switch to training mode."""
         ...
@@ -479,6 +480,12 @@ class IndependentAgent(Agent):
         hidden_size = self._backbone.config.hidden_size
         model_dtype = next(self._backbone.parameters()).dtype
         self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+        # Optional second value head, fitted to the environment-likelihood
+        # part of the return alone. Its input is detached exactly as the main
+        # head's is, so it trains only its own parameters and cannot reach the
+        # policy or the backbone. Used to centre E_s when estimating the
+        # gradient bias (environment_likelihood_derivation.md).
+        self._bias_value_head = None
 
         if keep_ref_model:
             ref_kwargs: dict = {}
@@ -526,14 +533,35 @@ class IndependentAgent(Agent):
         else:
             yield from self._backbone.parameters()
         yield from self._value_head.parameters()
+        if self._bias_value_head is not None:
+            yield from self._bias_value_head.parameters()
+
+
+    def enable_bias_probe(self) -> None:
+        """Attach the environment-likelihood probe head (idempotent)."""
+        if self._bias_value_head is not None:
+            return
+        hs = self._value_head.linear.in_features
+        dt = next(self._value_head.parameters()).dtype
+        self._bias_value_head = ValueHead(hs).to(self.device, dtype=dt)
+
+    def bias_values(self, last_hidden):
+        """Probe value estimate. Input detached: no gradient to the trunk."""
+        if self._bias_value_head is None:
+            return None
+        return self._bias_value_head(last_hidden.detach())
 
     def train_mode(self) -> None:
         self._backbone.train()
         self._value_head.train()
+        if self._bias_value_head is not None:
+            self._bias_value_head.train()
 
     def eval_mode(self) -> None:
         self._backbone.eval()
         self._value_head.eval()
+        if self._bias_value_head is not None:
+            self._bias_value_head.eval()
 
     # ------------------------------------------------------------------ #
     # Rollout: autoregressive sampling with KV cache                       #
@@ -781,6 +809,12 @@ class LoRASharedBaseAgent(Agent):
         hidden_size = shared_backbone.config.hidden_size
         model_dtype = next(p for p in shared_backbone.parameters() if p.dtype.is_floating_point).dtype
         self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+        # Optional second value head, fitted to the environment-likelihood
+        # part of the return alone. Its input is detached exactly as the main
+        # head's is, so it trains only its own parameters and cannot reach the
+        # policy or the backbone. Used to centre E_s when estimating the
+        # gradient bias (environment_likelihood_derivation.md).
+        self._bias_value_head = None
 
         from marlllm.context_formatter import make_formatter
         self.context_formatter = make_formatter(self._tokenizer, context_formatter)
@@ -821,14 +855,35 @@ class LoRASharedBaseAgent(Agent):
             if f".{self._adapter_name}." in name:
                 yield param
         yield from self._value_head.parameters()
+        if self._bias_value_head is not None:
+            yield from self._bias_value_head.parameters()
+
+
+    def enable_bias_probe(self) -> None:
+        """Attach the environment-likelihood probe head (idempotent)."""
+        if self._bias_value_head is not None:
+            return
+        hs = self._value_head.linear.in_features
+        dt = next(self._value_head.parameters()).dtype
+        self._bias_value_head = ValueHead(hs).to(self.device, dtype=dt)
+
+    def bias_values(self, last_hidden):
+        """Probe value estimate. Input detached: no gradient to the trunk."""
+        if self._bias_value_head is None:
+            return None
+        return self._bias_value_head(last_hidden.detach())
 
     def train_mode(self) -> None:
         self._backbone.train()
         self._value_head.train()
+        if self._bias_value_head is not None:
+            self._bias_value_head.train()
 
     def eval_mode(self) -> None:
         self._backbone.eval()
         self._value_head.eval()
+        if self._bias_value_head is not None:
+            self._bias_value_head.eval()
 
     # ------------------------------------------------------------------ #
     # Rollout: autoregressive sampling                                     #
