@@ -211,6 +211,26 @@ class CCSMLoss(Loss):
                 ratio_mean = 1.0
                 ratio_max = 1.0
 
+            # Noise floor on E_s. The stored log-probs come from the SAMPLING
+            # engine — vLLM at fp8 — while this forward runs the training
+            # weights at bf16. For p_env that is the right object: the
+            # environment really did sample from the fp8 engine, so its
+            # log-prob IS ln p_env, and re-scoring under the training weights
+            # would give the log-prob of a distribution that generated nothing.
+            # But E_s is then on a different numerical footing from M_s, and
+            # the gap between the two engines at the SAME tokens bounds how
+            # finely any E_s difference can be read. With ppo_clip = 0 the
+            # ratio is not otherwise computed, so measure it here.
+            if act_log_probs_old is not None and env_log_probs is not None:
+                _old = act_log_probs_old[:, 1:][shifted_act_mask].detach()
+                _d = (act_log_probs.detach() - _old)
+                if _d.numel() > 0:
+                    _envlp_metrics["envlp/sampling_vs_training_lp_mean"] = float(_d.mean())
+                    _envlp_metrics["envlp/sampling_vs_training_lp_absmean"] = float(
+                        _d.abs().mean())
+                    _envlp_metrics["envlp/sampling_vs_training_lp_std"] = (
+                        float(_d.std()) if _d.numel() > 1 else 0.0)
+
             # Entropy bonus: H[p_θ] at action positions (§6.1).
             # We index hidden states at the act positions first, then push only
             # those through lm_head in chunks — never materialising the full

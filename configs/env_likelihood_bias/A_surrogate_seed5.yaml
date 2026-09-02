@@ -91,6 +91,16 @@ use_env_likelihood_return: false
 # its own parameters and never reaches the policy or the backbone.
 bias_probe_enabled: true
 
+# --- rollout pathway: pinned to match the reference run ---
+# runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc predates these
+# keys and ran the synchronous path with a single-shot loss and plain REINFORCE.
+# Pinned rather than inherited so a change of default cannot silently move this
+# experiment off the pathway it is meant to be comparable with. seq_chunk_size
+# is deliberately left unset (None = single-shot, as the reference).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
 environments:
 - name: study_group_ashbourne_gc
   type: forum

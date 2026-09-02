@@ -1571,6 +1571,19 @@ class PopulationTrainer:
                     # The post index this action is about to be given, so the
                     # log-probs can be found again when the post lands in
                     # another agent's observation stream.
+                    #
+                    # These are the SAMPLING log-probs, from the vLLM engine at
+                    # fp8 — not a re-score under the bf16 training weights. That
+                    # is deliberate and it is the correct object: p_env is the
+                    # distribution the environment actually generated from, and
+                    # the environment here IS the fp8 engine. Re-scoring later
+                    # would yield the log-prob of a distribution that produced
+                    # nothing. (On the synchronous path the two are one
+                    # optimiser step apart at most, so this is a precision
+                    # argument, not a staleness one — staleness only bites when
+                    # async_rollout is on, and this experiment pins it off.)
+                    # The residual fp8-vs-bf16 gap is the noise floor on E_s and
+                    # is logged as envlp/sampling_vs_training_lp_* by the loss.
                     _post_idx = getattr(envs[k], "_post_count", None)
                     _t_env = time.perf_counter()
                     envs[k].step(act_ids)

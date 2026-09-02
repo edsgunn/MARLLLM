@@ -309,6 +309,19 @@ per-token log-probs are stored at rollout, and the environment splices its exact
 token ids into every observer's context, so each observation token carries its
 generator's log-prob with no re-encoding and no alignment step.
 
+One subtlety about *which* distribution that is. The stored log-probs come from
+the sampling engine — vLLM at fp8 — while the training forward runs bf16. For
+$p_{\text{env}}$ the sampled value is the right one, not an approximation to be
+tolerated: the environment is defined by what actually generated the token, and
+what actually generated it was the fp8 engine. A re-score under the training
+weights would return the log-prob of a distribution that emitted nothing. The
+consequence is that $E_s$ and $M_s$ sit on slightly different numerical footings,
+since $M_s$ is a bf16 forward. The gap between the engines at identical tokens
+therefore sets the resolution at which any $E_s$ difference can be read, and it
+is logged (`envlp/sampling_vs_training_lp_{mean,absmean,std}`) so the floor is
+measured rather than assumed. It is *not* a staleness effect: staleness needs
+`async_rollout`, which these configs pin off (§9a, pathway).
+
 **Arm A — surrogate return, environment term measured.** Trains exactly as every
 run in this project has, on $-G_t$. $E_s$ is logged throughout, so the corrected
 return, the dropped term's share, and the disagreement between the two returns

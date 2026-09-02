@@ -26,6 +26,24 @@ log-probs are stored at rollout and the environment splices its exact token ids
 into every observer's context, so each observation token carries its generator's
 log-prob with no re-encoding and no alignment step.
 
+Those are the fp8 vLLM sampling log-probs, and that is the point rather than a
+compromise: p_env is whatever actually generated the token, and the fp8 engine
+is what actually generated it. M_s meanwhile is a bf16 forward, so the two sit
+on marginally different footings; the engine gap at identical tokens bounds how
+finely an E_s difference can be read and is logged as
+`envlp/sampling_vs_training_lp_*`. Nothing to do with staleness — that needs
+`async_rollout`, pinned off below.
+
+## Rollout pathway
+
+Pinned to `async_rollout: false`, `ppo_clip: 0.0`, `pack_sequences: false`,
+`seq_chunk_size` unset, matching
+`runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc`, which predates
+all four keys and so ran the synchronous, single-shot, plain-REINFORCE path.
+These are also the current defaults, so pinning changes no behaviour — it stops a
+later change of default from silently moving this experiment off the pathway it
+is meant to be comparable with.
+
 ## The two arms
 
 | | return | value head | env term |
