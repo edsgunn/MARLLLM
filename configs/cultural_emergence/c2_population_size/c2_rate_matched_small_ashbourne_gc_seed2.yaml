@@ -1,0 +1,119 @@
+# STATUS: QUEUED as job 6261680 on 2026-09-02.
+#
+# C2 -- POPULATION SIZE, CAUSALLY. SMALL, RATE-MATCHED -- N=4 at the N=16 per-agent volume. Seed 2.
+#
+# THE DESIGN THIS BELONGS TO (REWRITE.md 6.3)
+#   N varies three things at once: the number of distinct interaction partners,
+#   the per-agent gradient volume, and the context composition. Five arms
+#   separate them; this is one of them.
+#
+#     arm                        N    partners   per-agent volume
+#     baseline small             4       3         high  (C1's 4-agent cell)
+#     baseline large            16      15         low
+#     large, restricted pairing 16       3         low   (needs the roster
+#                                                         subset mechanism)
+#     small, rate-matched        4       3         low
+#     frozen majority           16      15         low, 14 frozen
+#
+#   The claim only becomes causal with all of them: if outcome tracks partner
+#   count rather than N, "population size" was never the variable.
+#
+# WHAT THIS CHANGES
+#   Against configs/cultural_emergence/run10_4agent_7B_study_group_ashbourne_gc.yaml:
+#   rollouts 16 -> 4. Nothing else.
+#
+# WHAT THAT BUYS, AND WHY THIS INSTRUMENT
+#   With max_posts 16 and round-robin, each agent posts max_posts/N times per
+#   episode: 4 times at N=4, once at N=16. Over 16 episodes that is 64 action
+#   segments per agent per iteration at N=4 against 16 at N=16 -- a 4x
+#   difference in gradient volume that rides along with every N=4 vs N=16
+#   comparison in this project. Cutting rollouts to 4 restores parity: 4
+#   episodes x 4 posts = 16 segments, matching N=16.
+#
+#   The alternative instrument is max_posts 16 -> 4, which matches volume by
+#   shortening the thread. rollouts is preferred because it holds thread length
+#   and context composition fixed and moves only the quantity the arm names.
+#   Neither is perfectly surgical: fewer episodes also means noisier gradients,
+#   and that is a real limitation of this arm rather than a detail.
+#
+#   A note on the design table's wording: "updates/agent/iter" is loose. The
+#   trainer takes ONE optimizer step per agent per iteration either way. What
+#   differs is action tokens per update, and that is what this matches.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether the N=4 cell's behaviour follows N or follows gradient volume. If
+#   rate-matched N=4 behaves like N=16, the population-size story is largely a
+#   story about how much each agent trains per iteration.
+#
+# WHAT WOULD FALSIFY THAT READING
+#   Rate-matched N=4 tracking unmatched N=4. Volume is then not the variable
+#   and the difference is partner count or context composition -- which is what
+#   the restricted-pairing arm separates.
+#
+name: c2_rate_matched_small_ashbourne_gc_seed2
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "24:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 42
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 32768
+
+# --- rollout pathway: pinned to match the reference run ---
+# The reference run predates these three keys and ran the synchronous path
+# with a single-shot loss and plain REINFORCE. Pinned rather than inherited
+# so a change of default cannot silently move this run off the pathway it is
+# compared against. seq_chunk_size is left unset (None = single-shot).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+rollouts: 4
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: canonical_4
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/cultural_emergence/c2_population_size/c2_rate_matched_small_ashbourne_gc_seed2
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

@@ -233,6 +233,7 @@ class ForumEnv(AECEnv):
         super().__init__()
 
         self.possible_agents = list(agent_names)
+        self._episode_agents = list(agent_names)
         self._personas = dict(agent_personas)
         self._tok = tokenizer
         self._forum_description = forum_description
@@ -449,7 +450,36 @@ class ForumEnv(AECEnv):
         if seed is not None:
             self._rng = random.Random(seed)
 
-        self.agents = list(self.possible_agents)
+        # Per-episode roster. ``possible_agents`` is every agent that could ever
+        # appear; ``agents`` is the set actually in this episode. Passing
+        # ``active_agents`` runs the thread with a subset, which is how partner
+        # count is varied independently of population size — see
+        # PopulationTrainer's partner_graph_degree. Absent means the full
+        # roster, so the default path is unchanged.
+        active = (options or {}).get("active_agents")
+        if active:
+            unknown = [a for a in active if a not in self.possible_agents]
+            if unknown:
+                raise ValueError(
+                    f"active_agents {unknown} are not in possible_agents "
+                    f"{list(self.possible_agents)}"
+                )
+            if len(active) < 2:
+                raise ValueError(
+                    f"active_agents needs at least 2 agents, got {list(active)}"
+                )
+            # Keep possible_agents' order so turn order does not depend on the
+            # order the subset happened to be built in.
+            self.agents = [a for a in self.possible_agents if a in set(active)]
+        else:
+            self.agents = list(self.possible_agents)
+        # Who took part in THIS episode, captured here for two reasons:
+        # ``agents`` is drained as members terminate, so it cannot answer that
+        # once the thread is over and the trace is read after the fact; and
+        # taking it *before* the turn-order shuffle below keeps it in
+        # possible_agents order, which is byte-for-byte what the trace and the
+        # termination loop recorded when they read possible_agents directly.
+        self._episode_agents = list(self.agents)
         if self._post_order == "round_robin":
             # Shuffle the round-robin permutation so the same agent doesn't
             # always open. The shuffle is keyed off ``order_seed`` (passed via
@@ -737,7 +767,7 @@ class ForumEnv(AECEnv):
         if self._post_count >= self._max_posts:
             self._final_state = {"thread": list(self._thread)}
             tool_info = self._build_tool_info()
-            for a in self.possible_agents:
+            for a in self._episode_agents:
                 self._terminations[a] = True
                 self._cumulative_rewards[a] = self._reward_fn(self._final_state, a)
                 self._infos[a] = {**self._infos.get(a, {}), **tool_info}
@@ -1283,7 +1313,7 @@ class ForumEnv(AECEnv):
     def episode_trace(self) -> dict:
         return {
             "thread": list(self._thread),
-            "agents": list(self.possible_agents),
+            "agents": list(self._episode_agents),
             "post_order": self._post_order,
             "max_posts": self._max_posts,
             "completed_posts": self._post_count,

@@ -57,6 +57,23 @@ class TrainingConfig:
     # partner while agent_0 is trained — the "focal vs fixed partner" setup.
     frozen_agents: list[str] = field(default_factory=list)
 
+    # Fixed partner graph (REWRITE.md 6.3). None means every population member
+    # takes part in every episode, which is what a forum substrate has always
+    # done and remains the default.
+    #
+    # Set to k and the population is partitioned once, deterministically, into
+    # disjoint groups of k+1; each episode runs with one group. Every agent then
+    # has exactly k interaction partners and always the SAME k, while the
+    # population stays size N. That is what separates partner count from
+    # population size — the two are otherwise varied together by every
+    # population-size comparison in this project.
+    #
+    # Requires (k+1) to divide N. Note the graph is a disjoint union of
+    # (k+1)-cliques rather than an arbitrary k-regular graph: within an episode
+    # everyone present is everyone else's partner, which is the property that
+    # makes "partner count" well defined here.
+    partner_graph_degree: int | None = None
+
     # Treat the character prompt as an observation the agent emits about itself,
     # rather than as masked exogenous conditioning. When True (default), prompt
     # tokens are tagged TokenType.OBS — they contribute to L_perc (next-token

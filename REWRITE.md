@@ -313,7 +313,7 @@ pre-registration; two of the eight overturned a claim already written here.
 | # | Experiment | Scale | Answers |
 |---|---|---|---|
 | **C1** | N=2 and N=4 replicates, 5 seeds × 2 substrates × 2 sizes, to iteration 300 with checkpoints at 100/150/200/300. Implemented and configured: [`configs/cultural_emergence/c1_small_population_replicates/`](configs/cultural_emergence/c1_small_population_replicates/README.md). Seed 1 is re-run rather than reused — the 2026-05-06 originals ran against an uncommitted tree, so the family is made self-contained and the old run becomes a code-drift check | 20 runs, small — the cheapest item in this tier | Task 2; the unreplicated corner of Figure 1 |
-| C2 | Population-size decomposition (§6.3) | 15–20 runs | Task 3 — the causal question |
+| **C2** | Population-size decomposition (§6.3). Implemented and configured: [`configs/cultural_emergence/c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md). Baseline-small is C1's 4-agent cell; baseline-large, rate-matched-small and frozen-majority are submitted; restricted-pairing is written and gated on a GPU smoke. Needed a per-episode roster subset, not the pairing strategy §6.3 assumed — see the correction there | 19 runs, 14 submitted | Task 3 — the causal question |
 | **C3** | Frozen-population, solo-agent, static-transcript controls. **Frozen population implemented and configured**: `frozen_agents` is now honoured by `PopulationTrainer` ([`marlllm/population.py`](marlllm/population.py) `_setup_frozen_agents`, tests in [`tests/test_frozen_population.py`](tests/test_frozen_population.py)), and three arms sit in [`configs/cultural_emergence/c3_frozen_population/`](configs/cultural_emergence/c3_frozen_population/README.md) — 8-agent Ashbourne with 7 frozen, two learners × two seeds. Solo-agent and static-transcript arms still need work | 3 runs now, 6–9 for the full set | Task 7; 5MAX's remaining empirical objection — separates "the agents drove each other into it" from "surprise minimisation does this against any population" |
 | C4 | Public-tokens-only arm. **Not via `thinking_enabled: false`** — `train_population.py` builds `ForumEnv` from explicit `spec_dict.get()` calls and never reads that key, so it has been inert in every config that sets it (B6 again). The working levers are blanking the post tags, as [`configs/env_likelihood_bias/`](configs/env_likelihood_bias/README.md) does, or typing thinking as neither ACT nor OBS | 2–4 runs | §3.5; ZLns Q4 |
 | C5 | Restored-`p_env` arm (§5) | 2–4 runs | Removes the dark-room incentive from the objective, if §5 holds |
@@ -498,12 +498,29 @@ A design that separates them:
 | **small, rate-matched** | 4 | 3 | low | update rate, holding N |
 | **frozen majority** | 16 | 15 (14 frozen) | low | co-adaptation, holding N and partners |
 
-`pairing_strategy` currently offers `random_no_self`, `random_with_self` and
-`round_robin` ([`marlllm/population.py`](marlllm/population.py) lines 26–28).
-The restricted-pairing arm needs one new strategy — a fixed partner graph with
-degree *k*. That is a small, well-scoped addition and it is the arm that makes
-the claim causal: **if outcome tracks partner count rather than N, "population
-size" was never the variable.**
+**Correction (2026-09-02).** This section said the restricted-pairing arm
+"needs one new strategy — a fixed partner graph with degree *k*… a small,
+well-scoped addition". That was wrong about the mechanism. **`pairing_strategy`
+is a no-op on every forum substrate in this project.** Forum environments bind
+in *named* mode — each role goes to its same-named member and the whole roster
+is in every episode — so `_sample_pairs` is never called and partner count is
+pinned at N−1. It is a fourth dead config key, alongside `thinking_enabled`,
+`frozen_agents` and the `alpha_*` weights. The traces disguise it: an 8-agent
+header reads `pairing=Priya Shah vs Tom Whitaker` because the formatter prints
+the first two entries of a full-roster tuple.
+
+What the arm needed was a **per-episode roster subset** — `active_agents` in
+`ForumEnv.reset`, plus `_setup_partner_graph`, `_episode_roster` and
+`_bind_episode_roles` in `PopulationTrainer`. Now implemented and tested
+([`tests/test_partner_graph.py`](tests/test_partner_graph.py)):
+`partner_graph_degree: k` partitions the population once into disjoint groups
+of k+1 and runs each episode with one group, so every agent has exactly k
+partners and always the same k. Groups are cycled rather than sampled, which
+holds per-agent gradient volume at the N=16 arm's level rather than moving a
+second variable.
+
+It remains the arm that makes the claim causal: **if outcome tracks partner
+count rather than N, "population size" was never the variable.**
 
 5 seeds per arm. This is the single most valuable block of compute on the list.
 

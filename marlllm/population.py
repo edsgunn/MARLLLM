@@ -470,6 +470,7 @@ class PopulationTrainer:
         # Resolve frozen vs trainable members and build the parameter list the
         # optimizer gets. See _setup_frozen_agents.
         all_params = self._setup_frozen_agents(population, config)
+        self._setup_partner_graph(population, config)
         if getattr(config, "use_8bit_adam", False):
             import bitsandbytes as bnb
             self.optimizer = bnb.optim.AdamW8bit(all_params, lr=config.lr)
@@ -847,6 +848,53 @@ class PopulationTrainer:
             )
         return all_params
 
+    def _setup_partner_graph(self, population, config) -> None:
+        """Partition the population into fixed partner groups, or not.
+
+        With ``config.partner_graph_degree`` set to k, the population is split
+        once into disjoint groups of k+1 and each episode runs with one group,
+        so every member has exactly k interaction partners and always the same
+        k while the population stays size N. Absent, every member takes part in
+        every episode — what a forum substrate has always done, and the default.
+
+        The partition is built from the population's declared order rather than
+        sampled, so it is identical across seeds and a seed replicate varies the
+        training noise without also varying who talks to whom.
+
+        Sets ``partner_groups`` (None when unconfigured) and ``_group_cycle``.
+        See REWRITE.md 6.3.
+        """
+        k = getattr(config, "partner_graph_degree", None)
+        if k is None:
+            self.partner_groups: list[list[str]] | None = None
+            self._group_cycle = None
+            return
+
+        names = list(population.keys())
+        size = int(k) + 1
+        if int(k) < 1:
+            raise ValueError(f"partner_graph_degree must be >= 1, got {k}")
+        if size > len(names):
+            raise ValueError(
+                f"partner_graph_degree {k} needs at least {size} population "
+                f"members, but the population is {len(names)}."
+            )
+        if len(names) % size:
+            raise ValueError(
+                f"partner_graph_degree {k} implies groups of {size}, which does "
+                f"not divide a population of {len(names)}. Every group must be "
+                f"the same size or agents would not have equal partner counts."
+            )
+        self.partner_groups = [
+            names[i:i + size] for i in range(0, len(names), size)
+        ]
+        # Cycle groups rather than sampling them, so every group gets the same
+        # number of episodes and per-agent gradient volume stays uniform. At
+        # N=16, k=3 and 16 episodes per iteration that is 4 episodes per group,
+        # 4 posts each — 16 action segments per agent, matching the unrestricted
+        # N=16 arm exactly.
+        self._group_cycle = itertools.cycle(range(len(self.partner_groups)))
+
     def train(self, start_iteration: int = 1) -> None:
         pop_names = list(self.population.keys())
         env_names = [s.name for s in self.environments]
@@ -856,6 +904,13 @@ class PopulationTrainer:
                 len(pop_names), pop_names, env_names, self.pairing_strategy,
                 self.config.num_iterations, self.ddp_world_size,
             )
+            if self.partner_groups is not None:
+                self._logger.info(
+                    "Partner graph: degree %d — %d disjoint groups of %d, one "
+                    "per episode | groups=%s",
+                    len(self.partner_groups[0]) - 1, len(self.partner_groups),
+                    len(self.partner_groups[0]), self.partner_groups,
+                )
             if self.frozen_agents:
                 self._logger.info(
                     "Frozen population: %d of %d members receive no gradient "
@@ -1419,6 +1474,74 @@ class PopulationTrainer:
 
         return pairs
 
+    def _episode_roster(self, roles: list[str]) -> list[str]:
+        """Which population members take part in one named-mode episode.
+
+        The full roster unless a partner graph is configured, in which case the
+        next group in the cycle, intersected with what this environment
+        actually declares. Groups are cycled rather than sampled so each gets
+        an equal share of the episodes and per-agent gradient volume stays
+        uniform across the population.
+        """
+        if self._group_cycle is None:
+            return roles
+        declared = set(roles)
+        # A group can miss this env entirely when environments declare
+        # different rosters; skip to one that overlaps rather than running an
+        # episode with nobody in it. Bounded by the number of groups.
+        for _ in range(len(self.partner_groups)):
+            group = [n for n in self.partner_groups[next(self._group_cycle)]
+                     if n in declared]
+            if len(group) >= 2:
+                return group
+        raise ValueError(
+            f"No partner group has two or more members of environment roster "
+            f"{roles}. Partner groups and environment rosters are incompatible."
+        )
+
+    def _bind_episode_roles(self, env_specs):
+        """Decide who is in each episode and which member fills each env role.
+
+        Returns ``(pairings, env_role_to_name, active_rosters)``, one entry per
+        episode. ``active_rosters[i]`` is the subset to hand that episode's
+        environment, or None for the whole roster — which is every episode
+        unless a partner graph is configured.
+
+        Two role-mapping modes, as at construction. Pair-mode envs
+        ({agent_0, agent_1}) draw a 2-tuple from ``pairing_strategy``.
+        Named-mode envs — every forum substrate — bind each role to its
+        same-named member, which is why ``pairing_strategy`` has never had any
+        effect on a forum run: it is read here only on the pair-mode branch.
+
+        ``pairings[i]`` is what the trace records and what
+        ``_build_agent_trajectories`` filters on, so for named-mode episodes it
+        has to be the episode's actual roster rather than the declared one, or a
+        subset episode would build trajectories for members who never spoke.
+        """
+        pair_count = sum(
+            1 for spec in env_specs
+            if set(getattr(spec.env, "possible_agents", [])) == {"agent_0", "agent_1"}
+        )
+        sampled_pairs = self._sample_pairs(pair_count) if pair_count else []
+        pair_iter = iter(sampled_pairs)
+
+        pairings: list[tuple[str, ...]] = []
+        env_role_to_name: list[dict[str, str]] = []
+        active_rosters: list[list[str] | None] = []
+        for spec in env_specs:
+            roles = list(spec.env.possible_agents)
+            if set(roles) == {"agent_0", "agent_1"}:
+                p = next(pair_iter)
+                env_role_to_name.append({"agent_0": p[0], "agent_1": p[1]})
+                pairings.append(p)
+                active_rosters.append(None)
+            else:
+                roster = self._episode_roster(roles)
+                env_role_to_name.append({r: r for r in roster})
+                pairings.append(tuple(roster))
+                active_rosters.append(None if roster == roles else roster)
+        return pairings, env_role_to_name, active_rosters
+
     def _sample_env_specs(self, n: int) -> list[EnvironmentSpec]:
         """Sample n EnvironmentSpec objects according to their weights."""
         return self._rng.choices(self.environments, weights=self._env_weights, k=n)
@@ -1447,24 +1570,9 @@ class PopulationTrainer:
         # Build per-episode role→name mapping based on each env's possible_agents.
         # Pair-mode envs ({"agent_0","agent_1"}) sample a 2-tuple of pop members;
         # named-role envs (e.g. Concordia) bind each role to its same-named member.
-        pair_count = sum(
-            1 for spec in env_specs
-            if set(getattr(spec.env, "possible_agents", [])) == {"agent_0", "agent_1"}
+        pairings, env_role_to_name, active_rosters = self._bind_episode_roles(
+            env_specs
         )
-        sampled_pairs = self._sample_pairs(pair_count) if pair_count else []
-        pair_iter = iter(sampled_pairs)
-
-        pairings: list[tuple[str, ...]] = []
-        env_role_to_name: list[dict[str, str]] = []
-        for spec in env_specs:
-            roles = list(spec.env.possible_agents)
-            if set(roles) == {"agent_0", "agent_1"}:
-                p = next(pair_iter)
-                env_role_to_name.append({"agent_0": p[0], "agent_1": p[1]})
-                pairings.append(p)
-            else:
-                env_role_to_name.append({r: r for r in roles})
-                pairings.append(tuple(roles))
 
         # Deep-copy one env per episode from the appropriate spec template.
         # Use a single shared ``order_seed`` across all parallel episodes so
@@ -1481,7 +1589,10 @@ class PopulationTrainer:
             env_k = copy.deepcopy(spec.env)
             if hasattr(env_k, "_tok"):
                 env_k._tok = spec.env._tok
-            env_k.reset(seed=self._rng_counter, options={"order_seed": order_seed})
+            reset_options: dict = {"order_seed": order_seed}
+            if active_rosters[k] is not None:
+                reset_options["active_agents"] = active_rosters[k]
+            env_k.reset(seed=self._rng_counter, options=reset_options)
             self._rng_counter += 1
             envs.append(env_k)
 

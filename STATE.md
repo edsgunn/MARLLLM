@@ -331,16 +331,15 @@ time, because every published analysis evaluates at a fixed iteration.*
   the Instruct model, confounding the prompt-swap diagnostic the design turned
   on. This is why every config needs a `STATUS:` line. — *established* —
   `runs/phase_a_substrate_validation/02_ccsm_focal_competitive/NOTES.md`
-- 🆕 (2026-09-02) **Config keys the code does not read are a pattern, not an
-  incident.** Besides `thinking_enabled`, two more were unreachable from any
-  population config: `frozen_agents` existed only in the negotiation trainer,
-  and the three `alpha_*` term weights were never passed by
-  `train_population.py` — so every forum run in this project trained at 1/1/1,
-  and the frozen-population control could not be expressed at all. All three
-  were found by trying to write an experiment, not by reading code, so a key
+- 🆕 (2026-09-02) **Four config keys the code does not read.**
+  `thinking_enabled`; `frozen_agents`, in the negotiation trainer only; the
+  three `alpha_*` weights, never passed by `train_population.py`, so every
+  forum run trained at 1/1/1; and `pairing_strategy`, inert on forum
+  substrates because named-mode binding puts the whole roster in every
+  episode. Each made an experiment *inexpressible* rather than mis-logged, and
+  each was found by trying to write one rather than by reading code. A key
   audit is owed before any Tier-C scale estimate is trusted. — *established* —
-  `configs/cultural_emergence/c3_frozen_population/README.md`,
-  `configs/cultural_emergence/c10_term_ablation/README.md`
+  `configs/cultural_emergence/c2_population_size/README.md`
 
 ### Measurement — what our instruments do and do not show
 
@@ -418,6 +417,8 @@ time, because every published analysis evaluates at a fixed iteration.*
 | 6260985–6260987 | [`c3_frozen_population/`](configs/cultural_emergence/c3_frozen_population/README.md) | C3: one learner training against seven frozen members, separating co-adaptation from single-agent surprise minimisation. |
 | 6260988–6260989 | [`c6_extended_horizon/`](configs/cultural_emergence/c6_extended_horizon/README.md) | C6: the 8- and 16-agent reference populations resumed past iteration 300, to 900 and 600. |
 | 6261085–6261088 | [`c10_term_ablation/`](configs/cultural_emergence/c10_term_ablation/README.md) | C10: perception-only and action-only on the reference population, testing whether the decline needs the action term. |
+| 6261670–6261683 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2: three arms of the population-size decomposition — baseline-large at the full horizon, rate-matched small, and frozen majority. |
+| 6262498 | [`c2_population_size/smoke/`](configs/cultural_emergence/c2_population_size/README.md) | Smoke gate for the partner-graph path; the restricted-pairing arm's five seeds are written and held on its result. |
 
 Each family's README carries what it changes, what it predicts and what would
 falsify it, written before submission. **Held, not submitted:** seeds 2–5 of
