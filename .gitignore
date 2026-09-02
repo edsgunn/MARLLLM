@@ -31,8 +31,17 @@ htmlcov/
 .ipynb_checkpoints/
 *.ipynb
 
-# Training runs (large, machine-generated)
-runs/
+# Training runs.
+#
+# Run data is large (~28 TB) and machine-generated, so it never enters git.
+# Its WRITE-UPS do: NOTES.md is the analysis of a run and the only place its
+# numbers and argument live, and the archive READMEs say why an invalidated
+# run cannot be cited. PROCESS.md treats both as canonical, and STATE.md
+# cites them. Everything else under runs/ -- checkpoints, traces, metrics,
+# figures, the .csv the reports link to -- stays local.
+runs/**
+!runs/**/
+!runs/**/*.md
 slurm_scripts/
 slurm_logs/
 data/
