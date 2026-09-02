@@ -342,12 +342,16 @@ time, because every published analysis evaluates at a fixed iteration.*
   agents in `policy_collapse`. A population can get better at predicting itself
   by becoming deterministic. — *established* —
   `runs/cultural_emergence/run10_2agent_7B_study_group_ashbourne_gc/NOTES.md`
-- 🆕 (2026-09-01) **`thinking_frac` does not measure private deliberation.** It
-  is the residual `n_act − post_tokens`, and there are **zero `<think>` tags in
-  14 checkpoints across 7 forum runs** — the substrate never produces private
-  deliberation at all. What it rises with is malformed public output; structural
-  tag emission degrades to as many as 87 `<post>` opens per close. — *established*
-  — `runs/_tier_b/b6_token_accounting/NOTES.md`
+- 🆕 (2026-09-01) **`thinking_frac` measures the environment's private channel
+  correctly, and its name is wrong twice over.** It includes `<python>`, which is
+  *public* — 68–80% of early non-post tokens on the two tool substrates — and it
+  cannot distinguish deliberation from a post the agent wrote and failed to tag.
+  — *established* — `runs/_tier_b/b6_token_accounting/NOTES.md`
+- 🆕 (2026-09-01) **Structural tag compliance decays over training, and the
+  environment discards what falls outside a tag.** `<post>` opens per close go
+  1.7 → 87; late `post_missing` turns include agents writing in the substrate's
+  own pinned format without wrapping it. Nothing in the objective rewards a
+  well-formed tag. — *established* — same
 - 🔶 **Single-iteration endpoints are noise.** Per-iteration standard deviation
   of population-mean perception loss is comparable to the change a whole run
   produces; quote block means. — *established* —
@@ -415,6 +419,11 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ### Open questions
 
+- **What fraction of undelivered turns are untagged posts rather than
+  deliberation?** Reading a sample finds both, plus token loops. The number
+  decides whether the closing public channel is a policy pathology or a
+  substrate one, and it needs a classifier or a hand-coded sample. —
+  `runs/_tier_b/b6_token_accounting/NOTES.md`
 - **Does the closing public channel cause the decline, or accompany it?** The
   channel closes first, by up to 200 iterations, in 9 of 12 runs where both are
   observable — but that is association. The ablation that would settle direction

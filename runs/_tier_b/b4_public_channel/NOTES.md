@@ -68,17 +68,32 @@ term the surrogate drops.
 - **It falls before the regime classifier registers anything.** 9/12 runs where
   both are observable; up to a 200-iteration lead. — *likely*
 - **The regime taxonomy is a lagging indicator of this failure.** — *likely*
+- **The cause is mixed, and includes agents whose posts were well formed as
+  prose but untagged.** — *established* — [B6](../b6_token_accounting/NOTES.md)
 
 ## What it does not settle
+
+**Why the turns stop delivering.** The measurement is of *effect* — content not
+reaching other agents — and that is solid. The cause is mixed.
+[B6](../b6_token_accounting/NOTES.md) reads a fair sample of late `post_missing`
+turns and finds at least three kinds: posts the agent wrote and failed to tag
+(Kai Dempsey's untagged type argument; Roisin Doherty writing in Strathearn's
+own pinned format), genuine private deliberation, and degenerate token loops.
+
+That distinction matters for what the paper can claim. "Agents learn to go
+quiet" is **not** supported: a large share of these turns are agents trying to
+speak into a tagging convention that has decayed. What *is* supported is the
+consequence, and it is the same either way — under an objective whose return
+sums surprise over future observation tokens, an intended-but-untagged post and
+a deliberate silence are identical. The observation stream shrinks regardless.
 
 **Direction.** This is association. The channel could be closing *because* the
 population is degrading in some way the regime metrics see later. The ablation
 that would settle it is C4 in `REWRITE.md` — train with only public post tokens
 typed as actions — and it has not been run.
 
-Nor does it settle whether the environment's post accounting is well calibrated
-on a substrate with genuine `<think>` blocks; on Qwen3 the thinking counter reads
-zero while `<think>` markers appear in traces, and that is unresolved.
+**Calibration on native-thinking models.** On Qwen3 the thinking counter reads
+zero while `<think>` markers appear in traces; unresolved.
 
 ## Status
 

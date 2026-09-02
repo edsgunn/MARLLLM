@@ -196,14 +196,27 @@ in the released traces.
 
 ### 3.5 The public channel closes — and it closes before anything else shows
 
-**Retraction.** The first version of this section read a rising `thinking_frac`
-as agents moving generation into a private channel. That was wrong.
-[B6](runs/_tier_b/b6_token_accounting/NOTES.md) shows
-`thinking_tokens = max(0, n_act − post_tokens)` is a *residual*
-([`marlllm/population.py`](marlllm/population.py) line 721), and there are **zero
-`<think>` tags in 14 checkpoints across 7 forum runs**. The substrate never
-produces private deliberation at all. What was rising is the share of action
-tokens outside a well-formed post block.
+**Correction, twice.** The first version read a rising `thinking_frac` as agents
+moving generation into a private channel. The second version retracted that on
+the grounds that there are no `<think>` tags anywhere. **The second version was
+wrong.** In this framework `<think>` is not what makes a token private — the
+environment routes by tag, and "everything else" outside `<post>`/`<python>` is
+private by construction ([`envs/forum/env.py`](envs/forum/env.py):290, 518).
+`thinking_tokens = n_act − post_tokens` implements that definition correctly.
+
+What [B6](runs/_tier_b/b6_token_accounting/NOTES.md) does establish is subtler
+and worse for the metric: `thinking_frac` includes `<python>`, which is
+**public** — 68–80% of early non-post tokens on the two tool substrates — and it
+cannot tell deliberation from a post the agent wrote and failed to tag. Reading a
+fair sample of late `post_missing` turns finds all three: untagged posts (one
+agent writing in Strathearn's own pinned format, another giving a careful
+in-persona argument about list-versus-tuple types), genuine deliberation, and
+token loops (8–11%). Tags and intent have come apart in both directions — *"Note
+to self: …"* was published inside a `<post>` at margin_notes iteration 300.
+
+**So do not build the section on `thinking_frac`.** Build it on the
+environment's own post accounting, which measures the effect directly and is
+agnostic about intent.
 
 **The corrected finding is stronger, and the environment was already measuring
 it.** `envs/forum/env.py` classifies every turn `post_success` / `post_unclosed`
@@ -228,6 +241,14 @@ success collapses 0.97 → 0.34 between iterations 50 and 100 and stays there,
 while the alive fraction holds at 1.00 until 250 and then falls to 0.38. Across
 runs where both are observable, the channel degrades 25% at or before the first
 drop in alive fraction in **9 of 12**.
+
+**What this does and does not license.** "Agents learn to go quiet" is **not**
+supported — a large share of these turns are agents trying to speak into a
+tagging convention that has decayed, and nothing in the objective rewards a
+well-formed tag. What is supported is the *consequence*, and it is identical
+either way: under a return that sums surprise over future observation tokens, an
+intended-but-untagged post and a deliberate silence do the same thing to
+everyone else's `G_t`. The observation stream shrinks regardless.
 
 *Why this matters more than the numbers.* This is the rebuttal's own theoretical
 prediction, measured. The implemented return is
@@ -283,7 +304,7 @@ pre-registration; two of the eight overturned a claim already written here.
 | B3 | Substrate-relative perception thresholds | **Two substrates start above the degenerate cut** (Robotic Athanor 2.44, Ashbourne GC 2.20, vs Inner Loop 1.35). **50% of labels move** under a substrate-anchored convention; 40/79 runs read 0% alive at iteration 25 absolutely against 17/79 relatively. |
 | B4 | Does the public channel close? | **Yes — 63/65 runs**, and it leads the regime decline by up to 200 iterations. See §3.5. |
 | B5 | Is `p_env` recoverable? | **Provenance yes (100%), stored log-probs no.** The bias measurement is well posed; restoring the term costs a forward pass. §5 corrected. **B5b (the covariance) needs GPU and moves to Tier C.** |
-| B6 | Does `thinking_frac` measure deliberation? | **No.** Zero `<think>` tags in 14 checkpoints; it is the residual `n_act − post_tokens`. §3.5 retracted and re-grounded. |
+| B6 | What does `thinking_frac` contain? | **Not what the name says.** It includes `<python>` (public; 68–80% of early non-post tokens on tool substrates) and cannot tell deliberation from an untagged post. §3.5 re-grounded on the environment's post accounting instead. |
 | B7 | Is absorption measured while populations are healthy? | **Seeds yes, cross-env no.** Contrast +0.160 unchanged on the seed replication (0% of its measurements are post-decline); +0.199 → +0.024 on the cross-environment pool (31% are). |
 | B8 | Does this depend on the base model? | **Strongly.** No Qwen3 agent ever reaches KL ≥ 1; mean drift 6–14× lower at matched iterations; and the Qwen3 populations are *healthier*. |
 
@@ -496,7 +517,7 @@ Add the new one from §3.5: **withdrawn** — the agent's turns have stopped
 delivering well-formed public posts, regardless of the other three axes. B4 shows
 the instrument already exists (`tool/post_success_per_ep`) and fires 100–200
 iterations before any current regime does. Do **not** define it from
-`thinking_frac`, which B6 shows measures nothing of the kind.
+`thinking_frac`, which B6 shows is a different quantity.
 
 ### 6.6 What we can claim about enabling cultural emergence
 §2 and §4. In one sentence for the abstract: *we establish that the enabling
