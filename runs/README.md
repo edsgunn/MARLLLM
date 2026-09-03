@@ -14,6 +14,12 @@ traces, metrics and figures they describe.
 | directory | n | substrate / task | what it is | write-up |
 |---|---:|---|---|---|
 | [`cultural_emergence/`](cultural_emergence/) | 78 | forum substrates, Qwen2.5-7B | The main campaign: substrate screen, substrate × population-size grid, five-seed replicate sets, the 4×4 KL/β sweep, two-turn and dual-environment arms | per-run `NOTES.md`; sweeps have a family `NOTES.md` |
+| [`cultural_emergence/c1_small_population_replicates/`](cultural_emergence/c1_small_population_replicates/) | 20 | `ashbourne_gc`, `strathearn_server`, N=2 and 4 | Tier-C C1: five seeds of each small-population cell | [`NOTES.md`](cultural_emergence/c1_small_population_replicates/NOTES.md) |
+| [`cultural_emergence/c2_population_size/`](cultural_emergence/c2_population_size/) | 19 | `ashbourne_gc`, N=4 and 16 | Tier-C C2: the five-arm population-size decomposition; 2 arms finished | [`NOTES.md`](cultural_emergence/c2_population_size/NOTES.md) |
+| [`cultural_emergence/c3_frozen_population/`](cultural_emergence/c3_frozen_population/) | 3 | `ashbourne_gc`, N=8 with 7 frozen | Tier-C C3: one learner against a fixed population | [`NOTES.md`](cultural_emergence/c3_frozen_population/NOTES.md) |
+| [`cultural_emergence/c6_extended_horizon/`](cultural_emergence/c6_extended_horizon/) | 2 | `ashbourne_gc`, N=8 and 16 | Tier-C C6: the references resumed past iteration 300 | running |
+| [`cultural_emergence/c10_term_ablation/`](cultural_emergence/c10_term_ablation/) | 4 | `ashbourne_gc`, N=8 | Tier-C C10: perception-only and action-only against the full loss | [`NOTES.md`](cultural_emergence/c10_term_ablation/NOTES.md) |
+| [`env_likelihood_bias/`](env_likelihood_bias/) | 2 | `ashbourne_gc`, post tags blanked | Tier-C C9: the environment-likelihood pair. **Void** — see the write-up | [`NOTES.md`](env_likelihood_bias/NOTES.md) |
 | [`social_terminal/`](social_terminal/) | 6 | `ashbourne_school`, three rooms with fog of war | A spatial substrate; the observation-principle upgrade | per-run `NOTES.md` |
 | [`migration_experiments/`](migration_experiments/) | 16 | forum substrates | One agent's adapter moved into a population that has never met it | [`NOTES.md`](migration_experiments/NOTES.md) + per-run |
 | [`phase_a_substrate_validation/`](phase_a_substrate_validation/) | 6 | `deal_or_no_deal` | The framework's first pre-registered experiment | [`NOTES.md`](phase_a_substrate_validation/NOTES.md) + per-run |

@@ -1,4 +1,7 @@
-# STATUS: SUBMITTED 2026-09-02 as job 6256587, the first of the pair.
+# STATUS: VOID. Ran to iteration 300 of 300 but breaches its own
+# provenance void condition and logged none of its diagnostics. See
+# runs/env_likelihood_bias/NOTES.md. Do not cite; do not release seeds 2-5
+# until the provenance path is fixed.
 # Before releasing seeds 2-5, check the void conditions in the first logged
 # iterations:  envlp/obs_tokens_measured_frac == 1.0,
 #              envlp/misaligned_observations  == 0,
