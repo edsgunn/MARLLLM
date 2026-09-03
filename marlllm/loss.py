@@ -181,6 +181,7 @@ class CCSMLoss(Loss):
                 raw_std = float(act_returns.std()) if act_returns.numel() > 1 else 0.0
                 raw_absmax = (float(act_returns.abs().max())
                               if act_returns.numel() else 0.0)
+            act_returns_raw = act_returns
             if config.normalise_returns and act_returns.numel() > 1:
                 act_returns = (act_returns - act_returns.mean()) / (act_returns.std() + 1e-8)
 
@@ -216,7 +217,14 @@ class CCSMLoss(Loss):
                 ratio_mean = ratio.detach().mean().item()
                 ratio_max = ratio.detach().abs().max().item()
             else:
-                policy_loss = -(act_log_probs * advantages.detach()).mean()
+                policy_loss = -(act_log_probs * advantages.detach())
+                if getattr(config, "action_loss_denominator", "act") == "obs":
+                    # Same denominator as the perception arm, restoring the
+                    # derivation's 1:1 weighting between the two arms.
+                    n_obs = int(obs_mask.sum())
+                    policy_loss = policy_loss.sum() / max(1, n_obs)
+                else:
+                    policy_loss = policy_loss.mean()
                 clip_frac = 0.0
                 ratio_mean = 1.0
                 ratio_max = 1.0
@@ -260,7 +268,14 @@ class CCSMLoss(Loss):
             # the value head to predict ~250 while advantages are computed in ~[-1,1],
             # making the baseline actively harmful.
             act_values = values[act_mask]
-            l_val = F.mse_loss(act_values, act_returns.detach())
+            # By default the head is fitted to the same tensor the advantages
+            # use, so under normalise_returns it regresses onto a z-score and
+            # cannot absorb the return's LEVEL. value_target_raw fits it to the
+            # unstandardised return instead, which is what lets a baseline
+            # absorb the drift the perception arm induces in G_t.
+            v_target = (act_returns_raw if getattr(config, "value_target_raw", False)
+                        else act_returns)
+            l_val = F.mse_loss(act_values, v_target.detach())
         else:
             l_act = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
             l_val = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
@@ -317,6 +332,12 @@ class CCSMLoss(Loss):
             # exactly as the signal it is built from disappears. That is the
             # quantity to watch if the action term's late damage is a
             # normalisation artefact rather than a property of the objective.
+            # The implicit weight the means give the action arm relative to the
+            # derivation's 1:1. Drifts with how much the agents post.
+            "loss/n_obs_tokens": float(int(obs_mask.sum())),
+            "loss/n_act_tokens": float(int(act_mask.sum())),
+            "loss/obs_act_ratio": (float(int(obs_mask.sum())) /
+                                   max(1.0, float(int(act_mask.sum())))),
             "return_raw_mean": raw_mean,
             "return_raw_std": raw_std,
             "return_raw_abs_max": raw_absmax,

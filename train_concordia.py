@@ -167,6 +167,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--output-dir', default='runs/concordia', help='Log and checkpoint directory.')
     p.add_argument('--resume', action='store_true', help='Resume from latest checkpoint.')
     p.add_argument('--normalise-returns', action=argparse.BooleanOptionalAction, default=True, help='Standardise the return to zero mean and unit variance within the batch. Free in RL, where only advantage ORDERING matters; not free here, where the action term is summed with a supervised perception term in nats — see marlllm/config.py.')
+    p.add_argument('--value-target-raw', action=argparse.BooleanOptionalAction, default=False,
+                   help="Fit the value head to the RAW return even under --normalise-returns, so the baseline can absorb the level of the return rather than regressing onto a z-score. Badly conditioned on large returns; see marlllm/config.py.")
+    p.add_argument('--action-loss-denominator', choices=['act', 'obs'], default='act',
+                   help="Denominator for the action arm mean. Use obs for the perception arm denominator, restoring the derivation 1:1 weighting; act is the historical default and multiplies the action arm by N_obs/N_act.")
     p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty coefficient.')
     p.add_argument('--seed', type=int, default=42)
@@ -207,7 +211,7 @@ def main() -> None:
     primary_agent = agents[agent_names[0]]
     print(f'Building ConcordiaEnv (token_budget={args.token_budget}, max_turns={args.max_env_turns})')
     env = ConcordiaEnv(simulation_factory=scenario_factory, agent_names=agent_names, tokenizer=primary_agent.tokenizer, action_token_budget=args.token_budget, max_turns=args.max_env_turns, reward_fn=reward_fn)
-    config = TrainingConfig(gamma=args.gamma, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=devices[agent_names[0]], seed=args.seed, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
+    config = TrainingConfig(gamma=args.gamma, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=devices[agent_names[0]], seed=args.seed, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
     tokeniser = TextTokeniser(primary_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

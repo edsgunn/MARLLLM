@@ -40,6 +40,40 @@ class TrainingConfig:
     alpha_act: float = 1.0    # weight on L_act  (set to 0 for perception-only ablation)
     alpha_val: float = 1.0    # weight on L_val  (set to 0 for perception-only ablation)
     normalise_returns: bool = True  # standardise G_t within batch (§9.3)
+
+    # Fit the value head to the RAW return even when normalise_returns is on.
+    #
+    # By default the head regresses onto the already-standardised return, so it
+    # is fitted to a z-score: it can learn within-batch structure but not the
+    # LEVEL, which is precisely the drift a baseline exists to absorb. And the
+    # level here is non-stationary for a reason RL does not have — G_t is built
+    # from the same per-token surprises the perception arm is simultaneously
+    # driving down, so the return shrinks globally as perception improves,
+    # independently of the policy.
+    #
+    # Fitting on raw returns lets the baseline absorb that drift. The cost is
+    # the optimisation problem that motivated normalising the target in the
+    # first place: raw returns run to ~250 at gamma=0.99 and ~2300 at gamma=1,
+    # and a plain MSE head over that range is badly conditioned. If this option
+    # trains poorly, that is the signal to reach for PopArt or a two-hot /
+    # symlog head rather than to standardise the target again.
+    value_target_raw: bool = False
+
+    # Denominator for the action arm's mean.
+    #
+    # surprise_minimisation_derivation.md 7.1-7.2 writes BOTH arms as sums over
+    # t, so their relative weight is 1:1 and is fixed by the gradient
+    # decomposition rather than chosen. The implementation takes a mean of each
+    # arm over its own token count, which multiplies the action arm by
+    # N_obs/N_act — about 6.4 on the reference substrate, drifting to 7.05 by
+    # iteration 300 as agents post less. That factor is not constant and was
+    # never selected.
+    #
+    #   "act"  — divide by the number of action tokens (the historical default)
+    #   "obs"  — divide by the number of observation tokens, the same
+    #            denominator as the perception arm, restoring the derived 1:1
+    #            ratio up to a global 1/N_obs that is only a learning-rate scale
+    action_loss_denominator: str = "act"
     kl_coef: float = 0.0      # KL penalty weight: λ * KL(π_θ || π_ref) at ACT positions
     always_log_kl: bool = False  # If True, compute & log KL each step even when kl_coef == 0 (no gradient applied; requires keep_ref_model=True on agents).
 

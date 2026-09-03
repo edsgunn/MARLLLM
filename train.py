@@ -31,6 +31,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--output-dir', default='runs/default', help='Directory for logs and checkpoints')
     p.add_argument('--resume', action='store_true', help='Resume from latest checkpoint in output-dir')
     p.add_argument('--normalise-returns', action=argparse.BooleanOptionalAction, default=True, help='Standardise the return to zero mean and unit variance within the batch. Free in RL, where only advantage ORDERING matters; not free here, where the action term is summed with a supervised perception term in nats — see marlllm/config.py.')
+    p.add_argument('--value-target-raw', action=argparse.BooleanOptionalAction, default=False,
+                   help="Fit the value head to the RAW return even under --normalise-returns, so the baseline can absorb the level of the return rather than regressing onto a z-score. Badly conditioned on large returns; see marlllm/config.py.")
+    p.add_argument('--action-loss-denominator', choices=['act', 'obs'], default='act',
+                   help="Denominator for the action arm mean. Use obs for the perception arm denominator, restoring the derivation 1:1 weighting; act is the historical default and multiplies the action arm by N_obs/N_act.")
     p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty coefficient (0 = disabled)')
     p.add_argument('--seed', type=int, default=42, help='Random seed')
@@ -48,7 +52,7 @@ def main() -> None:
     from envs.counting_env import CountingEnv
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     log_system_info(args.output_dir, config_path=args.config)
-    config = TrainingConfig(gamma=args.gamma, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts={'agent_0': args.prompt}, episodes_per_iter=args.rollouts, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=args.device, seed=args.seed, kl_coef=args.kl_coef)
+    config = TrainingConfig(gamma=args.gamma, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts={'agent_0': args.prompt}, episodes_per_iter=args.rollouts, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=args.device, seed=args.seed, kl_coef=args.kl_coef)
     dtype_map = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}
     torch_dtype = dtype_map.get(args.dtype, 'auto')
     print(f'Loading model: {args.model} on {args.device} (dtype={args.dtype}, device_map={args.device_map})')
