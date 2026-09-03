@@ -77,6 +77,7 @@ directories, not jobs — several directories were submitted more than once.
 | 09-03 | First Tier-C results land | 36 of 50 jobs finished at their full iteration count, none truncated. One failure: `c2_frozen_majority_seed5` died in 63 s on `submit_batch`'s GPU-memory preflight guard — 549 MiB of a previous tenant's memory against its 500 MiB threshold, a node-cleanup race — resubmitted as 6279079. **No run has been analysed yet.** |
 | 09-03 | The walltime estimate that was wrong | C2's restricted-pairing arm was sized from its 3-iteration smoke (54 s/iter) and given 10 h; steady state is ~150 s/iter, so all five project 9.4–11.1 h against it. Per-iteration cost drifts 3× over a run and the growth is in generation, not the update (`time/rollout_frac` 61% → 77%). A limit cannot be raised once set, so the recovery is `--resume`. Configs re-timed to 19 h; `PROCESS.md` now says never to size from a smoke. |
 | 09-03 | Tier-C analysis ([C1](cultural_emergence/c1_small_population_replicates/NOTES.md), [C3](cultural_emergence/c3_frozen_population/NOTES.md), [C10](cultural_emergence/c10_term_ablation/NOTES.md), [C2 partial](cultural_emergence/c2_population_size/NOTES.md), [C9](env_likelihood_bias/NOTES.md)) | **C10 is the result of the batch:** perception-only ends 300 iterations alive on both seeds with perception loss 2.13 → 0.70 and 61/64 well-formed posts, against 36/64 and eight degenerate agents for the full loss; action-only misses 24–30 of 64 turns. **C1 fired its falsification condition** — the N=2/N=4 corner is seed noise, no metric separates the sizes. **C3 is inconclusive** at three runs. **C9 is void** — both arms breach their provenance condition and logged none of their diagnostics. |
+| 09-03 | The objective's own settings ([C11](../configs/cultural_emergence/c11_discount_normalisation/), [c9 post hoc](_tier_b/c9_post_hoc_env_term/NOTES.md)) | The dropped environment term recovered from arm A's checkpoints: ~43% of the return's magnitude, rank correlation 1.000, so it does not reorder updates. Then two defects in the objective itself. γ=0.99 is applied positionally per token — a 100-token horizon against a 384-token post, giving a 48× within-post credit gradient where the derived γ=1 is flat — and it is variance reduction from §6.2, not part of the derivation. Return normalisation is not free here because the action term is summed with a supervised one, and its 1/std gain rises as returns flatten. Neither key was reachable from any config: dead keys five and six. Both wired; C11 submitted as 6280551/6280553. |
 
 ---
 
@@ -87,6 +88,8 @@ directories, not jobs — several directories were submitted more than once.
 | 6260988–6260989 | 2026-09-02 | C6 — reference populations extended to 900 (8-agent) and 600 (16-agent) |
 | 6261670–6261673 | 2026-09-02 | C2 baseline-large — N=16 seeds 2–5 at the full horizon |
 | 6271024, 6271026–6271029 | 2026-09-03 | C2 restricted pairing — N=16 with three partners each |
+| 6279926 | 2026-09-03 | Arm B re-run with the provenance fix; self-gating |
+| 6280551, 6280553 | 2026-09-03 | C11 — γ=1 with and without normalisation, against the reference |
 | 6279079 | 2026-09-03 | C2 frozen-majority seed 5, resubmitted after the preflight guard tripped |
 
 Finished on 09-02/03 at full length: the twenty C1 replicates (6260359–6260378),

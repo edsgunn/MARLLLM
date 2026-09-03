@@ -406,6 +406,13 @@ time, because every published analysis evaluates at a fixed iteration.*
   by trying to write an experiment rather than by reading code. — *established*
   — `marlllm/config.py`,
   `configs/cultural_emergence/c2_population_size/README.md`
+- 🆕 (2026-09-03) **The dropped environment term is large but does not change
+  the update ordering.** Recovered post hoc from arm A's checkpoints: ~43% of
+  the return's magnitude at four checkpoints, rank correlation 1.000 throughout,
+  because a post is 6–36% less surprising per token to its author than to its
+  readers so the correction is same-signed and smaller. That margin narrows
+  toward parity over training. — *likely* —
+  `runs/_tier_b/c9_post_hoc_env_term/NOTES.md`
 - 🆕 (2026-09-03) **The discount is not in the derived objective, and it
   front-weights credit inside every post by ~48×.** γ=0.99 is applied
   *positionally per token*, a 100-token horizon against a 128–384-token post.
@@ -502,7 +509,7 @@ iteration count. What is left:
 | 6271024, 6271026–6271029 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 restricted pairing: N=16 with three partners each, the arm that makes the population-size claim causal. |
 | 6279079 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 frozen-majority seed 5, resubmitted after a node-cleanup race tripped the GPU-memory preflight guard. |
 | 6279926 | [`env_likelihood_bias/`](configs/env_likelihood_bias/README.md) | Arm B re-run with the provenance fix. Now self-gating: it raises rather than falling back if the corrected return cannot be computed. |
-| 6280214 | [`scripts/tier_b/c9_post_hoc_env_term.py`](scripts/tier_b/c9_post_hoc_env_term.py) | The dropped environment term recovered post hoc from arm A's checkpoints, which the runtime path failed to log. |
+| 6280551, 6280553 | [`c11_discount_normalisation/`](configs/cultural_emergence/c11_discount_normalisation/) | C11: γ=1 with normalisation, and γ=1 without. The derived return against the one every run in this project actually trained on — the highest-priority open question, because if the discount or the normalisation is behaviourally decisive then the population results are measuring an objective nobody chose. |
 
 Each family's README carries what it changes, what it predicts and what would
 falsify it, written before submission. **None of the finished runs has been

@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--output-dir', default='runs/terminal_experiments/default')
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--temperature', type=float, default=1.0)
+    p.add_argument('--normalise-returns', action=argparse.BooleanOptionalAction, default=True, help='Standardise the return to zero mean and unit variance within the batch. Free in RL, where only advantage ORDERING matters; not free here, where the action term is summed with a supervised perception term in nats — see marlllm/config.py.')
     p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty weight λ * KL(π_θ || π_ref) at action positions. 0 = disabled.  Use a small positive value (0.02–0.1) to prevent catastrophic forgetting between stages.')
     p.add_argument('--grad-accum', type=int, default=4)
@@ -160,7 +161,7 @@ def main() -> None:
                 if args.compile:
                     agents[aid]._backbone = torch.compile(agents[aid]._backbone)
                 print(f'  {aid}: independent weights')
-    config = TrainingConfig(gamma=args.gamma, model_name_or_path=args.model, character_prompts={aid: prompts.get(aid, '') for aid in agents}, episodes_per_iter=args.rollouts, num_iterations=args.iters, max_episode_tokens=args.max_episode_tokens, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=device, seed=args.seed, temperature=args.temperature, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha)
+    config = TrainingConfig(gamma=args.gamma, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts={aid: prompts.get(aid, '') for aid in agents}, episodes_per_iter=args.rollouts, num_iterations=args.iters, max_episode_tokens=args.max_episode_tokens, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=device, seed=args.seed, temperature=args.temperature, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha)
     tokeniser = TextTokeniser(primary_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()
