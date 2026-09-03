@@ -80,6 +80,42 @@ Submission is `submit_batch.py`, which generates one Slurm job per config:
 compiled against, silently breaking the rollout path. Rebuild with
 `sbatch slurm_scripts/install_vllm.sh`; add packages with `uv pip install`.
 
+### Ask for the walltime the run needs
+
+`slurm.time` is a queue-priority decision, not a safety margin. Isambard's
+`workq` caps at 24 h and it is tempting to just ask for it — 46 jobs did, which
+reserved 1,080 node-hours for about 250 hours of work and made every one of
+them unbackfillable.
+
+Estimate from the reference run's own `metrics.jsonl` rather than guessing:
+
+```bash
+.venv/bin/python -c "
+import json,statistics as st
+r=[json.loads(l) for l in open('runs/<family>/<ref>/metrics.jsonl')]
+t=sorted(x['time/iter_s'] for x in r if x.get('time/iter_s'))
+print(f'p90 {t[int(0.9*len(t))-1]:.0f}s/it')"
+```
+
+Then **limit = p90 × iters × 1.5, plus 30 min for setup, rounded up**. Measured
+p90 per iteration on Qwen2.5-7B, 4 × GH200, 16 episodes per iteration:
+
+| N | p90 s/iter | 300 iters |
+|---:|---:|---:|
+| 2 | 47–53 | 3.9–4.4 h |
+| 4 | 67–69 | 5.6–5.8 h |
+| 8 | 66 | 5.5 h |
+| 16 | 111 | 9.2 h |
+
+Two adjustments worth making rather than ignoring. Freezing members cuts the
+backward but not the rollout, so scale only the non-rollout share —
+`time/rollout_frac` is logged and runs 28% at N=16 to 68% at N=2. Cutting
+`rollouts` scales nearly everything, since both rollout and loss are
+proportional to episode count.
+
+A pending job's limit can be lowered after the fact:
+`scontrol update JobId=<id> TimeLimit=HH:00:00`.
+
 ---
 
 ## When a job finishes

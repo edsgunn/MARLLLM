@@ -60,7 +60,7 @@ name: run10_4agent_7B_study_group_strathearn_server_seed5
 script: train_population
 slurm:
   gpus_per_node: 4
-  time: "24:00:00"
+  time: "10:00:00"
 model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0

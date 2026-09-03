@@ -331,6 +331,13 @@ time, because every published analysis evaluates at a fixed iteration.*
   the Instruct model, confounding the prompt-swap diagnostic the design turned
   on. This is why every config needs a `STATUS:` line. — *established* —
   `runs/phase_a_substrate_validation/02_ccsm_focal_competitive/NOTES.md`
+- 🆕 (2026-09-03) **Asking for the 24 h maximum was costing more queue time
+  than it saved.** Forty-six jobs at the `workq` cap reserved 1,080 node-hours
+  for about 250 hours of work, making all of them unbackfillable; limits
+  estimated from each reference run's own p90 per-iteration cost cut the
+  reservation 60% with a 1.5× margin still in hand. Per-iteration cost is
+  stable enough to plan from — 47 s at N=2 to 111 s at N=16 on 4 × GH200. —
+  *established* — `PROCESS.md`, "Ask for the walltime the run needs"
 - 🆕 (2026-09-02) **Four config keys the code does not read.**
   `thinking_enabled`; `frozen_agents`, in the negotiation trainer only; the
   three `alpha_*` weights, never passed by `train_population.py`, so every
@@ -418,7 +425,7 @@ time, because every published analysis evaluates at a fixed iteration.*
 | 6260988–6260989 | [`c6_extended_horizon/`](configs/cultural_emergence/c6_extended_horizon/README.md) | C6: the 8- and 16-agent reference populations resumed past iteration 300, to 900 and 600. |
 | 6261085–6261088 | [`c10_term_ablation/`](configs/cultural_emergence/c10_term_ablation/README.md) | C10: perception-only and action-only on the reference population, testing whether the decline needs the action term. |
 | 6261670–6261683 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2: three arms of the population-size decomposition — baseline-large at the full horizon, rate-matched small, and frozen majority. |
-| 6262498 | [`c2_population_size/smoke/`](configs/cultural_emergence/c2_population_size/README.md) | Smoke gate for the partner-graph path; the restricted-pairing arm's five seeds are written and held on its result. |
+| 6271024, 6271026–6271029 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2's restricted-pairing arm: N=16 with three partners each, the arm that makes the population-size claim causal. Released after its smoke passed. |
 
 Each family's README carries what it changes, what it predicts and what would
 falsify it, written before submission. **Held, not submitted:** seeds 2–5 of

@@ -1,4 +1,6 @@
-# STATUS: QUEUED as job 6262498 on 2026-09-02.
+# STATUS: PASSED as job 6262498 on 2026-09-03, in 5m39s. Rosters were size 4
+# in every episode, all four groups appeared four times each, and membership
+# never changed. The five seeds were released on this result.
 #
 # SMOKE TEST for the partner-graph path. Not an experiment -- three
 # iterations at the real N, model and hardware, to confirm a subset

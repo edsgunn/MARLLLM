@@ -52,7 +52,7 @@ name: c3_frozen_pop_learner_marcus_seed1
 script: train_population
 slurm:
   gpus_per_node: 4
-  time: "24:00:00"
+  time: "06:00:00"
 model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0

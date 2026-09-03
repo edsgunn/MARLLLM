@@ -1,7 +1,13 @@
-# STATUS: NOT SUBMITTED. Gated on the GPU smoke below.
+# STATUS: QUEUED as job 6271029 on 2026-09-03.
 #
 # C2 -- LARGE, RESTRICTED PAIRING. N=16 with three partners each. Seed 5.
 # This is the arm that makes the population-size claim causal.
+#
+# SMOKE GATE: PASSED, job 6262498 on 2026-09-03.
+#   Three iterations at this N, model and hardware. Every episode roster was
+#   size 4, never 16; all four groups appeared exactly four times each, so the
+#   cycling is balanced; group membership matched the declared partition and
+#   never changed. Steady per-iteration cost 54 s.
 #
 # WHAT THIS CHANGES
 #   Against configs/cultural_emergence/run8_16agent_7B_study_group_ashbourne_gc.yaml:
@@ -52,7 +58,7 @@ name: c2_restricted_pairing_ashbourne_gc_seed5
 script: train_population
 slurm:
   gpus_per_node: 4
-  time: "24:00:00"
+  time: "10:00:00"
 model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0

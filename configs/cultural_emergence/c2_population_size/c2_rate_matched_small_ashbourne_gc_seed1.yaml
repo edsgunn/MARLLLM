@@ -54,7 +54,7 @@ name: c2_rate_matched_small_ashbourne_gc_seed1
 script: train_population
 slurm:
   gpus_per_node: 4
-  time: "24:00:00"
+  time: "05:00:00"
 model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0
