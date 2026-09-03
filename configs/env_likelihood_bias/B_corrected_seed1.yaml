@@ -1,4 +1,14 @@
-# STATUS: VOID. Ran to iteration 300 of 300 but breaches its own
+# STATUS: RESUBMITTED 2026-09-03 after the provenance fix. The first attempt
+# (job 6256588) is void — it silently trained on the uncorrected surrogate
+# because no-tag mode stripped the generation while the provenance matcher
+# required the unstripped decode, so env_log_probs never arrived. Its data is
+# kept at runs/env_likelihood_bias/B_corrected_seed1_void_provenance.
+#
+# This arm is now its own gate: with the fix in, a run that cannot compute the
+# corrected return RAISES rather than falling back, so a job that completes
+# has necessarily computed it. Check envlp/provenance_misses is 0 and that
+# envlp/env_share_of_return and envlp/return_rank_corr are present.
+# See runs/env_likelihood_bias/NOTES.md.
 # provenance void condition and logged none of its diagnostics. See
 # runs/env_likelihood_bias/NOTES.md. Do not cite; do not release seeds 2-5
 # until the provenance path is fixed.
@@ -45,7 +55,7 @@ name: B_corrected_seed1
 script: train_population
 slurm:
   gpus_per_node: 4
-  time: "24:00:00"
+  time: "10:00:00"
 model: Qwen/Qwen2.5-7B-Instruct
 dtype: bfloat16
 device: cuda:0

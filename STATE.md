@@ -483,6 +483,8 @@ iteration count. What is left:
 | 6261670–6261673 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 baseline-large: N=16 seeds 2–5 at the full 300-iteration horizon. |
 | 6271024, 6271026–6271029 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 restricted pairing: N=16 with three partners each, the arm that makes the population-size claim causal. |
 | 6279079 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 frozen-majority seed 5, resubmitted after a node-cleanup race tripped the GPU-memory preflight guard. |
+| 6279926 | [`env_likelihood_bias/`](configs/env_likelihood_bias/README.md) | Arm B re-run with the provenance fix. Now self-gating: it raises rather than falling back if the corrected return cannot be computed. |
+| 6280214 | [`scripts/tier_b/c9_post_hoc_env_term.py`](scripts/tier_b/c9_post_hoc_env_term.py) | The dropped environment term recovered post hoc from arm A's checkpoints, which the runtime path failed to log. |
 
 Each family's README carries what it changes, what it predicts and what would
 falsify it, written before submission. **None of the finished runs has been

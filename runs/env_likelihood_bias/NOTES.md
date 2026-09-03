@@ -169,7 +169,30 @@ failing there is nothing for it to disagree about.
 
 Seeds 2–5 of both arms are written and **remain held** — the gate they were held
 on has now failed rather than passed, which is the outcome the hold existed for.
-The fix is in. Before releasing seeds 2–5, run a **short arm-B job** and
+**Submitted 2026-09-03.**
+
+- **Arm B re-run as job 6279926**, with the fix in. It is now its own gate: a
+  run that cannot compute the corrected return raises rather than falling back,
+  so a job that completes has necessarily computed it. The void first attempt is
+  kept at `B_corrected_seed1_void_provenance`.
+- **The dropped term recovered post hoc from arm A's checkpoints**, job 6280214,
+  via [`scripts/tier_b/c9_post_hoc_env_term.py`](../../scripts/tier_b/c9_post_hoc_env_term.py).
+  Arm A's adapters and traces are intact, so the measurement the runtime path
+  failed to make can be made from them without retraining: score each delivered
+  post under its generator's adapter for `E_s`, and each observation block under
+  its observer's adapter for `M_s`, then form both returns.
+
+  Two things that reconstruction had to get right, and one it cannot. The
+  trainer delivers observations **per turn, not per post** — `env.last()` is
+  called only for the acting agent, so an agent receives everything accumulated
+  since its previous turn as one block, which is the measurement's real unit.
+  And the turn order is imposed from the recorded thread rather than re-drawn,
+  which reproduces the realised speaker sequence exactly. What it cannot recover
+  is the whitespace the generators actually emitted: the traces hold the
+  stripped text, so `E_s` is the adapter's log-prob of the delivered string
+  scored fresh, not the fp8 sampling log-prob.
+
+Before releasing seeds 2–5, check the re-run arm B and
 confirm two things in its `metrics.jsonl`: `envlp/provenance_misses` at 0, and
 `envlp/env_share_of_return` and `envlp/return_rank_corr` actually present. Arm B
 is the better smoke than arm A, because it now raises rather than falling back
