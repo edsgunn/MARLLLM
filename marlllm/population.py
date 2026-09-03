@@ -1052,6 +1052,8 @@ class PopulationTrainer:
             # member) is becoming the dominant cost as population grows.
             # Surfaces as ``per_agent/<name>/total_s`` etc. in metrics.
             per_agent_timings: dict[str, dict[str, float]] = {}
+            # agent -> [(mean, sq_mean)] of the raw return, one per micro-batch
+            popart_acc: dict[str, list] = {}
 
             for pop_name, agent in self.population.items():
                 # Frozen members posted during the rollout and their posts are
@@ -1193,6 +1195,7 @@ class PopulationTrainer:
                             env_log_probs=mb_env_lp,
                             env_lp_known=mb_env_known,
                             bias_values=agent.bias_values(last_hidden),
+                            value_head=agent._value_head,
                         )
 
                         (loss_val * scale).backward()
@@ -1201,6 +1204,11 @@ class PopulationTrainer:
                     for k, v in metrics.items():
                         key = f"{pop_name}/{k}"
                         all_metrics[key] = all_metrics.get(key, 0.0) + v / num_micros
+                    # PopArt needs the raw-return moments for this agent's whole
+                    # step, not per micro-batch.
+                    if "popart/batch_mean" in metrics:
+                        popart_acc.setdefault(pop_name, []).append(
+                            (metrics["popart/batch_mean"], metrics["popart/batch_sq_mean"]))
 
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
@@ -1273,6 +1281,18 @@ class PopulationTrainer:
                 # manual cross-rank average to stay in sync.
                 self._fsdp_all_reduce_value_head_grads()
             self.optimizer.step()
+            # PopArt: ART then POP, once per step. Doing this per micro-batch
+            # would move the output layer under gradients already accumulated
+            # against it.
+            for pop_name, moments in popart_acc.items():
+                vh = getattr(self.population[pop_name], "_value_head", None)
+                if vh is None or not getattr(vh, "popart", False) or not moments:
+                    continue
+                mean = sum(m for m, _ in moments) / len(moments)
+                sq = sum(q for _, q in moments) / len(moments)
+                info = vh.popart_update(mean, sq)
+                for k, v in info.items():
+                    all_metrics[f"{k}"] = v
             if self.sampling_engine is not None and self._sampling_engine_peft_model is not None:
                 # Push fresh LoRA weights into vLLM so the next rollout
                 # samples from the just-updated policy. Under async this also

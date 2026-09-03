@@ -20,7 +20,7 @@ Stop-gradient contract (all enforced here, not in the model):
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Any, Callable
 
 import torch
 import torch.nn.functional as F
@@ -102,6 +102,7 @@ class CCSMLoss(Loss):
         env_log_probs: torch.Tensor | None = None,
         env_lp_known: torch.Tensor | None = None,
         bias_values: torch.Tensor | None = None,
+        value_head: Any | None = None,
     ) -> tuple[torch.Tensor, dict]:
         # Single chunked pass through lm_head produces shifted per-token
         # log p(input_ids[t+1] | hidden[t]). Both surprises and act log-probs
@@ -179,15 +180,27 @@ class CCSMLoss(Loss):
             with torch.no_grad():
                 raw_mean = float(act_returns.mean()) if act_returns.numel() else 0.0
                 raw_std = float(act_returns.std()) if act_returns.numel() > 1 else 0.0
+                raw_sq_mean = float((act_returns * act_returns).mean()) if act_returns.numel() else 0.0
                 raw_absmax = (float(act_returns.abs().max())
                               if act_returns.numel() else 0.0)
             act_returns_raw = act_returns
+            # PopArt: the head emits a NORMALISED value, so the baseline has to
+            # be put back on the return's scale before it can centre anything.
+            _vh = value_head if (value_head is not None
+                                 and getattr(value_head, "popart", False)) else None
             if config.normalise_returns and act_returns.numel() > 1:
                 act_returns = (act_returns - act_returns.mean()) / (act_returns.std() + 1e-8)
 
             # Advantages: negate so less surprise = positive advantage (§7.2 step 4)
             act_values_det = values[act_mask].detach()
-            advantages = -(act_returns - act_values_det)
+            if _vh is not None:
+                # Both sides in the return's units: the raw return, centred by
+                # the denormalised baseline. This is the whole point of PopArt —
+                # a well-conditioned head that still speaks in nats.
+                advantages = -(act_returns_raw
+                               - _vh.denormalise(act_values_det))
+            else:
+                advantages = -(act_returns - act_values_det)
 
             # Log-probs of the sampled action tokens (from the training forward pass)
             shifted_act_mask = act_mask[:, 1:]
@@ -273,8 +286,16 @@ class CCSMLoss(Loss):
             # cannot absorb the return's LEVEL. value_target_raw fits it to the
             # unstandardised return instead, which is what lets a baseline
             # absorb the drift the perception arm induces in G_t.
-            v_target = (act_returns_raw if getattr(config, "value_target_raw", False)
-                        else act_returns)
+            if _vh is not None:
+                # ART: regress onto the adaptively normalised target. POP keeps
+                # the denormalised output fixed when the moments move, so this
+                # does not discard the level the way standardising the target
+                # does.
+                v_target = _vh.normalise_target(act_returns_raw)
+            elif getattr(config, "value_target_raw", False):
+                v_target = act_returns_raw
+            else:
+                v_target = act_returns
             l_val = F.mse_loss(act_values, v_target.detach())
         else:
             l_act = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
@@ -338,6 +359,12 @@ class CCSMLoss(Loss):
             "loss/n_act_tokens": float(int(act_mask.sum())),
             "loss/obs_act_ratio": (float(int(obs_mask.sum())) /
                                    max(1.0, float(int(act_mask.sum())))),
+            # Moments of the RAW return, for the trainer's PopArt update. It
+            # must run once per optimiser step, not per micro-batch: rescaling
+            # the output layer moves parameters that accumulated gradients were
+            # computed against.
+            "popart/batch_mean": raw_mean,
+            "popart/batch_sq_mean": raw_sq_mean,
             "return_raw_mean": raw_mean,
             "return_raw_std": raw_std,
             "return_raw_abs_max": raw_absmax,

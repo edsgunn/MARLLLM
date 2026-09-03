@@ -59,6 +59,18 @@ class TrainingConfig:
     # symlog head rather than to standardise the target again.
     value_target_raw: bool = False
 
+    # PopArt on the value head (van Hasselt et al. 2016). The head regresses
+    # onto an adaptively normalised target while its output layer is rescaled
+    # to preserve the denormalised value, so the baseline stays on the return's
+    # own scale AND stays well conditioned. This is the principled answer to
+    # "the value head cannot learn raw returns": normalise the target's
+    # CONDITIONING, not the target's meaning.
+    #
+    # Supersedes value_target_raw when both are set — PopArt already keeps the
+    # value in the return's units.
+    popart: bool = False
+    popart_beta: float = 3e-4   # EMA rate for the running target moments
+
     # Denominator for the action arm's mean.
     #
     # surprise_minimisation_derivation.md 7.1-7.2 writes BOTH arms as sums over

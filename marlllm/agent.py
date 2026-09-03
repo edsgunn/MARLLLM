@@ -361,15 +361,87 @@ class ValueHead(nn.Module):
     Scalar value head: Linear(hidden_size -> 1).
     Receives detached hidden states so the value loss gradient stays
     inside the linear layer and never propagates into the LM backbone.
+
+    Optionally carries PopArt (van Hasselt et al. 2016, "Learning values across
+    many orders of magnitude"), which exists for exactly the problem this
+    project has: the return spans ~250 at gamma=0.99 to ~2300 at gamma=1, a
+    plain MSE head over that range is badly conditioned, and standardising the
+    TARGET instead throws away the level the baseline is supposed to absorb.
+
+    PopArt splits the difference. ART adaptively rescales the target using
+    running moments, so the head always regresses onto a well-conditioned
+    quantity. POP then rescales the output layer whenever those moments move,
+    so the DENORMALISED output is preserved exactly and the value function
+    stays on the return's own scale. The head learns a normalised value;
+    ``denormalise`` puts it back in nats for the advantage.
     """
 
-    def __init__(self, hidden_size: int) -> None:
+    def __init__(self, hidden_size: int, *, popart: bool = False,
+                 popart_beta: float = 3e-4) -> None:
         super().__init__()
         self.linear = nn.Linear(hidden_size, 1, bias=True)
+        self.popart = bool(popart)
+        self.popart_beta = float(popart_beta)
+        # Running first and second moments of the TARGET, and the scale derived
+        # from them. Buffers so they checkpoint and move with the module.
+        self.register_buffer("popart_mu", torch.zeros(()))
+        self.register_buffer("popart_nu", torch.ones(()))
+        self.register_buffer("popart_sigma", torch.ones(()))
+        self.register_buffer("popart_ready", torch.zeros(()))
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        # hidden_states: (B, T, H) — should already be detached by caller
+        # hidden_states: (B, T, H) — should already be detached by caller.
+        # With PopArt this is the NORMALISED value; use denormalise() for the
+        # value in the return's units.
         return self.linear(hidden_states).squeeze(-1)  # (B, T)
+
+    def denormalise(self, v_norm: torch.Tensor) -> torch.Tensor:
+        """Normalised value -> the return's own scale."""
+        if not self.popart:
+            return v_norm
+        return v_norm * self.popart_sigma + self.popart_mu
+
+    def normalise_target(self, y: torch.Tensor) -> torch.Tensor:
+        """A raw return -> the scale the head is actually regressing onto."""
+        if not self.popart:
+            return y
+        return (y - self.popart_mu) / self.popart_sigma
+
+    @torch.no_grad()
+    def popart_update(self, batch_mean: float, batch_sq_mean: float) -> dict:
+        """ART then POP. Call once per optimiser step, never per micro-batch.
+
+        Rescaling the output layer changes parameters that already-accumulated
+        gradients were computed against, so doing this mid-accumulation would
+        apply stale gradients to moved weights.
+        """
+        if not self.popart:
+            return {}
+        mu_old = self.popart_mu.clone()
+        sigma_old = self.popart_sigma.clone()
+        b = self.popart_beta
+        if float(self.popart_ready) < 1.0:
+            # Seed from the first batch rather than crawling up from 0/1, which
+            # would leave sigma wrong by orders of magnitude for thousands of
+            # steps at beta=3e-4.
+            self.popart_mu.fill_(float(batch_mean))
+            self.popart_nu.fill_(float(batch_sq_mean))
+            self.popart_ready.fill_(1.0)
+        else:
+            self.popart_mu.mul_(1.0 - b).add_(b * float(batch_mean))
+            self.popart_nu.mul_(1.0 - b).add_(b * float(batch_sq_mean))
+        var = (self.popart_nu - self.popart_mu * self.popart_mu).clamp_min(1e-4)
+        self.popart_sigma.copy_(var.sqrt())
+        # POP: preserve outputs precisely.
+        #   sigma_new * (W' h + b') + mu_new  ==  sigma_old * (W h + b) + mu_old
+        #   =>  W' = W * sigma_old/sigma_new
+        #       b' = (sigma_old * b + mu_old - mu_new) / sigma_new
+        ratio = sigma_old / self.popart_sigma
+        self.linear.weight.mul_(ratio)
+        self.linear.bias.mul_(ratio).add_((mu_old - self.popart_mu) / self.popart_sigma)
+        return {"popart/mu": float(self.popart_mu),
+                "popart/sigma": float(self.popart_sigma),
+                "popart/rescale": float(ratio)}
 
 
 class IndependentAgent(Agent):
@@ -390,6 +462,8 @@ class IndependentAgent(Agent):
         torch_dtype: torch.dtype | str | None = "auto",
         device_map: str | dict | None = None,
         keep_ref_model: bool = False,
+        popart: bool = False,
+        popart_beta: float = 3e-4,
         gradient_checkpointing: bool = False,
         lora_r: int = 0,
         lora_alpha: int = 16,
@@ -479,7 +553,9 @@ class IndependentAgent(Agent):
 
         hidden_size = self._backbone.config.hidden_size
         model_dtype = next(self._backbone.parameters()).dtype
-        self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+        self._value_head = ValueHead(
+            hidden_size, popart=bool(popart), popart_beta=float(popart_beta),
+        ).to(self.device, dtype=model_dtype)
         # Optional second value head, fitted to the environment-likelihood
         # part of the return alone. Its input is detached exactly as the main
         # head's is, so it trains only its own parameters and cannot reach the
@@ -790,6 +866,8 @@ class LoRASharedBaseAgent(Agent):
         tokenizer: PreTrainedTokenizerBase,
         device: torch.device | str,
         keep_ref_model: bool = False,
+        popart: bool = False,
+        popart_beta: float = 3e-4,
         context_formatter: str = "auto",
         compile_rollout: bool = False,
     ) -> None:
@@ -808,7 +886,9 @@ class LoRASharedBaseAgent(Agent):
 
         hidden_size = shared_backbone.config.hidden_size
         model_dtype = next(p for p in shared_backbone.parameters() if p.dtype.is_floating_point).dtype
-        self._value_head = ValueHead(hidden_size).to(self.device, dtype=model_dtype)
+        self._value_head = ValueHead(
+            hidden_size, popart=bool(popart), popart_beta=float(popart_beta),
+        ).to(self.device, dtype=model_dtype)
         # Optional second value head, fitted to the environment-likelihood
         # part of the return alone. Its input is detached exactly as the main
         # head's is, so it trains only its own parameters and cannot reach the
