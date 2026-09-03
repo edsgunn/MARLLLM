@@ -89,13 +89,18 @@ maximises and what we want are related only by argument.*
   costs a forward pass per agent per episode, not a lookup. — *established* —
   `runs/_tier_b/b5_env_likelihood/NOTES.md`
 - 🆕 (2026-09-03) **The experiment built to measure the dropped environment
-  term did not measure it.** Both arms breach their own pre-registered void
-  condition — `provenance_misses` climbs from 4 to 497 per episode instead of
-  staying at 0 — and the decision-relevant outputs were never logged, because
-  `_env_likelihood_terms` returns empty whenever `env_log_probs` is None.
-  Blanking the post tags settles the *maths*; the provenance plumbing is
-  separate and is what failed. The `p_env` entries above rest on B5 and are
-  unaffected. — *established* — `runs/env_likelihood_bias/NOTES.md`
+  term measured nothing, because no-tag mode stripped the generation while the
+  provenance matcher required the unstripped decode.** Any surrounding
+  whitespace missed, so no observation token carried `ln p_env`; and because
+  the corrected return is selected only after that check, **arm B silently
+  trained on the surrogate** and is a duplicate of arm A. Fixed, with
+  regression tests; both arms need re-running. — *established* —
+  `runs/env_likelihood_bias/NOTES.md`
+- 🆕 (2026-09-03) **A run can declare an objective it is not training on.**
+  Nothing in six hours of either arm's output said the corrected return was
+  unavailable — the signal was an *absence* of `envlp/*` keys. The path now
+  raises instead. Worth assuming other declared-but-unused settings exist,
+  alongside the four keys the code never read. — *established* — same
 - 🔸 **The environment conditional is observer-independent under
   full observability.** An agent's own persona and private deliberation are
   conditionally independent of what other agents emit, given the public thread,

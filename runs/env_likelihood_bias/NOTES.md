@@ -51,6 +51,78 @@ condition for trusting any of it fails.
 |---|---|---|---|---|---|---|
 | mean | 40 | 122 | 201 | 286 | 376 | 466 |
 
+## Root cause, found 2026-09-03
+
+**One line, and it is not a logging bug.**
+
+`_extract_blocks` in no-tag mode delivered `generation.strip()` as the post,
+while `_content_token_ids` required the **unstripped** decode of the action's
+tokens to equal the delivered text exactly. Any generation with leading or
+trailing whitespace therefore failed the match, and Qwen generations almost
+always have some. Reproduced directly:
+
+| generation | provenance, before the fix |
+|---|---|
+| `hi everyone, shall we start?` | resolved |
+| `hi everyone, shall we start?\n` | **miss** |
+| ` hi everyone, shall we start?` | **miss** |
+| `\n\nhi everyone, shall we start? \n` | **miss** |
+
+A miss sets `content_ids = None`, which is what is handed to every observer, so
+the consequence is not a missing log line: **0 of 140 observation tokens carried
+`ln p_env`** where a clean generation gave 7 of 140. The term was dropped as
+completely as if `provenance` had never been set.
+
+### It also invalidated arm B, silently
+
+`_env_likelihood_terms` returns `(returns, None, {})` when `env_log_probs is
+None` — *before* `use_env_likelihood_return` is ever consulted, at
+[`marlllm/loss.py`](../../marlllm/loss.py) line 800. So arm B, which declared
+`use_env_likelihood_return: True`, **trained on the uncorrected surrogate**.
+The two arms are not two arms: they are the same experiment run twice, and
+nothing in either job's output said so.
+
+### Why it worsened over training
+
+The strip only bites when the generation has surrounding whitespace, and
+degrading policies emit more of it — the same drift that takes per-iteration
+cost from 48 s to 157 s by emitting longer, messier generations. Hence 4 misses
+per episode at the start and 497 by iteration 300.
+
+### The fix
+
+Three changes, with regression tests in
+[`tests/test_env_likelihood.py`](../../tests/test_env_likelihood.py):
+
+1. **No-tag mode no longer strips.** Stripping *is* discarding, and the whole
+   premise of no-tag mode is that nothing an agent emits is discarded — that is
+   what makes `p_env` the generator's own log-prob over the delivered tokens.
+   Emptiness is still judged on the stripped form, so a whitespace-only turn
+   still counts as `post_missing` and B4's channel metric is unaffected.
+2. **The matcher is strip-aware anyway**, searching a bounded span for an exact
+   decode match, so a stripped body elsewhere degrades to a miss rather than
+   silently mismatching. Exactness is kept: the ids returned still decode to
+   the delivered text and nothing else, because they *are* what gets spliced
+   into the observer's context.
+3. **The silent fallback is now loud.** A run that declares
+   `use_env_likelihood_return` and finds no environment log-probs raises
+   instead of quietly training on the surrogate, and a run with
+   `env_likelihood_logging` on emits `envlp/env_term_absent` so the absence is
+   visible in `metrics.jsonl` rather than being an absence of keys that nothing
+   was watching for.
+
+After the fix all five whitespace shapes resolve with zero misses and every
+generated token carries `ln p_env`.
+
+**A separate defect, not fixed:** provenance does not resolve in *tagged* mode
+either, because there `text` is the content between the tags while the action
+tokens include the tags, so no span of the action decodes to the delivered text
+by this route. It has presumably never worked. The env-likelihood design uses
+no-tag mode so this does not block C9, and B5's 100%-provenance result is a
+different measurement (post text appearing as a contiguous span in observers'
+contexts) and is unaffected. But `provenance: true` on a tagged substrate is
+currently a no-op and should be either fixed or refused.
+
 ## Why the diagnostics are missing
 
 `_env_likelihood_terms` in [`marlllm/loss.py`](../../marlllm/loss.py) returns
@@ -88,13 +160,21 @@ failing there is nothing for it to disagree about.
   corrected return in use, but with provenance failing, what it was correcting
   by is unknown. Its policy outcome should not be read as the corrected
   objective's behaviour.
-- **What exactly broke.** Whether provenance never attached, attached and was
-  dropped in collation, or was lost at the `RolloutBatch` boundary is not
-  established here and needs a targeted check before resubmission.
+- ~~**What exactly broke.**~~ Found and fixed — see *Root cause* above. What
+  remains unestablished is whether anything else in the path is also broken;
+  the fix was verified on synthetic generations and in the unit tests, not yet
+  on a real run.
 
 ## What to do next
 
 Seeds 2–5 of both arms are written and **remain held** — the gate they were held
 on has now failed rather than passed, which is the outcome the hold existed for.
-Before resubmitting: instrument `provenance_misses` at the point of failure,
-confirm `env_log_probs` is non-None in a short run, and only then release.
+The fix is in. Before releasing seeds 2–5, run a **short arm-B job** and
+confirm two things in its `metrics.jsonl`: `envlp/provenance_misses` at 0, and
+`envlp/env_share_of_return` and `envlp/return_rank_corr` actually present. Arm B
+is the better smoke than arm A, because it now raises rather than falling back
+if the term is missing — a job that completes has necessarily computed the
+corrected return.
+
+Seed 1 of both arms should then be **re-run**, not reused: the existing pair is
+the same experiment twice.

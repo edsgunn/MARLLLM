@@ -763,6 +763,28 @@ def _env_likelihood_terms(
     """
     m: dict = {}
     if env_log_probs is None:
+        # The term is absent. Say so in the metrics rather than returning a
+        # bare dict: arms A and B of 2026-09-02 both ran 300 iterations and 6
+        # hours here, and the only signal was an *absence* of envlp/* keys,
+        # which nothing was watching for.
+        # Only for runs that asked for this instrumentation. A legacy run has
+        # no environment log-probs by design and must not gain a stray key —
+        # tests/test_env_likelihood.py pins that.
+        if getattr(config, "env_likelihood_logging", False):
+            m["envlp/env_term_absent"] = 1.0
+        if config.use_env_likelihood_return:
+            # This run was configured to TRAIN on the corrected return. Falling
+            # back to the surrogate silently is what made arm B a duplicate of
+            # arm A without either job failing. A run that cannot compute the
+            # objective it declared is invalid, so stop.
+            raise RuntimeError(
+                "use_env_likelihood_return is set but no environment "
+                "log-probabilities reached the loss, so the corrected return "
+                "cannot be computed and training would silently fall back to "
+                "the surrogate. Check that the environment has provenance=True "
+                "and that its posts resolve (envlp/provenance_misses must be "
+                "0) — see runs/env_likelihood_bias/NOTES.md."
+            )
         return returns, None, m
     env_ret = _env_returns(
         env_log_probs, token_type_mask, config.gamma, seq_ids, returns.dtype)

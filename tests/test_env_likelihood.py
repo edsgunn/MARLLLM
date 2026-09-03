@@ -283,6 +283,70 @@ def test_spearman():
     assert _spearman(torch.tensor([1.0]), torch.tensor([1.0])) == 0.0
 
 
+# ------------------------------------------------------------------ #
+# Regression: the fault that voided the 2026-09-02 runs                #
+# ------------------------------------------------------------------ #
+def test_provenance_survives_surrounding_whitespace():
+    """The break that voided arms A and B.
+
+    No-tag mode used to deliver ``generation.strip()`` while the provenance
+    matcher required the *unstripped* decode to equal the delivered text. Any
+    leading or trailing whitespace therefore missed, provenance resolved for
+    nothing, and `env_log_probs` arrived as None — which skips the whole
+    diagnostic block AND silently returns the uncorrected surrogate return,
+    regardless of `use_env_likelihood_return`. See
+    runs/env_likelihood_bias/NOTES.md.
+    """
+    tok = _tokenizer()
+    for gen in ("clean text with no padding",
+                "trailing newline\n",
+                " leading space",
+                "\n\nboth ends, doubled \n",
+                "multi-line:\n\n1. one\n2. two\n"):
+        env, names = _env(tok, post_open_tag="", post_close_tag="", provenance=True)
+        env.reset()
+        speaker = env.agent_selection
+        ids = tok.encode(gen, add_special_tokens=False)
+        env.step(ids)
+        assert env._provenance_misses == 0, f"miss on {gen!r}"
+        assert 0 in env._post_token_provenance, f"unresolved: {gen!r}"
+        # And the term actually reaches the observer.
+        observer = next(a for a in names if a != speaker)
+        obs_ids = env.observe(observer)
+
+        class _Stub:
+            _log_env_likelihood = True
+            _env_lp_misalignments = 0
+            _env_log_probs_for_obs = PopulationTrainer._env_log_probs_for_obs
+
+        lps, known = _Stub()._env_log_probs_for_obs(
+            env, observer, len(obs_ids), {0: [-0.5] * len(ids)})
+        assert lps is not None, f"env_log_probs is None for {gen!r}"
+        measured = sum(1 for i, k in enumerate(known) if k and lps[i] != 0.0)
+        assert measured == len(ids), (
+            f"{measured} of {len(ids)} tokens carry ln p_env for {gen!r}")
+
+
+def test_no_tag_mode_discards_nothing():
+    """The property the whole no-tag design rests on."""
+    tok = _tokenizer()
+    gen = "  keep every byte, including the padding.  \n"
+    env, _ = _env(tok, post_open_tag="", post_close_tag="", provenance=True)
+    env.reset()
+    env.step(tok.encode(gen, add_special_tokens=False))
+    assert env._thread[0]["text"] == gen, "no-tag mode stripped the generation"
+
+
+def test_whitespace_only_turn_still_counts_as_no_post():
+    """Not stripping must not turn an empty turn into a delivered post."""
+    tok = _tokenizer()
+    env, _ = _env(tok, post_open_tag="", post_close_tag="", provenance=True)
+    env.reset()
+    env.step(tok.encode("  \n  ", add_special_tokens=False))
+    c = env._tool_counts
+    assert c["post_success"] == 0 and c["post_missing"] == 1, c
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

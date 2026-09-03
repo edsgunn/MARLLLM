@@ -789,6 +789,22 @@ class ForumEnv(AECEnv):
         ``_decode_action`` drops special tokens, so the delivered text is the
         decode of the non-special subsequence; this recovers that subsequence
         and verifies the round trip before returning it.
+
+        The delivered text is *stripped* — in no-tag mode it is
+        ``generation.strip()``, and tagged bodies are stripped too — while the
+        action's tokens are not. So the whole-sequence decode usually differs
+        from ``text`` by leading or trailing whitespace, and requiring exact
+        equality of the two rejected almost every post: the environment-likelihood
+        runs of 2026-09-02 lost provenance on 4 to 497 posts per episode and
+        silently dropped the term they existed to measure
+        (`runs/env_likelihood_bias/NOTES.md`).
+
+        So trim whitespace tokens off each end and look for the sub-span that
+        decodes to exactly ``text``. Exactness is kept, not relaxed: the ids
+        returned still decode to the delivered text and nothing else, because
+        the observer's context contains that text and a log-prob attached to a
+        token spanning the boundary would be attached to the wrong token. A span
+        that cannot be found is still a miss.
         """
         try:
             ids = [int(t) for t in action]
@@ -797,14 +813,38 @@ class ForumEnv(AECEnv):
         specials = set(getattr(self._tok, "all_special_ids", []) or [])
         keep = [(n, t) for n, t in enumerate(ids) if t not in specials]
         cand = [t for _, t in keep]
-        if not cand:
+        if not cand or not text:
             return None, None
         try:
-            if self._tok.decode(cand, skip_special_tokens=True) != text:
-                return None, None
+            whole = self._tok.decode(cand, skip_special_tokens=True)
         except Exception:
             return None, None
-        return cand, [n for n, _ in keep]
+        if whole == text:
+            return cand, [n for n, _ in keep]
+        # Only surrounding whitespace may differ; if anything else does, the
+        # delivered text is not this token sequence and there is nothing to
+        # attach.
+        if whole.strip() != text:
+            return None, None
+        # Bounded search over how many tokens the strip consumed at each end.
+        # Whitespace runs are short, and a token that merges whitespace with a
+        # word cannot be split, so no span will match and the miss is correct.
+        lead = len(whole) - len(whole.lstrip())
+        trail = len(whole) - len(whole.rstrip())
+        max_lo = min(len(cand), lead + 1)
+        max_hi = min(len(cand), trail + 1)
+        for lo in range(max_lo + 1):
+            for hi in range(max_hi + 1):
+                if lo + hi >= len(cand):
+                    continue
+                span = cand[lo:len(cand) - hi] if hi else cand[lo:]
+                try:
+                    if self._tok.decode(span, skip_special_tokens=True) == text:
+                        pos = [n for n, _ in keep]
+                        return span, pos[lo:len(pos) - hi] if hi else pos[lo:]
+                except Exception:
+                    continue
+        return None, None
 
     def _decode_action(self, action: Any) -> str:
         if action is None:
@@ -870,8 +910,18 @@ class ForumEnv(AECEnv):
             # Everything the agent generated is the post. One "closed" block,
             # nothing unclosed, no code. Keeps every downstream counter
             # (post_success / post_missing / post_blocks) meaningful.
-            body = text.strip()
-            return body, [], False, False, (1 if body else 0)
+            #
+            # Deliberately NOT stripped. The point of no-tag mode is that
+            # nothing an agent emits is discarded, so that p_env is exactly the
+            # generator's own log-prob over the delivered tokens; stripping
+            # whitespace discards tokens and breaks that identity, because the
+            # delivered text no longer decodes from the generated ids. The
+            # 2026-09-02 environment-likelihood runs lost provenance on 4 to 497
+            # posts per episode for exactly this reason and silently fell back
+            # to the uncorrected return — see runs/env_likelihood_bias/NOTES.md.
+            # Emptiness is still judged on the stripped form, so a whitespace-
+            # only turn counts as empty rather than as a post.
+            return text, [], False, False, (1 if text.strip() else 0)
         po, pc = self._post_open_tag, self._post_close_tag
         yo, yc = self._python_open_tag, self._python_close_tag
         to, tc = self._THINK_OPEN, self._THINK_CLOSE
