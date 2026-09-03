@@ -1,4 +1,7 @@
-# STATUS: QUEUED as job 6261678 on 2026-09-02.
+# STATUS: QUEUED as job 6279079 on 2026-09-03. First attempt (6261678) died
+# after 63s on submit_batch's own preflight guard: the node had 549 MiB of a
+# previous tenant's GPU memory still held against its 500 MiB threshold. A
+# node-cleanup race, nothing to do with this config.
 #
 # C2 -- POPULATION SIZE, CAUSALLY. FROZEN MAJORITY -- N=16, 14 frozen, 2 learning. Seed 5.
 #

@@ -113,8 +113,25 @@ backward but not the rollout, so scale only the non-rollout share —
 `rollouts` scales nearly everything, since both rollout and loss are
 proportional to episode count.
 
+**Never estimate from a short smoke.** Per-iteration cost is not stationary: on
+a 16-agent forum run it drifts from 48 s at iteration 25 to 157 s by iteration
+150 — 3× — and plateaus only after about 100 iterations. A 3-iteration smoke
+measures warm-up and nothing else. This is not hypothetical: C2's
+restricted-pairing arm was given 10 h on the strength of its smoke's 54 s/iter
+when the steady figure turned out to be ~150, leaving all five seeds projecting
+9.4–11.1 h against that limit. Every arm sized from a *reference run's* p90 came
+in comfortably instead, because a full run's p90 already contains the drift.
+
+The growth is in **generation**, not the update: `time/rollout_frac` rises from
+61% to 77% across the same span, so it is the agents emitting more tokens per
+turn rather than the loss getting slower. Which means the drift is worse on
+exactly the runs whose policies are degrading, and those are most of them.
+
 A pending job's limit can be lowered after the fact:
-`scontrol update JobId=<id> TimeLimit=HH:00:00`.
+`scontrol update JobId=<id> TimeLimit=HH:00:00`. **It cannot be raised** — that
+is operator-only — so the recovery path for a wall is `--extra-args "--resume"`,
+which reloads `<output_dir>/checkpoints/latest`. At `checkpoint_every: 25` a
+wall costs at most 24 iterations of work.
 
 ---
 

@@ -416,22 +416,20 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ## What we are running
 
+Thirty-six of the fifty jobs submitted on 2026-09-02 have finished at their full
+iteration count. What is left:
+
 | job | config | what it is for |
 |---|---|---|
-| 6256587 | [`env_likelihood_bias/A_surrogate_seed1`](configs/env_likelihood_bias/README.md) | Arm A of the environment-likelihood experiment: the usual surrogate return, with `ln p_env` logged but unused, so the dropped term's size and its effect on the update direction can be measured. |
-| 6256588 | [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md) | Arm B: identical but for the return, which becomes `R_t = Σ γ^(s-t)(E_s − M_s)`, with the value head fitted to it. |
-| 6260359–6260378 | [`c1_small_population_replicates/`](configs/cultural_emergence/c1_small_population_replicates/README.md) | C1: five seeds of each N=2 and N=4 cell of the population-size figure, where every cell is currently n=1. |
-| 6260985–6260987 | [`c3_frozen_population/`](configs/cultural_emergence/c3_frozen_population/README.md) | C3: one learner training against seven frozen members, separating co-adaptation from single-agent surprise minimisation. |
 | 6260988–6260989 | [`c6_extended_horizon/`](configs/cultural_emergence/c6_extended_horizon/README.md) | C6: the 8- and 16-agent reference populations resumed past iteration 300, to 900 and 600. |
-| 6261085–6261088 | [`c10_term_ablation/`](configs/cultural_emergence/c10_term_ablation/README.md) | C10: perception-only and action-only on the reference population, testing whether the decline needs the action term. |
-| 6261670–6261683 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2: three arms of the population-size decomposition — baseline-large at the full horizon, rate-matched small, and frozen majority. |
-| 6271024, 6271026–6271029 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2's restricted-pairing arm: N=16 with three partners each, the arm that makes the population-size claim causal. Released after its smoke passed. |
+| 6261670–6261673 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 baseline-large: N=16 seeds 2–5 at the full 300-iteration horizon. |
+| 6271024, 6271026–6271029 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 restricted pairing: N=16 with three partners each, the arm that makes the population-size claim causal. |
+| 6279079 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 frozen-majority seed 5, resubmitted after a node-cleanup race tripped the GPU-memory preflight guard. |
 
 Each family's README carries what it changes, what it predicts and what would
-falsify it, written before submission. **Held, not submitted:** seeds 2–5 of
-both environment-likelihood arms, released only once
-`envlp/obs_tokens_measured_frac` is 1.0 and both
-`envlp/misaligned_observations` and `envlp/provenance_misses` are 0.
+falsify it, written before submission. **None of the finished runs has been
+analysed yet** — no `NOTES.md`, no regime table, no traces read — so nothing
+below has moved on their account.
 
 ---
 

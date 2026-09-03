@@ -74,6 +74,8 @@ directories, not jobs — several directories were submitted more than once.
 |---|---|---|
 | 09-03 | C2's partner-graph smoke (6262498) | **Passed** in 5m39s. Every episode roster was size 4 rather than 16, all four groups appeared four times each, and membership never changed. The restricted-pairing arm's five seeds were released on it. |
 | 09-03 | Walltime audit | Every job had inherited the 24 h `workq` cap: 1,080 node-hours reserved for ~250 hours of work, none of it backfillable. Limits re-estimated from each reference run's p90 per-iteration cost and lowered in place with `scontrol`; reservation down 60% with a 1.5x margin. The method is now in `PROCESS.md`. |
+| 09-03 | First Tier-C results land | 36 of 50 jobs finished at their full iteration count, none truncated. One failure: `c2_frozen_majority_seed5` died in 63 s on `submit_batch`'s GPU-memory preflight guard — 549 MiB of a previous tenant's memory against its 500 MiB threshold, a node-cleanup race — resubmitted as 6279079. **No run has been analysed yet.** |
+| 09-03 | The walltime estimate that was wrong | C2's restricted-pairing arm was sized from its 3-iteration smoke (54 s/iter) and given 10 h; steady state is ~150 s/iter, so all five project 9.4–11.1 h against it. Per-iteration cost drifts 3× over a run and the growth is in generation, not the update (`time/rollout_frac` 61% → 77%). A limit cannot be raised once set, so the recovery is `--resume`. Configs re-timed to 19 h; `PROCESS.md` now says never to size from a smoke. |
 
 ---
 
@@ -81,23 +83,22 @@ directories, not jobs — several directories were submitted more than once.
 
 | job | started | what |
 |---|---|---|
-| 6256587 | 2026-09-02 | `A_surrogate_seed1` — environment-likelihood experiment, arm A |
-| 6256588 | 2026-09-02 | `B_corrected_seed1` — arm B, corrected return |
-| 6260359–6260378 | 2026-09-02 | C1 — twenty seed replicates of the N=2/N=4 corner of the population-size figure |
-| 6260985–6260987 | 2026-09-02 | C3 — one learner against seven frozen members, two learners × two seeds |
 | 6260988–6260989 | 2026-09-02 | C6 — reference populations extended to 900 (8-agent) and 600 (16-agent) |
-| 6261085–6261088 | 2026-09-02 | C10 — perception-only and action-only term ablations, two seeds each |
-| 6261670–6261683 | 2026-09-02 | C2 — baseline-large at full horizon, rate-matched small, frozen majority |
-| 6271024, 6271026–6271029 | 2026-09-03 | C2 restricted pairing — N=16 with three partners each, released after its smoke passed |
+| 6261670–6261673 | 2026-09-02 | C2 baseline-large — N=16 seeds 2–5 at the full horizon |
+| 6271024, 6271026–6271029 | 2026-09-03 | C2 restricted pairing — N=16 with three partners each |
+| 6279079 | 2026-09-03 | C2 frozen-majority seed 5, resubmitted after the preflight guard tripped |
 
-The first job submitted since 2026-06-23. Seeds 2-5 of each arm are written and
-held until the provenance void conditions are confirmed —
+Finished on 09-02/03 at full length: the twenty C1 replicates (6260359–6260378),
+the three C3 frozen-population arms (6260985–6260987), the four C10 ablations
+(6261085–6261088), C2's four frozen-majority seeds (6261674–6261677) and five
+rate-matched seeds (6261679–6261683), and both environment-likelihood arms
+(6256587–6256588, ~6 h each).
+
+Seeds 2-5 of each environment-likelihood arm remain written and held until the
+provenance void conditions are confirmed —
 [`configs/env_likelihood_bias/README.md`](../configs/env_likelihood_bias/README.md).
 
-The C1 replicates are twenty single-node jobs of 2.5-5.5 h each, queued behind
-the two environment-likelihood arms —
-[`configs/cultural_emergence/c1_small_population_replicates/README.md`](../configs/cultural_emergence/c1_small_population_replicates/README.md).
-
-Forty-six jobs in total, the largest batch since the May campaign. All are
-single-node and inside the 24 h limit; the deepest is C6's 8-agent extension at
-an estimated 10.5 h.
+Fifty jobs went out in total, the largest batch since the May campaign. The C1,
+C3, C10 and C2 rate-matched and frozen-majority families all came in under the
+right-sized limits; only the restricted-pairing arm was mis-sized, and only
+because it was estimated from a smoke rather than a full run.
