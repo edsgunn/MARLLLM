@@ -166,6 +166,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--checkpoint-every', type=int, default=100, help='Checkpoint every N iterations.')
     p.add_argument('--output-dir', default='runs/concordia', help='Log and checkpoint directory.')
     p.add_argument('--resume', action='store_true', help='Resume from latest checkpoint.')
+    p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty coefficient.')
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--grad-accum', type=int, default=8, help='Gradient accumulation steps.')
@@ -205,7 +206,7 @@ def main() -> None:
     primary_agent = agents[agent_names[0]]
     print(f'Building ConcordiaEnv (token_budget={args.token_budget}, max_turns={args.max_env_turns})')
     env = ConcordiaEnv(simulation_factory=scenario_factory, agent_names=agent_names, tokenizer=primary_agent.tokenizer, action_token_budget=args.token_budget, max_turns=args.max_env_turns, reward_fn=reward_fn)
-    config = TrainingConfig(model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=devices[agent_names[0]], seed=args.seed, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
+    config = TrainingConfig(gamma=args.gamma, model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=devices[agent_names[0]], seed=args.seed, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
     tokeniser = TextTokeniser(primary_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

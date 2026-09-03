@@ -171,6 +171,16 @@ class CCSMLoss(Loss):
         if act_mask.any():
             act_returns = returns[act_mask]  # G_t (or the corrected R_t)
 
+            # Keep the raw scale before standardising. Every metric downstream
+            # of this point is a z-score, so without these the pre-normalisation
+            # return — and with it the action term's true weight against the
+            # supervised perception term — is unobservable. It was unobservable
+            # in every run before 2026-09-03.
+            with torch.no_grad():
+                raw_mean = float(act_returns.mean()) if act_returns.numel() else 0.0
+                raw_std = float(act_returns.std()) if act_returns.numel() > 1 else 0.0
+                raw_absmax = (float(act_returns.abs().max())
+                              if act_returns.numel() else 0.0)
             if config.normalise_returns and act_returns.numel() > 1:
                 act_returns = (act_returns - act_returns.mean()) / (act_returns.std() + 1e-8)
 
@@ -299,7 +309,18 @@ class CCSMLoss(Loss):
             "surprise_p95": surp_p95,
             "surprise_max": surp_max,
             "mean_return": act_returns.mean().item() if act_returns.numel() > 0 else 0.0,
+            # NB: post-normalisation, so this is a max |z-score|, not a return.
             "return_abs_max": act_returns.abs().max().item() if act_returns.numel() > 0 else 0.0,
+            # Pre-normalisation scale. `return_norm_gain` is the factor the
+            # standardisation applies, 1/std: it RISES as the returns flatten,
+            # so the action term keeps full weight against the perception term
+            # exactly as the signal it is built from disappears. That is the
+            # quantity to watch if the action term's late damage is a
+            # normalisation artefact rather than a property of the objective.
+            "return_raw_mean": raw_mean,
+            "return_raw_std": raw_std,
+            "return_raw_abs_max": raw_absmax,
+            "return_norm_gain": (1.0 / raw_std) if raw_std > 1e-8 else 0.0,
             "mean_advantage": advantages.mean().item() if advantages.numel() > 0 else 0.0,
             "entropy": entropy.item() if isinstance(entropy, torch.Tensor) else float(entropy),
             "perc_loss": l_perc.item(),

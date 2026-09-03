@@ -51,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--num-checkpoint-traces', type=int, default=4, help='Episode traces saved alongside each checkpoint')
     p.add_argument('--output-dir', default='runs/negotiation', help='Log and checkpoint directory')
     p.add_argument('--resume', action='store_true', help='Resume from latest checkpoint')
+    p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty coefficient')
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--alpha-perc', type=float, default=1.0, help='Weight on the L_perc (NTP) loss term. Set to 0 for the action-only ablation (Phase A condition 4).')
@@ -173,7 +174,7 @@ def main() -> None:
         frozen_agents.append(args.api_partner)
     if frozen_agents and args.shared_weights:
         raise ValueError('--freeze-agent-* is incompatible with --shared-weights: both agents share one parameter set, so freezing one would freeze the other.')
-    config = TrainingConfig(model_name_or_path=model_0, character_prompts={'agent_0': args.prompt_0, 'agent_1': args.prompt_1}, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, output_dir=args.output_dir, device=device_0, seed=args.seed, kl_coef=args.kl_coef, alpha_perc=args.alpha_perc, alpha_act=args.alpha_act, alpha_val=args.alpha_val, frozen_agents=frozen_agents, perception_agents=[a.strip() for a in args.perception_agents.split(',') if a.strip()] if args.perception_agents else [], grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
+    config = TrainingConfig(gamma=args.gamma, model_name_or_path=model_0, character_prompts={'agent_0': args.prompt_0, 'agent_1': args.prompt_1}, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, output_dir=args.output_dir, device=device_0, seed=args.seed, kl_coef=args.kl_coef, alpha_perc=args.alpha_perc, alpha_act=args.alpha_act, alpha_val=args.alpha_val, frozen_agents=frozen_agents, perception_agents=[a.strip() for a in args.perception_agents.split(',') if a.strip()] if args.perception_agents else [], grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
     tokeniser = TextTokeniser(agent_0.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

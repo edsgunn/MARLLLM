@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--checkpoint-every', type=int, default=100, help='Save checkpoint every N iterations')
     p.add_argument('--output-dir', default='runs/default', help='Directory for logs and checkpoints')
     p.add_argument('--resume', action='store_true', help='Resume from latest checkpoint in output-dir')
+    p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty coefficient (0 = disabled)')
     p.add_argument('--seed', type=int, default=42, help='Random seed')
     p.add_argument('--prompt', default='You are a counter that always outputs the next integer in sequence.', help='Character prompt for agent_0')
@@ -46,7 +47,7 @@ def main() -> None:
     from envs.counting_env import CountingEnv
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     log_system_info(args.output_dir, config_path=args.config)
-    config = TrainingConfig(model_name_or_path=args.model, character_prompts={'agent_0': args.prompt}, episodes_per_iter=args.rollouts, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=args.device, seed=args.seed, kl_coef=args.kl_coef)
+    config = TrainingConfig(gamma=args.gamma, model_name_or_path=args.model, character_prompts={'agent_0': args.prompt}, episodes_per_iter=args.rollouts, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=args.device, seed=args.seed, kl_coef=args.kl_coef)
     dtype_map = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}
     torch_dtype = dtype_map.get(args.dtype, 'auto')
     print(f'Loading model: {args.model} on {args.device} (dtype={args.dtype}, device_map={args.device_map})')

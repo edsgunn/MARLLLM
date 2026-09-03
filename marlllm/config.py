@@ -15,7 +15,26 @@ class TrainingConfig:
     )
 
     # CCSM hyperparameters (§9.2 of surprise_minimisation_derivation.md)
-    gamma: float = 0.99       # discount factor for future obs surprise
+    # Discount on future observation surprise, applied POSITIONALLY per token
+    # (the exponent is s-t in the token sequence, gaps included) — see
+    # marlllm/loss.py _compute_returns.
+    #
+    # This is NOT part of the derived objective. surprise_minimisation_derivation.md
+    # introduces it in section 6.2 as variance reduction, "reduces variance at
+    # the cost of bias", over gamma in (0, 1] — so gamma = 1 IS the derived
+    # return and anything below it is a deliberate bias-for-variance trade.
+    #
+    # At 0.99 per token the horizon is 1/(1-gamma) = 100 tokens, against a
+    # post_token_budget of 128-384. The consequence is not a smaller return —
+    # normalise_returns divides the scale out — but a positional one: on a real
+    # 386-token post the future-observation mass at an action token runs from
+    # 2.0 at the first token to 97.1 at the last, a 48x swing, where gamma = 1
+    # gives 2057 flat across the whole post. Credit that should be uniform over
+    # a post is concentrated on its final tokens.
+    #
+    # 0.99 was the hardcoded default for every run before 2026-09-03 and no
+    # config could reach it; it was never a chosen value.
+    gamma: float = 0.99
     beta: float = 0.01        # entropy regularisation coefficient
     alpha_perc: float = 1.0   # weight on L_perc (set to 0 for action-only ablation)
     alpha_act: float = 1.0    # weight on L_act  (set to 0 for perception-only ablation)

@@ -9,8 +9,8 @@ is and how to run it is [`README.md`](README.md). The chronology is
 [`runs/TIMELINE.md`](runs/TIMELINE.md). What we intend to claim in the
 resubmission, and what has to be answered first, is [`REWRITE.md`](REWRITE.md).
 
-Last updated: 2026-09-02 (third update: the environment-likelihood
-experiment, and the first Tier-C submissions).
+Last updated: 2026-09-03 (fourth update: the first Tier-C results, and two
+defects in the implemented objective).
 
 ---
 
@@ -396,15 +396,33 @@ time, because every published analysis evaluates at a fixed iteration.*
   the learners, whose own rates are 0.00–1.00 and 0.25–0.62. `pop/n_frozen` is
   logged every iteration so the denominator is visible. — *established* —
   `runs/cultural_emergence/c3_frozen_population/NOTES.md`
-- 🔶 **Four config keys the code does not read.**
-  `thinking_enabled`; `frozen_agents`, in the negotiation trainer only; the
-  three `alpha_*` weights, never passed by `train_population.py`, so every
-  forum run trained at 1/1/1; and `pairing_strategy`, inert on forum
-  substrates because named-mode binding puts the whole roster in every
-  episode. Each made an experiment *inexpressible* rather than mis-logged, and
-  each was found by trying to write one rather than by reading code. A key
-  audit is owed before any Tier-C scale estimate is trusted. — *established* —
+- 🆕 (2026-09-03) **Six config keys the code does not read**, and the last two
+  are worse than the rest. `thinking_enabled`; `frozen_agents`, in the
+  negotiation trainer only; the three `alpha_*` weights, so every forum run
+  trained at 1/1/1; `pairing_strategy`, inert on forum substrates; and now
+  **`gamma` and `normalise_returns`**, passed by none of the five trainers. The
+  first four made an experiment *inexpressible*; these two silently fixed the
+  objective's shape for every run in the project's history. All six were found
+  by trying to write an experiment rather than by reading code. — *established*
+  — `marlllm/config.py`,
   `configs/cultural_emergence/c2_population_size/README.md`
+- 🆕 (2026-09-03) **The discount is not in the derived objective, and it
+  front-weights credit inside every post by ~48×.** γ=0.99 is applied
+  *positionally per token*, a 100-token horizon against a 128–384-token post.
+  On a real 386-token post the future-observation mass at an action token runs
+  2.0 at the first token to 97.1 at the last; at γ=1 it is 2057, flat.
+  `surprise_minimisation_derivation.md` §6.2 introduces γ only as variance
+  reduction "at the cost of bias", so γ=1 is the derived return. — *established*
+  — `marlllm/loss.py` `_compute_returns`
+- 🆕 (2026-09-03) **Return normalisation is not the free choice it is in RL,
+  because the action term is summed with a supervised one.** In RL only the
+  ordering of advantages matters and scale is absorbed by the learning rate;
+  here `α_perc·L_perc` is in nats while the normalised advantage is in standard
+  deviations, so `α_perc = α_act = 1` sets an exchange rate nobody chose. The
+  gain is 1/std, which *rises* as returns flatten, so the action term holds full
+  weight against perception as its own signal vanishes. — *likely*, from the
+  code and the scale mismatch; `return_norm_gain` is now logged to test it —
+  `marlllm/loss.py`
 
 ### Measurement — what our instruments do and do not show
 

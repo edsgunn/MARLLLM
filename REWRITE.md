@@ -322,6 +322,7 @@ pre-registration; two of the eight overturned a claim already written here.
 | C8 | **The private-prefix correction `I(z; y \| u)`**, pre-registered with falsification conditions in `scripts/tier_b/c7_env_likelihood_bias.py` (dry-run works; scoring pass unimplemented) | GPU, ~2k passes per run | Whether the naive cross-agent substitution is usable as-is |
 | **C9** | **The environment-likelihood experiment.** Two arms on `study_group_ashbourne_gc` with the post tags blanked, so nothing an agent emits is discarded and `p_env` is exact rather than estimated. A logs the term without using it; B trains on the corrected return. Implemented and configured: [`configs/env_likelihood_bias/`](configs/env_likelihood_bias/README.md) | 8-agent runs, 10 configs, seed 1 of each first | How large the dropped term is, whether it changes the update direction, and what the corrected objective does |
 | **C10 — ANSWERED** | **Which term does the damage?** Perception-only (`alpha_act`=0) and action-only (`alpha_perc`=0) on the reference forum population, two seeds each; `run7` is the full-loss cell already on disk, so it is a three-cell dissociation for four runs. The dark-room incentive of §3.5 reaches behaviour through the action term ALONE, so `alpha_act`=0 removes the mechanism rather than a term — this converts the channel-closes-first association (9 of 12 runs) into a causal claim or kills it. Absorption meanwhile is carried by the perception term (`prompt_as_observation` types prompt tokens OBS), so the arm can separate the framework's learning signal from its pathology. The alphas were honoured by the loss but unreachable from a population config until now. Implemented and configured: [`configs/cultural_emergence/c10_term_ablation/`](configs/cultural_emergence/c10_term_ablation/README.md) | 4 runs | §3.5's mechanism, causally; and whether perception-only is a stabilisation rather than only a control |
+| **C11** | **The discount arm.** γ=1 against γ=0.99 on the reference population, two seeds each — the derived return against the one every run in this project actually trained on. γ=1 removes the 48× within-post credit gradient and restores the episode-length horizon; it also raises the raw return scale by ~300×, which `normalise_returns` divides out, so the arm tests the discount rather than the scale. Pair it with a `normalise_returns: false` arm only after the γ arm, since the two interact | 4 runs | Whether front-weighted credit is why the action term damages the policy, and whether the derived objective behaves better than the implemented one |
 
 **Results (2026-09-03).** C1 fired its falsification condition: the N=2/N=4
 corner is seed noise and comes out of the figure
@@ -334,6 +335,43 @@ inconclusive at three runs and needs five seeds per learner
 — both arms breach their provenance condition and logged none of the quantities
 they existed to produce ([NOTES](runs/env_likelihood_bias/NOTES.md)). C2 and C6
 are still running.
+
+### The discount, and the normalisation (2026-09-03)
+
+Two properties of the implemented objective that are not in the derivation and
+were not chosen, found while measuring the environment term.
+
+**γ is applied positionally per token, at 0.99, and no config could set it.**
+The horizon is 1/(1−γ) = 100 tokens against a post budget of 128–384. On a real
+386-token post the future-observation mass at an action token runs from 2.0 at
+the first token to 97.1 at the last — a 48× swing from position alone — where
+γ=1 gives 2057 flat across the post. So credit that the derived objective
+spreads evenly over a post is concentrated on its final tokens, and the reach
+of the "future observation stream" is a quarter of one post rather than the
+episode. `surprise_minimisation_derivation.md` §6.2 introduces γ only as
+variance reduction "at the cost of bias" over γ ∈ (0,1], so **γ=1 is the
+derived return** and 0.99 was a default nobody selected.
+
+This bears on §3.5 directly. The dark-room incentive is real, but its reach is
+~100 tokens, so what it rewards is shortening the *immediately following*
+observation rather than the episode's stream — a narrower and more specific
+mechanism than the paper's wording implies.
+
+**Return normalisation is not the free choice it is in RL.** In RL only the
+ordering of advantages matters and scale is absorbed by the learning rate. Here
+the action term is *summed* with a supervised perception term: `α_perc·L_perc`
+is in nats, the normalised advantage is in standard deviations, and
+`α_perc = α_act = 1` therefore sets an exchange rate that nobody chose and that
+moves with the batch. The gain is 1/std, which **rises as the returns flatten**,
+so the action term retains full weight against perception exactly as the signal
+it is built from disappears — a candidate mechanism for the late entropy
+collapse that C10 pins on the action term. No metric in any run before
+2026-09-03 could see this: `mean_return` is logged after normalisation and is
+≈0 by construction, and `return_abs_max` is a max z-score. `return_raw_std` and
+`return_norm_gain` are now logged.
+
+Both keys are now settable, which makes the obvious arm expressible for the
+first time — see C11.
 
 ### Tier D — dropped, and say so
 
