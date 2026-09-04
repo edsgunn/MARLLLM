@@ -156,6 +156,16 @@ run twice carried the headline (`social_terminal/run03`, `run05`).
    `</post>\n</python>` loop while still emitting a readable post scores as
    healthy. That exact case is why `degenerate` was split in two
    (`_population_figures/trace_verification_iter200.md`).
+
+   **It has happened twice.** The second time was worse, because the metric was
+   not merely blind to the failure but *driven by it*: perception loss is
+   computed over observation tokens, so a population that stops posting makes
+   its own observation stream predictable, `perc_loss` falls through the
+   classifier's `< 1.7` gate, and `alive` rises. At iteration 900 of the
+   extended reference, five well-formed posts in 64 turns scored `alive` 0.62
+   (`runs/cultural_emergence/c6_extended_horizon/NOTES.md`). **Always report
+   the well-formed post rate next to any `alive` figure.** If the two disagree,
+   the traces decide and the metric is wrong.
 4. **Write `NOTES.md`** from `runs/_TEMPLATE_NOTES.md`. Fill in every core
    metric, even where the answer is "not measured" — a visible gap is worth
    more than a silent one.

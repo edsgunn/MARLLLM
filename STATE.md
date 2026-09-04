@@ -303,17 +303,21 @@ time, because every published analysis evaluates at a fixed iteration.*
   the only multi-agent run in the project that does. — *likely*, two runs —
   `runs/social_terminal/run06_8agent_7B_ashbourne_school/NOTES.md`
 
-- 🆕 (2026-09-03b) **The decline bottoms out and reverses.** The 8-agent reference falls
-  to `alive` 0.12 at iteration 400 and recovers to 0.62 by 900, perception loss
-  falling 2.43 → 1.55 throughout. So iteration 200–300, where every
-  population-level claim in this project is drawn, sits near the trough of a
-  non-monotone trajectory. — *likely*, one run with a 12.3% step at the resume
-  boundary — `runs/cultural_emergence/c6_extended_horizon/NOTES.md`
-- 🆕 (2026-09-03b) **Regime recovery and channel decline are separate axes.** Over the same
-  iterations 300–900 the population's `alive` fraction rises while the
-  well-formed post rate falls 0.54 → 0.15, and KL from base keeps climbing
-  1.26 → 2.09. The classifier's inputs can improve while the substrate's actual
-  communication keeps degrading. — *likely* — same
+- 🆕 (2026-09-03b) **`alive` is invalid wherever delivery is low: its dominant input moves
+  with the failure it is meant to detect.** Perception loss is computed over
+  observation tokens, so as agents stop posting the stream becomes
+  deterministic scaffolding and `perc_loss` falls through the classifier's
+  `< 1.7` gate. Within the 8-agent extension, delivery and perception correlate
+  at r = +0.85 while `alive` moves the other way; across ten (run, iteration)
+  points delivery and `alive` correlate at only r = +0.23, and the two
+  references invert — `run7` delivers 56% of turns and scores 0.00, `run8`
+  delivers 27% and scores 0.88. — *established* —
+  `runs/cultural_emergence/c6_extended_horizon/NOTES.md`
+- 🆕 (2026-09-03b) **The extended populations do not recover; they fall silent.** At
+  iteration 900 the 8-agent reference delivers 5 well-formed posts in 64 turns
+  while scoring `alive` 0.62, with four of five "alive" agents posting nothing.
+  Whether the decline bottoms out is unanswered and not answerable with this
+  classifier. — *established* — same
 
 ### Whether populations become *different from each other*
 
@@ -468,6 +472,16 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ### Measurement — what our instruments do and do not show
 
+*Read the first entry before citing any `alive` number.*
+
+- 🆕 (2026-09-03b) **The regime classifier cannot be trusted at low delivery,
+  and this is the second time its inputs have been fooled by the failure they
+  measure.** The first was a policy looping `</post>` while still scoring
+  healthy, which is why `degenerate` was split in two. This one is deeper: the
+  perception input falls *because* agents stop posting. Any population-size or
+  horizon reading drawn off `alive` needs re-checking against the well-formed
+  post rate. C10's and C11's conclusions survive that check; C6's did not. —
+  *established* — `runs/cultural_emergence/c6_extended_horizon/NOTES.md`
 - **Agents within a population are not independent samples.** Perception-loss
   ICC across seeds is 0.56–0.88, a design effect of 4.9–13.7: a 16-agent
   population is worth about 6 independent agents. The population is the unit of

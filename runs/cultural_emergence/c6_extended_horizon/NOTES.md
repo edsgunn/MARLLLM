@@ -18,11 +18,44 @@ decline was visible.
 
 ## Headline
 
-**The decline is not terminal. Both populations bottom out and then partly
-recover** — the 8-agent from `alive` 0.12 at iteration 400 to 0.62 at 900, and
-the 16-agent from 0.00 at 300 to 0.88 at 400 and 0.81 at 600. But the 16-agent
-run **fails its own pre-registered void condition**, so only the 8-agent
-trajectory can carry the claim.
+**The recovery is not real. The populations go quiet, and the regime classifier
+rewards them for it.** At iteration 900 the 8-agent reference scores `alive`
+0.62 while delivering **5 well-formed posts out of 64 turns**. Four of the five
+agents the classifier calls alive deliver **nothing at all**, and the one with
+the *lowest* perception loss in the population — Beatrice Okafor at 0.49 — has
+not posted once.
+
+The mechanism is mechanical. Perception loss is computed over observation
+tokens; as agents stop posting, the observation stream becomes mostly
+deterministic scaffolding, which is trivially predictable, so perception loss
+falls. And `perc_loss < 1.7` is the classifier's primary gate. Within this run,
+delivery and perception loss correlate at **r = +0.85** across iterations
+400–900 while `alive` moves the opposite way:
+
+| iter | delivery | mean perception | alive |
+|---|---|---|---|
+| 400 | 0.422 | 2.34 | 0.12 |
+| 500 | 0.281 | 2.04 | 0.38 |
+| 600 | 0.266 | 1.60 | 0.50 |
+| 700 | 0.234 | 1.44 | 0.62 |
+| 900 | **0.078** | 1.44 | **0.62** |
+
+So the question this family was built to answer — does the decline bottom out —
+**is not answered**. What is answered is that `alive` cannot be used to answer
+it.
+
+## The thread at iteration 900
+
+Thirteen of sixteen turns deliver nothing. One agent emits the `</post>` loop
+this project already documented once:
+
+> 0–4 *(five agents, nothing)*
+> 5 **Sam Pritchard:** "Let's not dwell on the weather—can anyone solve this:
+> prove that the sum of the first n odd numb…"
+> 6 **Priya Shah:** `/n?</post?</?</?</?</?</?</?</?</?</?</?…`
+> 7–12 *(six agents, nothing)*
+> 13 **Sam Pritchard:** "nah, that's more convoluted than necessary…"
+> 14–15 *(nothing)*
 
 ## Core metrics
 
@@ -61,32 +94,30 @@ iterations past the boundary, rather than immediately at it.
 
 ## What this settles
 
-- **The decline bottoms out and reverses on the 8-agent reference.** `alive`
-  falls to 0.12 at iteration 400 and recovers to 0.62 by 900, with perception
-  loss falling 2.43 → 1.55 throughout. — *likely*, one run, 12.3% boundary step
-  — this run
-- **Iteration 200–300 is near the trough, not a plateau.** Every
-  population-level claim in this project is drawn in the worst region of a
-  non-monotone trajectory. That does not make those claims wrong, but it makes
-  the choice of evaluation point load-bearing in a way nobody intended. —
-  *likely* — same
-- **Divergence does not plateau.** KL from base continues to rise, 1.26 → 2.09
-  over iterations 300–900, while the population is recovering — so recovery and
-  drift-from-base are not the same axis. — *likely* — same
+- **`alive` is invalid as a health measure wherever delivery is low**, because
+  its dominant input moves *with* the failure it is meant to detect. Across ten
+  (run, iteration) points the correlation between delivery rate and `alive` is
+  only **r = +0.23**, and the two reference runs invert: `run7` delivers 56% of
+  turns and scores 0.00, `run8` delivers 27% and scores 0.88. — *established* —
+  this run, and `runs/cultural_emergence/c2_population_size/NOTES.md`
+- **The 8-agent population does not recover; it falls silent.** Delivery goes
+  0.42 → 0.08 over iterations 400–900 while KL from base climbs 1.26 → 2.09. —
+  *established* — this run
+- **The 16-agent extension is void twice over** — the 19% boundary step, and
+  now the same silence artefact at 0.156 delivery with `alive` 0.81. —
+  *established* — same
 
 ## What it does not settle
 
-- **The 16-agent trajectory**, which is void by its own criterion. It should be
-  re-run from scratch on current code rather than resumed if the 16-agent
-  recovery is wanted.
-- **Whether the recovery is real or a code artefact.** The honest reading of a
-  12.3% step is that the 8-agent extension is *probably* continuous but not
-  demonstrably so. The clean version is a from-scratch 900-iteration run on
-  current code, which is also what would let the recovery be replicated at more
-  than one seed.
-- **What recovers.** The public channel does **not**: it falls 0.54 → 0.15 on
-  the 8-agent run while `alive` rises. So the regime classifier's recovery and
-  the channel's decline are separate phenomena, and the classifier's inputs
-  (perception, KL, entropy) can improve while the substrate's actual
-  communication keeps degrading. That is worth a closer look than this write-up
-  gives it.
+- **Whether the decline bottoms out.** Unanswered, and not answerable with the
+  current classifier. It needs a health measure whose inputs are not driven by
+  the failure — delivery rate itself is the obvious candidate, and by that
+  measure these runs decline monotonically and never recover.
+- **How far the artefact reaches.** It bites wherever delivery is low, which
+  includes the 16-agent reference at iteration 300 (0.266 delivery, `alive`
+  0.88). Every population-size reading drawn off `alive` needs re-checking
+  against delivery before it is cited. C10's and C11's conclusions are
+  unaffected because both were reported with delivery alongside and the two
+  agree there.
+- **Whether the regime thresholds can be repaired** or whether the perception
+  input has to be conditioned on delivery. Not attempted here.
