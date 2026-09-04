@@ -78,6 +78,7 @@ directories, not jobs — several directories were submitted more than once.
 | 09-03 | The walltime estimate that was wrong | C2's restricted-pairing arm was sized from its 3-iteration smoke (54 s/iter) and given 10 h; steady state is ~150 s/iter, so all five project 9.4–11.1 h against it. Per-iteration cost drifts 3× over a run and the growth is in generation, not the update (`time/rollout_frac` 61% → 77%). A limit cannot be raised once set, so the recovery is `--resume`. Configs re-timed to 19 h; `PROCESS.md` now says never to size from a smoke. |
 | 09-03 | Tier-C analysis ([C1](cultural_emergence/c1_small_population_replicates/NOTES.md), [C3](cultural_emergence/c3_frozen_population/NOTES.md), [C10](cultural_emergence/c10_term_ablation/NOTES.md), [C2 partial](cultural_emergence/c2_population_size/NOTES.md), [C9](env_likelihood_bias/NOTES.md)) | **C10 is the result of the batch:** perception-only ends 300 iterations alive on both seeds with perception loss 2.13 → 0.70 and 61/64 well-formed posts, against 36/64 and eight degenerate agents for the full loss; action-only misses 24–30 of 64 turns. **C1 fired its falsification condition** — the N=2/N=4 corner is seed noise, no metric separates the sizes. **C3 is inconclusive** at three runs. **C9 is void** — both arms breach their provenance condition and logged none of their diagnostics. |
 | 09-03 | The objective's own settings ([C11](../configs/cultural_emergence/c11_discount_normalisation/), [c9 post hoc](_tier_b/c9_post_hoc_env_term/NOTES.md)) | The dropped environment term recovered from arm A's checkpoints: ~43% of the return's magnitude, rank correlation 1.000, so it does not reorder updates. Then two defects in the objective itself. γ=0.99 is applied positionally per token — a 100-token horizon against a 384-token post, giving a 48× within-post credit gradient where the derived γ=1 is flat — and it is variance reduction from §6.2, not part of the derivation. Return normalisation is not free here because the action term is summed with a supervised one, and its 1/std gain rises as returns flatten. Neither key was reachable from any config: dead keys five and six. Both wired; C11 submitted as 6280551/6280553. |
+| 09-03 | C11, C6 and the N=16 reference ([C11](cultural_emergence/c11_discount_normalisation/NOTES.md), [C6](cultural_emergence/c6_extended_horizon/NOTES.md), [C2](cultural_emergence/c2_population_size/NOTES.md)) | **The decline is not terminal**: the 8-agent reference bottoms out at `alive` 0.12 by iteration 400 and recovers to 0.62 by 900, so iteration 200–300 — where every population claim is drawn — sits near the trough. The 16-agent extension is void by its own 15% boundary criterion at 19%. **C11**: γ=1 alone ends at 0.50 against the reference's 0.00, but removing normalisation reaches perception loss 37 with 62 of 64 turns delivering nothing — the arm mis-scaling, exactly as its header predicted, not a test of the derived objective. **The N=16 reference** is now five seeds spanning 0.38–0.88, and the frozen-majority claim read against its single best seed is withdrawn. |
 
 ---
 
@@ -85,24 +86,15 @@ directories, not jobs — several directories were submitted more than once.
 
 | job | started | what |
 |---|---|---|
-| 6260988–6260989 | 2026-09-02 | C6 — reference populations extended to 900 (8-agent) and 600 (16-agent) |
-| 6261670–6261673 | 2026-09-02 | C2 baseline-large — N=16 seeds 2–5 at the full horizon |
-| 6271024, 6271026–6271029 | 2026-09-03 | C2 restricted pairing — N=16 with three partners each |
-| 6279926 | 2026-09-03 | Arm B re-run with the provenance fix; self-gating |
-| 6280551, 6280553 | 2026-09-03 | C11 — γ=1 with and without normalisation, against the reference |
-| 6279079 | 2026-09-03 | C2 frozen-majority seed 5, resubmitted after the preflight guard tripped |
+| 6310961 | 2026-09-03 | The pure surrogate with PopArt — the arm C11's verdict waits on |
+| 6310965 | 2026-09-03 | C2 frozen-majority seed 5, third attempt |
+| 6310968 | 2026-09-03 | Arm B, third attempt, after the guard learned to distinguish its two cases |
+| 6310975, 6310983, 6310988 | 2026-09-03 | C2 restricted pairing seeds 1–3, resumed from 267–298 of 300 |
 
-Finished on 09-02/03 at full length: the twenty C1 replicates (6260359–6260378),
-the three C3 frozen-population arms (6260985–6260987), the four C10 ablations
-(6261085–6261088), C2's four frozen-majority seeds (6261674–6261677) and five
-rate-matched seeds (6261679–6261683), and both environment-likelihood arms
-(6256587–6256588, ~6 h each).
-
-Seeds 2-5 of each environment-likelihood arm remain written and held until the
-provenance void conditions are confirmed —
-[`configs/env_likelihood_bias/README.md`](../configs/env_likelihood_bias/README.md).
-
-Fifty jobs went out in total, the largest batch since the May campaign. The C1,
-C3, C10 and C2 rate-matched and frozen-majority families all came in under the
-right-sized limits; only the restricted-pairing arm was mis-sized, and only
-because it was estimated from a smoke rather than a full run.
+Of the 60 jobs submitted on 09-02/03, 54 reached their configured iteration
+count. Six failed: three on `submit_batch`'s GPU-memory preflight guard, a
+node-cleanup race unrelated to any config; one on a scope bug introduced with
+the raw-return metrics, which crashed a micro-batch containing no action
+tokens; one when the environment-likelihood guard fired correctly but on too
+broad a condition; and one restricted-pairing resume that hit the guard again.
+All six are resubmitted or fixed.

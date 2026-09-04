@@ -7,7 +7,7 @@ finished; the family's question is not yet answerable.***
 |---|---|
 | Configs | [`configs/cultural_emergence/c2_population_size/`](../../../configs/cultural_emergence/c2_population_size/README.md) |
 | Model | `Qwen2.5-7B-Instruct`, LoRA r64 on q_proj/v_proj |
-| Ran to | rate-matched 5/5 and frozen-majority 4/5 at iteration 300; baseline-large and restricted-pairing still running · jobs 6261670–6261683, 6271024–6271029 |
+| Ran to | baseline-large 4/4, rate-matched 5/5, frozen-majority 4/5 at 300; restricted-pairing 2/5 complete, 3 resumed · jobs 6261670–6261683, 6271024–6271029 |
 | **Differs from** | **`run8_16agent_7B_study_group_ashbourne_gc`** (N=16 arms) and **C1's N=4 cell** (small arms) — one manipulation each, named per arm. |
 
 ## What it was for
@@ -20,9 +20,18 @@ count rather than N.
 
 ## Headline
 
-**Nothing yet, by design.** What the two finished arms do show is that the
-*rate-matched* manipulation is benign and the *frozen-majority* one is
-suggestive, and that is as far as two of five arms can go.
+**Still incomplete, but the N=16 reference now exists at five seeds and it
+changes the frozen-majority reading.** Baseline-large gives `alive` at
+iteration 300 of 0.38 / 0.75 / 0.69 / 0.81 across seeds 2–5, with `run8`'s 0.88
+as seed 1 — mean 0.70, range 0.38–0.88. The single-seed reference the
+frozen-majority arm was read against was the *top* of that range, so the
+"learners do better than co-adapting agents" reading is weaker than it looked.
+Restricted pairing, the arm that carries the causal claim, is still incomplete.
+
+Separately: **rate-matched N=4 is the healthiest cell measured anywhere in C2 or
+C1** — `alive` 1.00 at 300 in four of five seeds. Matching per-agent gradient
+volume downward *helps*, which is the direction C10 predicts if the action term
+is what does the damage.
 
 ## Core metrics, the two finished arms
 
@@ -39,7 +48,11 @@ suggestive, and that is as far as two of five arms can go.
 | frozen-majority s2 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 2.37 → 2.19 | 0.012 → 1.32 |
 | frozen-majority s3 | 0.00 | 0.00 | 0.00 | 0.50 | 0.00 | 2.34 → 2.09 | 0.064 → 0.24 |
 | frozen-majority s4 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 2.34 → 2.05 | 0.028 → 0.77 |
-| REF `run8` N=16 | 0.00 | 0.88 | 1.00 | 1.00 | 0.88 | 2.35 → 1.71 | 0.026 → 1.59 |
+| baseline-large s2 | 0.00 | 1.00 | 1.00 | 0.88 | **0.38** | 2.31 → 2.10 | 0.026 → 1.50 |
+| baseline-large s3 | 0.00 | 1.00 | 1.00 | 1.00 | **0.75** | 2.34 → 1.89 | 0.025 → 0.31 |
+| baseline-large s4 | 0.00 | 1.00 | 1.00 | 0.94 | **0.69** | 2.32 → 1.82 | 0.023 → 0.64 |
+| baseline-large s5 | 0.00 | 1.00 | 1.00 | 1.00 | **0.81** | 2.35 → 1.78 | 0.014 → 0.81 |
+| REF `run8` N=16 (seed 1) | 0.00 | 0.88 | 1.00 | 1.00 | 0.88 | 2.35 → 1.71 | 0.026 → 1.59 |
 | REF C1 N=4 s1 | 0.00 | 1.00 | 1.00 | 1.00 | 0.75 | 2.18 → 1.51 | 0.009 → 0.33 |
 
 Well-formed post rate at iteration 300, from `tool_counts_per_agent`. For
@@ -63,11 +76,16 @@ the freeze, not the learners.
   iteration 300. Less training per iteration, less damage — which is the
   direction C10 predicts, since the action term is what does the damage. —
   *likely*, five seeds against five — this arm and C1
-- **A frozen majority's two learners deliver better than `run8`'s sixteen
-  co-adapting agents**, 0.25–0.62 against 0.27, with all four seeds at or above
-  the reference. — *provisional* — the reference is **one** seed, and
-  baseline-large exists precisely to replace it with five. Do not cite this
-  until it does.
+- ~~**A frozen majority's two learners deliver better than `run8`'s sixteen
+  co-adapting agents.**~~ **Weakened by baseline-large.** That comparison used
+  `run8`'s single seed; the five-seed N=16 reference now spans `alive` 0.38–0.88
+  at iteration 300 with `run8` at the top of it. The frozen-majority learners
+  are inside that band rather than above it, so the co-adaptation effect this
+  arm was reaching for is not demonstrated. — *withdrawn as stated* — this arm
+  and baseline-large
+- **The N=16 reference is 0.70 mean, 0.38–0.88 range, at five seeds.** Any
+  future comparison against N=16 has to clear that spread, which the previous
+  single-seed reference concealed. — *established* — baseline-large
 
 ## What it does not settle
 

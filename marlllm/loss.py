@@ -298,6 +298,12 @@ class CCSMLoss(Loss):
                 v_target = act_returns
             l_val = F.mse_loss(act_values, v_target.detach())
         else:
+            # No action tokens in this micro-batch. The raw-return stats below
+            # are computed in the branch above and read unconditionally by the
+            # metrics dict, so they have to exist here too — a batch with no
+            # ACT tokens is rare but real, and it crashed
+            # c2_frozen_majority_seed5 (job 6279079) at iteration ~30.
+            raw_mean = raw_std = raw_absmax = raw_sq_mean = 0.0
             l_act = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
             l_val = torch.tensor(0.0, device=last_hidden.device, dtype=last_hidden.dtype)
             advantages = torch.zeros(0, device=last_hidden.device, dtype=last_hidden.dtype)
@@ -841,7 +847,16 @@ def _env_likelihood_terms(
         # tests/test_env_likelihood.py pins that.
         if getattr(config, "env_likelihood_logging", False):
             m["envlp/env_term_absent"] = 1.0
-        if config.use_env_likelihood_return:
+        # A micro-batch with no observation tokens at all has nothing to
+        # measure, and that is benign: an agent's trajectory legitimately
+        # contains only ACT steps when it received nothing new since its last
+        # turn. Raising on it conflates "there was nothing to measure" with
+        # "the provenance path is broken", which is what killed the arm-B
+        # re-run (job 6279926) three minutes in. Only the second is a fault.
+        has_obs = bool(obs_mask.any())
+        if has_obs and getattr(config, "env_likelihood_logging", False):
+            m["envlp/obs_without_env_term"] = 1.0
+        if config.use_env_likelihood_return and has_obs:
             # This run was configured to TRAIN on the corrected return. Falling
             # back to the surrogate silently is what made arm B a duplicate of
             # arm A without either job failing. A run that cannot compute the
@@ -850,7 +865,9 @@ def _env_likelihood_terms(
                 "use_env_likelihood_return is set but no environment "
                 "log-probabilities reached the loss, so the corrected return "
                 "cannot be computed and training would silently fall back to "
-                "the surrogate. Check that the environment has provenance=True "
+                "the surrogate. This micro-batch HAS observation tokens, so "
+                "there was something to measure and the provenance path did "
+                "not deliver. Check that the environment has provenance=True "
                 "and that its posts resolve (envlp/provenance_misses must be "
                 "0) — see runs/env_likelihood_bias/NOTES.md."
             )

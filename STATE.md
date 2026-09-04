@@ -9,8 +9,7 @@ is and how to run it is [`README.md`](README.md). The chronology is
 [`runs/TIMELINE.md`](runs/TIMELINE.md). What we intend to claim in the
 resubmission, and what has to be answered first, is [`REWRITE.md`](REWRITE.md).
 
-Last updated: 2026-09-03 (fourth update: the first Tier-C results, and two
-defects in the implemented objective).
+Last updated: 2026-09-03 (fifth update: C11, C6, and the N=16 reference).
 
 ---
 
@@ -27,7 +26,7 @@ defects in the implemented objective).
 recent update, 🔶 the update before it, 🔸 the one before that, and unmarked is
 settled. Markers are demoted on every update — see `PROCESS.md`.
 
-The 🔸 generation is the 2026-09-01 back-fill. This document was written
+The 2026-09-01 back-fill has now aged out of the markers. This document was written
 retrospectively that day, so those entries mean specifically: **derived from the
 runs' own metrics during the back-fill, and not stated in any report written at
 the time.** Everything unmarked comes from the analysis reports under
@@ -74,21 +73,21 @@ maximises and what we want are related only by argument.*
   comparable amount.** The published PMI gap bundles both; each carries about
   half the load. — *likely* —
   `runs/cultural_emergence/_pmi_decomposition/REPORT.md`
-- 🔸 **The implemented return rewards shortening the observation
+- **The implemented return rewards shortening the observation
   stream, and its behavioural signature is now measured.** `G_t` sums surprise
   over *future observation tokens*, so its magnitude depends on how many follow
   as much as on how surprising each is. The fraction of turns delivering a
   well-formed public post falls in **63 of 65 runs** — on the reference
   population from 99% to 28%, with 28% of turns delivering nothing at all. —
   *established* — `runs/_tier_b/b4_public_channel/NOTES.md`
-- 🔸 **`p_env` is not a black box in this substrate class, but
+- **`p_env` is not a black box in this substrate class, but
   restoring it is not free.** Observation-token provenance resolves at 100% —
   every post appears as a contiguous token span in every other agent's context —
   so the dropped term is measurable. The producing agent's own tokenisation is
   *not* the receiver's, so its stored log-probs do not align: restoring the term
   costs a forward pass per agent per episode, not a lookup. — *established* —
   `runs/_tier_b/b5_env_likelihood/NOTES.md`
-- 🆕 (2026-09-03) **The experiment built to measure the dropped environment
+- 🔶 **The experiment built to measure the dropped environment
   term measured nothing, because no-tag mode stripped the generation while the
   provenance matcher required the unstripped decode.** Any surrounding
   whitespace missed, so no observation token carried `ln p_env`; and because
@@ -96,42 +95,42 @@ maximises and what we want are related only by argument.*
   trained on the surrogate** and is a duplicate of arm A. Fixed, with
   regression tests; both arms need re-running. — *established* —
   `runs/env_likelihood_bias/NOTES.md`
-- 🆕 (2026-09-03) **A run can declare an objective it is not training on.**
+- 🔶 **A run can declare an objective it is not training on.**
   Nothing in six hours of either arm's output said the corrected return was
   unavailable — the signal was an *absence* of `envlp/*` keys. The path now
   raises instead. Worth assuming other declared-but-unused settings exist,
   alongside the four keys the code never read. — *established* — same
-- 🔸 **The environment conditional is observer-independent under
+- **The environment conditional is observer-independent under
   full observability.** An agent's own persona and private deliberation are
   conditionally independent of what other agents emit, given the public thread,
   so every observer of a post shares one `p_env`. The correction is a property of
   the *generator's* turn, computed once per post rather than once per
   (post, observer) pair. — *established* (derivation) —
   `environment_likelihood_derivation.md`
-- 🔸 **The single adjustment needed is the mutual information
+- **The single adjustment needed is the mutual information
   between the generator's private prefix and its public post.** Exact pointwise
   identity; non-negative; zero when the generator emits no private tokens; and
   bounded above by the term currently being dropped, so substituting the
   generator's log-probs is never worse than dropping and is *exact* early in
   training. — *established* (derivation), unmeasured — same
-- 🔸 **The committed-vs-coherent absorption contrast is
+- **The committed-vs-coherent absorption contrast is
   horizon-sensitive.** Intact at +0.160 on the Inner Loop seed replication, whose
   window ends before any decline; falls from +0.199 to +0.024 on the
   cross-environment pool when measurements taken during decline are dropped. The
   seed replication is the citable one. — *likely* —
   `runs/_tier_b/b7_absorption_horizon/NOTES.md`
-- 🆕 (2026-09-03) **The perception term does the learning and the action term does the
+- 🔶 **The perception term does the learning and the action term does the
   damage, and the separation is total on the reference substrate.**
   Perception-only ends 300 iterations with `alive` 1.00 on both seeds,
   perception loss 2.13 → 0.70, entropy intact and 61 of 64 turns delivering a
   well-formed post; the full loss manages 36 of 64 with all eight agents
   degenerate. — *established* — `runs/cultural_emergence/c10_term_ablation/NOTES.md`
-- 🆕 (2026-09-03) **The dark-room incentive is causal, not merely associated with the
+- 🔶 **The dark-room incentive is causal, not merely associated with the
   decline.** It reaches behaviour through the action term alone, and removing
   that term removes both the channel closure and the population failure.
   Isolating it instead — action-only — misses 24 to 30 of 64 turns entirely and
   drives perception loss to 4.2, above base. — *established* — same
-- 🆕 (2026-09-03) **Perception-only is a candidate stabilisation, not yet a result.** It
+- 🔶 **Perception-only is a candidate stabilisation, not yet a result.** It
   moves the policy about six times less than the full loss (KL 0.22 against
   1.32), matching Phase A, so it is not vacuous — but whether it still *absorbs*
   needs the PMI scoring pass, which has not run. Until then it could be
@@ -140,6 +139,19 @@ maximises and what we want are related only by argument.*
   any threshold: on the cleanest subset a linear model in KL beats a step model
   on R², AIC and leave-one-out error. — *established* —
   `runs/cultural_emergence/_regime_threshold_sweep_3d/REBUTTAL_NOTES.md`
+
+- 🆕 (2026-09-03b) **Removing the discount alone helps survival; removing the
+  normalisation destroys the run.** γ=1 with normalisation kept ends at `alive`
+  0.50 where the reference ends at 0.00. γ=1 without it reaches perception loss
+  **37**, entropy 0.00, and 62 of 64 turns delivering nothing — the pure
+  dark-room outcome, worse than C10's action-only arm. — *provisional*, one
+  seed each — `runs/cultural_emergence/c11_discount_normalisation/NOTES.md`
+- 🆕 (2026-09-03b) **The un-normalised arms test the arm mis-scaling, not the derived
+  objective.** At γ=1 the raw return is ~2300 against a perception loss of
+  ~1.4, so the action arm enters the summed loss ~1600× larger and the run is
+  action-only in all but name. This was predicted in the config headers before
+  submission. Whether the derived objective trains with a *working* baseline is
+  open until the PopArt arm reports. — *established* — same
 
 ### The substrate — what a world must be for anything to run at all
 
@@ -217,7 +229,7 @@ measurement downstream is void.*
   character sheet.** With rosters held fixed across seeds, Fleiss κ ≈ 0. The
   reproducible object is the population-level composition. — *established* —
   `runs/cultural_emergence/_seed_replicate_regimes/SUMMARY.md`
-- 🔸 **What a population becomes depends strongly on the base
+- **What a population becomes depends strongly on the base
   model.** At matched iterations on one substrate with identical regularisation,
   **no Qwen3-4B or Qwen3-8B agent ever reaches KL ≥ 1 from base**, where 27 of
   182 Qwen2.5-7B agents do; mean drift is 6–14× lower and the populations are
@@ -229,22 +241,33 @@ measurement downstream is void.*
   mode is entropy collapse rather than text degeneration. — *likely* —
   `runs/cultural_emergence/run11_16agent_7B_study_group_ashbourne_gc_2turns/NOTES.md`
 
-- 🆕 (2026-09-03) **The N=2 and N=4 cells of the population-size figure are seed noise.**
+- 🔶 **The N=2 and N=4 cells of the population-size figure are seed noise.**
   Five seeds a side: within-cell spread of `alive` is 0.44 against between-cell
   gaps of 0.20 and 0.35 at iteration 200, and 1.00 against 0.05 and 0.15 at 300.
   No continuous metric separates the sizes (all p ≥ 0.15, exact
   Mann-Whitney). The pre-registered falsification condition fired. —
   *established* —
   `runs/cultural_emergence/c1_small_population_replicates/NOTES.md`
-- 🆕 (2026-09-03) **Two published cell readings were seed artefacts.** "Dead from iteration
+- 🔶 **Two published cell readings were seed artefacts.** "Dead from iteration
   150 onward" for 2-agent Strathearn becomes 0.50–1.00 alive at 150 across five
   seeds. — *established* — same
-- 🆕 (2026-09-03) **A single agent minimising surprise against a frozen population can
+- 🔶 **A single agent minimising surprise against a frozen population can
   still collapse completely**, so co-adaptation is not necessary for the
   failure. Whether it is *sufficient* is unresolved: three learners span 0.00 to
   1.00 well-formed delivery against a co-adapting reference of 0.56. —
   *likely* for the necessity half, *inconclusive* for the rest —
   `runs/cultural_emergence/c3_frozen_population/NOTES.md`
+
+- 🆕 (2026-09-03b) **The N=16 reference spans `alive` 0.38–0.88 at iteration 300 across
+  five seeds**, mean 0.70, where it was previously a single run at 0.88 — the
+  top of the range. Comparisons drawn against that single seed were comparing
+  against the best case. — *established* —
+  `runs/cultural_emergence/c2_population_size/NOTES.md`
+- 🆕 (2026-09-03b) **Matching per-agent gradient volume downward at N=4 gives the healthiest
+  cell measured anywhere in C1 or C2**: `alive` 1.00 at iteration 300 in four of
+  five seeds, against 0.65 mean for unmatched N=4 and 0.70 for N=16. Less
+  training per iteration, less damage — the direction C10 predicts. — *likely*,
+  five seeds — same
 
 ### Training horizon — what happens if you keep going
 
@@ -270,7 +293,7 @@ time, because every published analysis evaluates at a fixed iteration.*
   100% alive across four seed replicates that stop at iteration 150, and 50%
   alive in the one run that continued to 300. — *established* —
   `runs/cultural_emergence/run7_8agent_7B_margin_notes/NOTES.md`
-- 🔸 **The public channel closes long before the regime classifier
+- **The public channel closes long before the regime classifier
   registers anything** — by up to 200 iterations. On the reference population the
   channel is already half shut at iteration 200 while the alive fraction still
   reads 1.00. The taxonomy is a lagging indicator of this failure. — *likely* —
@@ -279,6 +302,18 @@ time, because every published analysis evaluates at a fixed iteration.*
   that reached iteration 300 ended alive, and one improved between 200 and 300 —
   the only multi-agent run in the project that does. — *likely*, two runs —
   `runs/social_terminal/run06_8agent_7B_ashbourne_school/NOTES.md`
+
+- 🆕 (2026-09-03b) **The decline bottoms out and reverses.** The 8-agent reference falls
+  to `alive` 0.12 at iteration 400 and recovers to 0.62 by 900, perception loss
+  falling 2.43 → 1.55 throughout. So iteration 200–300, where every
+  population-level claim in this project is drawn, sits near the trough of a
+  non-monotone trajectory. — *likely*, one run with a 12.3% step at the resume
+  boundary — `runs/cultural_emergence/c6_extended_horizon/NOTES.md`
+- 🆕 (2026-09-03b) **Regime recovery and channel decline are separate axes.** Over the same
+  iterations 300–900 the population's `alive` fraction rises while the
+  well-formed post rate falls 0.54 → 0.15, and KL from base keeps climbing
+  1.26 → 2.09. The classifier's inputs can improve while the substrate's actual
+  communication keeps degrading. — *likely* — same
 
 ### Whether populations become *different from each other*
 
@@ -301,7 +336,7 @@ time, because every published analysis evaluates at a fixed iteration.*
   and per-character contribution correlates +0.55 with the agent's own entropy
   deficit. The claim was replicated on three datasets and was still wrong. —
   *established* — `runs/cultural_emergence/_diagnostics_d2d3/REPORT.md`
-- 🔸 **The divergence is not an artefact of collapsed adapters, but
+- **The divergence is not an artefact of collapsed adapters, but
   the pooled magnitudes are inflated where failure regimes are present.**
   Restricting to characters alive in both populations changes the end-of-training
   policy distance by 0–5% on Inner Loop and Ashbourne and by **−45% on Margin
@@ -377,26 +412,26 @@ time, because every published analysis evaluates at a fixed iteration.*
   the Instruct model, confounding the prompt-swap diagnostic the design turned
   on. This is why every config needs a `STATUS:` line. — *established* —
   `runs/phase_a_substrate_validation/02_ccsm_focal_competitive/NOTES.md`
-- 🔶 **Asking for the 24 h maximum was costing more queue time
+- 🔸 **Asking for the 24 h maximum was costing more queue time
   than it saved.** Forty-six jobs at the `workq` cap reserved 1,080 node-hours
   for about 250 hours of work, making all of them unbackfillable; limits
   estimated from each reference run's own p90 per-iteration cost cut the
   reservation 60% with a 1.5× margin still in hand. Per-iteration cost is
   stable enough to plan from — 47 s at N=2 to 111 s at N=16 on 4 × GH200. —
   *established* — `PROCESS.md`, "Ask for the walltime the run needs"
-- 🆕 (2026-09-03) **Counting non-empty thread text overstates the public channel by up to
+- 🔶 **Counting non-empty thread text overstates the public channel by up to
   a factor of two.** An unclosed `<post>` block still has its text extracted
   onto the thread, so only `tool_counts_per_agent`'s `post_success` measures
   what B4's claim is about — on `run8` at iteration 300 the two read 0.27 and
   0.80. Using the proxy hid the frozen-majority effect entirely. — *established*
   — `runs/cultural_emergence/c2_population_size/NOTES.md`
-- 🆕 (2026-09-03) **A population-mean metric is meaningless when most of the population is
+- 🔶 **A population-mean metric is meaningless when most of the population is
   frozen.** With 7 of 8 or 14 of 16 members frozen at base, the population
   post-success rate is the freeze fraction — 0.88, 0.94 — and says nothing about
   the learners, whose own rates are 0.00–1.00 and 0.25–0.62. `pop/n_frozen` is
   logged every iteration so the denominator is visible. — *established* —
   `runs/cultural_emergence/c3_frozen_population/NOTES.md`
-- 🆕 (2026-09-03) **Six config keys the code does not read**, and the last two
+- 🔶 **Six config keys the code does not read**, and the last two
   are worse than the rest. `thinking_enabled`; `frozen_agents`, in the
   negotiation trainer only; the three `alpha_*` weights, so every forum run
   trained at 1/1/1; `pairing_strategy`, inert on forum substrates; and now
@@ -406,14 +441,14 @@ time, because every published analysis evaluates at a fixed iteration.*
   by trying to write an experiment rather than by reading code. — *established*
   — `marlllm/config.py`,
   `configs/cultural_emergence/c2_population_size/README.md`
-- 🆕 (2026-09-03) **The dropped environment term is large but does not change
+- 🔶 **The dropped environment term is large but does not change
   the update ordering.** Recovered post hoc from arm A's checkpoints: ~43% of
   the return's magnitude at four checkpoints, rank correlation 1.000 throughout,
   because a post is 6–36% less surprising per token to its author than to its
   readers so the correction is same-signed and smaller. That margin narrows
   toward parity over training. — *likely* —
   `runs/_tier_b/c9_post_hoc_env_term/NOTES.md`
-- 🆕 (2026-09-03) **The discount is not in the derived objective, and it
+- 🔶 **The discount is not in the derived objective, and it
   front-weights credit inside every post by ~48×.** γ=0.99 is applied
   *positionally per token*, a 100-token horizon against a 128–384-token post.
   On a real 386-token post the future-observation mass at an action token runs
@@ -421,7 +456,7 @@ time, because every published analysis evaluates at a fixed iteration.*
   `surprise_minimisation_derivation.md` §6.2 introduces γ only as variance
   reduction "at the cost of bias", so γ=1 is the derived return. — *established*
   — `marlllm/loss.py` `_compute_returns`
-- 🆕 (2026-09-03) **Return normalisation is not the free choice it is in RL,
+- 🔶 **Return normalisation is not the free choice it is in RL,
   because the action term is summed with a supervised one.** In RL only the
   ordering of advantages matters and scale is absorbed by the learning rate;
   here `α_perc·L_perc` is in nats while the normalised advantage is in standard
@@ -447,7 +482,7 @@ time, because every published analysis evaluates at a fixed iteration.*
   Ashbourne GC, both above the 2.0 cut, against 1.35 on Inner Loop — a spread
   wider than the gap between the two thresholds. — *established* —
   `runs/_tier_b/b3_substrate_relative_regimes/NOTES.md`
-- 🔸 **Half of all regime labels move if the perception cut is
+- **Half of all regime labels move if the perception cut is
   anchored to the substrate instead of fixed.** 40 of 79 runs read as 0% alive at
   iteration 25 under the absolute cuts against 17 of 79 under relative ones. Which
   convention is right is open; that the choice is load-bearing is not. —
@@ -458,19 +493,19 @@ time, because every published analysis evaluates at a fixed iteration.*
   agents in `policy_collapse`. A population can get better at predicting itself
   by becoming deterministic. — *established* —
   `runs/cultural_emergence/run10_2agent_7B_study_group_ashbourne_gc/NOTES.md`
-- 🔶 **`thinking_enabled` is a dead config key.** No code reads it,
+- 🔸 **`thinking_enabled` is a dead config key.** No code reads it,
   in the env or the trainer, and 86 configs set it — including the run billed as
   "Qwen3-8B with native thinking". The forum env always extracts `<post>`, so
   the private channel exists by construction whatever the key says. Native
   thinking, where it happens, comes from the chat template via
   `marlllm/context_formatter.py`, not from this. — *established* —
   `scripts/build_migration_configs.py` line 41 records the same fact
-- 🔸 **`thinking_frac` measures the environment's private channel
+- **`thinking_frac` measures the environment's private channel
   correctly, and its name is wrong twice over.** It includes `<python>`, which is
   *public* — 68–80% of early non-post tokens on the two tool substrates — and it
   cannot distinguish deliberation from a post the agent wrote and failed to tag.
   — *established* — `runs/_tier_b/b6_token_accounting/NOTES.md`
-- 🔸 **Structural tag compliance decays over training, and the
+- **Structural tag compliance decays over training, and the
   environment discards what falls outside a tag.** `<post>` opens per close go
   1.7 → 87; late `post_missing` turns include agents writing in the substrate's
   own pinned format without wrapping it. Nothing in the objective rewards a
@@ -499,22 +534,18 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ## What we are running
 
-Thirty-six of the fifty jobs submitted on 2026-09-02 have finished at their full
-iteration count. What is left:
+The 2026-09-02/03 batch has finished: 54 of 60 jobs reached their configured
+iteration count. What is left is a resubmission queue.
 
 | job | config | what it is for |
 |---|---|---|
-| 6260988–6260989 | [`c6_extended_horizon/`](configs/cultural_emergence/c6_extended_horizon/README.md) | C6: the 8- and 16-agent reference populations resumed past iteration 300, to 900 and 600. |
-| 6261670–6261673 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 baseline-large: N=16 seeds 2–5 at the full 300-iteration horizon. |
-| 6271024, 6271026–6271029 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 restricted pairing: N=16 with three partners each, the arm that makes the population-size claim causal. |
-| 6279079 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 frozen-majority seed 5, resubmitted after a node-cleanup race tripped the GPU-memory preflight guard. |
-| 6279926 | [`env_likelihood_bias/`](configs/env_likelihood_bias/README.md) | Arm B re-run with the provenance fix. Now self-gating: it raises rather than falling back if the corrected return cannot be computed. |
-| 6280551, 6280553, 6284325, 6284688 | [`c11_discount_normalisation/`](configs/cultural_emergence/c11_discount_normalisation/) | C11: γ=1 with normalisation, γ=1 without, the pure surrogate — the derived objective with all three variance-reduction departures removed — and the same with PopArt, which lets the baseline fit the raw return. The derived return against the one every run in this project actually trained on — the highest-priority open question, because if the discount or the normalisation is behaviourally decisive then the population results are measuring an objective nobody chose. |
+| 6310961 | [`c11_discount_normalisation/`](configs/cultural_emergence/c11_discount_normalisation/) | The pure surrogate with PopArt — whether the derived objective trains once the baseline can fit it. The arm C11's verdict is currently waiting on. |
+| 6310965 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 frozen-majority seed 5, third attempt. |
+| 6310968 | [`env_likelihood_bias/`](configs/env_likelihood_bias/README.md) | Arm B, third attempt, after the guard was taught to distinguish "nothing to measure" from "provenance broken". |
+| 6310975, 6310983, 6310988 | [`c2_population_size/`](configs/cultural_emergence/c2_population_size/README.md) | C2 restricted pairing seeds 1–3, resumed from checkpoints after hitting a wall at 267–298 of 300. |
 
 Each family's README carries what it changes, what it predicts and what would
-falsify it, written before submission. **None of the finished runs has been
-analysed yet** — no `NOTES.md`, no regime table, no traces read — so nothing
-below has moved on their account.
+falsify it, written before submission.
 
 ---
 

@@ -111,6 +111,28 @@ def test_the_component_losses_are_still_reported_when_switched_off():
         assert k in m, f"{k} is not reported"
 
 
+def test_a_batch_with_no_action_tokens_does_not_crash():
+    """Regression: the raw-return stats are computed inside `if act_mask.any()`
+    but read unconditionally by the metrics dict, so an all-observation
+    micro-batch raised UnboundLocalError. It killed
+    c2_frozen_majority_seed5 (job 6279079) ~30 minutes in."""
+    torch.manual_seed(0)
+    B, T, H, V = 2, 10, 16, 32
+    ids = torch.randint(0, V, (B, T))
+    tm = torch.full((B, T), OBS)          # not one ACT token
+    am = torch.zeros((B, T), dtype=torch.long)
+    trunk, lm_head, vhead = nn.Linear(H, H), nn.Linear(H, V), ValueHead(H)
+    hidden = trunk(torch.randn(B, T, H))
+    loss, m = CCSMLoss().compute_loss(
+        last_hidden=hidden, lm_head=lm_head, values=vhead(hidden.detach()),
+        input_ids=ids, token_type_mask=tm, agent_id_mask=am,
+        target_agent_idx=0, config=TrainingConfig())
+    assert m["act_loss"] == 0.0 and m["return_raw_mean"] == 0.0
+    assert m["value_loss"] == 0.0
+    for k in ("return_raw_std", "return_norm_gain", "popart/batch_mean"):
+        assert k in m, f"{k} missing on the no-action path"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
