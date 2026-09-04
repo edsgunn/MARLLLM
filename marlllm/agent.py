@@ -395,6 +395,25 @@ class ValueHead(nn.Module):
         # value in the return's units.
         return self.linear(hidden_states).squeeze(-1)  # (B, T)
 
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """Tolerate checkpoints written before PopArt existed.
+
+        Adding the four running-moment buffers made every earlier checkpoint
+        unloadable — `load_state_dict` reports them as missing keys and raises,
+        which breaks resume as well as any analysis over old checkpoints. A
+        checkpoint from before PopArt legitimately has no moments; the right
+        behaviour is to keep the freshly-initialised ones, which have
+        popart_ready = 0 so the first update seeds them from the batch.
+
+        Only the PopArt buffers are filled in. Any other missing or unexpected
+        key still surfaces as it did.
+        """
+        for name in ("popart_mu", "popart_nu", "popart_sigma", "popart_ready"):
+            key = prefix + name
+            if key not in state_dict:
+                state_dict[key] = getattr(self, name).detach().clone()
+        return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
     def denormalise(self, v_norm: torch.Tensor) -> torch.Tensor:
         """Normalised value -> the return's own scale."""
         if not self.popart:

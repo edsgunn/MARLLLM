@@ -116,6 +116,39 @@ def test_off_by_default_is_a_plain_head():
     assert TrainingConfig().popart is False
 
 
+def test_pre_popart_checkpoints_still_load():
+    """Regression: adding the four running-moment buffers made every earlier
+    checkpoint unloadable, which breaks resume as well as analysis over old
+    checkpoints. It killed job 6312471 and would have killed three queued
+    restricted-pairing resumes."""
+    old_sd = {"linear.weight": torch.randn(1, 8), "linear.bias": torch.zeros(1)}
+    for popart in (False, True):
+        h = ValueHead(8, popart=popart)
+        h.load_state_dict(dict(old_sd))              # must not raise
+        assert torch.equal(h.linear.weight, old_sd["linear.weight"])
+        assert float(h.popart_ready) == 0.0, "should seed on the first update"
+
+
+def test_a_genuinely_missing_key_still_raises():
+    """The tolerance is for the PopArt buffers only."""
+    h = ValueHead(8)
+    try:
+        h.load_state_dict({"linear.weight": torch.randn(1, 8)})   # no bias
+    except RuntimeError as e:
+        assert "linear.bias" in str(e)
+    else:
+        raise AssertionError("a real missing key was silently tolerated")
+
+
+def test_popart_state_round_trips():
+    a = ValueHead(8, popart=True)
+    a.popart_update(2300.0, 2300.0 ** 2 + 500.0 ** 2)
+    b = ValueHead(8, popart=True)
+    b.load_state_dict(a.state_dict())
+    assert torch.equal(a.popart_sigma, b.popart_sigma)
+    assert torch.equal(a.popart_mu, b.popart_mu)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
