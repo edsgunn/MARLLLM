@@ -474,6 +474,20 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 *Read the first entry before citing any `alive` number.*
 
+- 🆕 (2026-09-03b) **Measuring perception loss on post content only does not
+  repair the classifier — predictability is simply the wrong target.** Content
+  is *more* predictable than scaffolding at 12 of 13 checkpoints, and
+  content-only loss is lowest where delivery is lowest (0.78 nats/token at
+  delivery 0.234), because a degenerate `</?` loop is content and is maximally
+  predictable — at iteration 900 one such post is 82% of everything delivered.
+  Any loss over a stream the agents control can be reduced by emitting less or
+  by emitting something trivially repetitive. — *established* —
+  `runs/_tier_b/content_perception/NOTES.md`
+- 🆕 (2026-09-03b) **The environment's framing is not deterministic**, because
+  it carries the speaker's name — which of eight agents posts next is the least
+  predictable thing in the stream. Scaffolding NLL runs 1.8–2.7, above content
+  almost everywhere. Any future token split has to account for that rather than
+  treat framing as free. — *established* — same
 - 🆕 (2026-09-03b) **The regime classifier cannot be trusted at low delivery,
   and this is the second time its inputs have been fooled by the failure they
   measure.** The first was a policy looping `</post>` while still scoring

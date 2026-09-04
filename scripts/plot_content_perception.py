@@ -63,8 +63,8 @@ def main():
             label="all observation tokens  (this is `perc_loss`)")
     ax.axhline(PERC_COHERENT, color="k", ls=":", lw=1.2)
     ax.annotate("classifier's coherence gate, perc_loss < 1.7",
-                xy=(it[0], PERC_COHERENT), xytext=(4, 5),
-                textcoords="offset points", fontsize=8)
+                xy=(it[-1], PERC_COHERENT), xytext=(-6, -14),
+                textcoords="offset points", fontsize=8, ha="right")
     ax.set_ylabel("negative log-likelihood (nats/token)")
     ax.set_title("Perception loss is two different quantities averaged together")
     ax.legend(frameon=False, fontsize=9)
@@ -86,9 +86,11 @@ def main():
     for ax in axes:
         if boundary:
             ax.axvline(boundary, color="grey", ls="--", lw=1, alpha=0.7)
-    axes[0].annotate("resume boundary\n(run7 → extension)", xy=(boundary, axes[0].get_ylim()[1]),
-                     xytext=(6, -28), textcoords="offset points",
-                     fontsize=8, color="grey") if boundary else None
+    if boundary:
+        axes[0].annotate("resume boundary\n(run7 → extension)",
+                         xy=(boundary, axes[0].get_ylim()[0]),
+                         xytext=(6, 8), textcoords="offset points",
+                         fontsize=8, color="grey")
 
     fig.suptitle("What falls when `perc_loss` falls — 8-agent Ashbourne reference",
                  y=0.995, fontsize=12)
