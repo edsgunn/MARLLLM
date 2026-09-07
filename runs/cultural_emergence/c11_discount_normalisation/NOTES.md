@@ -22,12 +22,26 @@ from any config before 2026-09-03.
 
 ## Headline
 
-**The discount is a real but secondary effect; the normalisation is load-bearing
-only because the two arms are badly mis-scaled.** γ=1 with normalisation kept
-ends at `alive` 0.50 where the reference ends at 0.00 — a genuine improvement
-from removing the within-post credit gradient. Removing normalisation instead
-**destroys the run**: perception loss reaches **37**, entropy **0.00**, and
-every agent emits nothing at all.
+**PopArt fixed the baseline completely and rescued nothing.** With it, the value
+head's loss falls from 486,932 to **3.6** after one update and stays O(10) for
+300 iterations; without it the same run's value loss *diverges* to
+**145,106,008**. A seven-million-fold improvement in the fit — and the run still
+ends with perception loss 39.6, entropy 0.00 and 7 well-formed posts in 64
+turns.
+
+That result is informative precisely because the mechanism worked. **The scale
+mismatch is not a baseline problem.** Even a perfectly fitted baseline leaves an
+advantage on the order of the return's *spread*, which PopArt measures directly
+as σ = 1552 by iteration 300 — so the action arm still enters the summed loss
+~1000× larger than the perception arm. Fixing what the baseline predicts does
+not change the scale of what is left over.
+
+**And γ=1 does not help after all.** The earlier version of this write-up said
+it did, on `alive` 0.50 against the reference's 0.00. By well-formed post rate —
+the measure `alive` has since been shown unable to carry
+(`runs/cultural_emergence/c6_extended_horizon/NOTES.md`) — it is **0.50 against
+the reference's 0.56**, i.e. no improvement and possibly slightly worse. That
+claim is withdrawn.
 
 ## Core metrics
 
@@ -65,27 +79,39 @@ observable form, and it is *worse* than C10's action-only arm (24–30 missing o
 > **Hana Yilmaz:** hey sam, iz anyone else bored of the same-old-same-old?…
 > **Priya Shah:** `?", ?</?`
 
+## Did PopArt work? Two separate questions, two answers
+
+| | with PopArt | without |
+|---|---|---|
+| value loss, iteration 1 | 486,932 | 419,047 |
+| value loss, iteration 100 | **14.2** | 1,542,080 |
+| value loss, iteration 300 | **20.8** | **145,106,008** |
+| perception loss @300 | 39.60 | 37.18 |
+| entropy @300 | 0.00 | 0.00 |
+| well-formed posts @300 | 7/64 | 0/64 |
+
+PopArt's own state tracks a genuinely moving target: μ 697 → 861 and
+**σ 344 → 1552** over 300 iterations. The return's scale grows 4.5×, which is
+the non-stationarity that motivated the whole question — and confirms that a
+per-batch standardisation was papering over something real rather than nothing.
+
 ## What this settles
 
-- **The un-normalised arms are not a test of the derived objective.** The
-  prediction written in their headers before submission was that at γ=1 the raw
-  return is ~2300 against a perception loss of ~1.4, so the action arm enters
-  the summed loss ~1600× larger, making it an action-only run in all but name.
-  That is exactly what happened, and more severely than C10's action-only arm
-  because γ=1 enlarges the return a further ~300×. — *established* — this family
-  against `runs/cultural_emergence/c10_term_ablation/NOTES.md`
-- **The arm denominator is irrelevant once the scale mismatch dominates.**
-  Pure surrogate (obs denominator) and γ=1-no-norm (act denominator) differ by
-  nothing that matters: perception 37.18 vs 37.92, 62 vs 58 missing turns. —
-  *established* — same
-- **Removing the discount alone helps survival.** `alive` 0.50 at iteration 300
-  against the reference's 0.00, with perception, entropy and channel otherwise
-  comparable. The 48× within-post credit gradient is doing some damage, but it
-  is not the main driver. — *provisional*, one seed — same
-- **Normalisation is currently load-bearing, and that is a statement about the
-  mismatch rather than a vindication.** With the arms mis-scaled by ~1600×,
-  standardising the return is the only thing holding the action term to a
-  comparable magnitude. — *likely* — same
+- **PopArt does what it claims.** The value head goes from diverging by eight
+  orders of magnitude to a stable O(10) loss, with the value kept in the
+  return's own units. — *established* — this arm against the same config
+  without it
+- **A working baseline is not sufficient to make the derived objective
+  trainable.** Both pure-surrogate arms end degenerate; the one with a fitted
+  baseline delivers 7 posts of 64 instead of 0, which is not a rescue. — *established* — same
+- **The scale mismatch is an arm-weighting problem, not a baseline problem.**
+  The advantage's scale is the return's spread (σ = 1552), which a baseline
+  centres but cannot shrink. Any fix has to change the *relative weight* of the
+  two arms — normalisation, an `alpha_act` set against the raw scale, or a
+  return expressed as a mean in nats rather than a sum. — *established* — same
+- ~~**Removing the discount alone helps survival.**~~ **Withdrawn.** It rested
+  on `alive`; by delivery it is 0.50 against the reference's 0.56. — *withdrawn*
+  — this arm
 
 ## What it does not settle
 

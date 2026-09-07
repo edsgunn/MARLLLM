@@ -1,4 +1,8 @@
-# STATUS: RESUBMITTED 2026-09-03 after the provenance fix. The first attempt
+# STATUS: HELD after three failures (6256588 void, 6279926 and 6310968 both
+# died in ~3 min on the environment-likelihood guard). Do NOT resubmit without
+# instrumenting observation_segments first — the guard has localised the fault
+# to it returning empty for some agents' observation steps, and further blind
+# attempts are no longer informative. See runs/env_likelihood_bias/NOTES.md.
 # (job 6256588) is void — it silently trained on the uncorrected surrogate
 # because no-tag mode stripped the generation while the provenance matcher
 # required the unstripped decode, so env_log_probs never arrived. Its data is

@@ -51,6 +51,36 @@ condition for trusting any of it fails.
 |---|---|---|---|---|---|---|
 | mean | 40 | 122 | 201 | 286 | 376 | 466 |
 
+## Three failures, and where it now is (2026-09-03)
+
+Arm B has now failed three times and **should not be resubmitted again without
+instrumentation**. Each failure was different and each narrowed it:
+
+| job | outcome | what it told us |
+|---|---|---|
+| 6256588 | ran 6 h, void | trained on the surrogate silently; no guard existed |
+| 6279926 | died 3 m | the guard fired, but on too broad a condition — a micro-batch with no observation tokens is benign |
+| 6310968 | died 3 m | the guard fired on the **narrow** condition: observation tokens present, no environment log-probs |
+
+So the strip fix below is necessary and not sufficient. The narrow guard
+localises the fault: for at least one agent's micro-batch, every observation
+step returned `None` from `_env_log_probs_for_obs`, which happens only when
+`observation_segments` comes back empty. Verified locally that it does *not*
+come back empty on a fresh two-post episode, so the trigger is something about
+the real run — eight agents, DDP across four ranks, vLLM sampling — that a
+single-process replay does not reproduce.
+
+**The next step is a counter, not a job.** Log how often
+`observation_segments` returns empty and for which agent and turn index, run
+three iterations, and read it. Three-minute crashes are cheap but they have
+stopped being informative.
+
+Note also the separate, unfixed defect below: provenance does not resolve in
+*tagged* mode at all. That does not affect these runs, which are no-tag, but it
+means `provenance: true` is a no-op on every tagged substrate — and it has now
+blocked two other analyses (the content/scaffolding split had to be built
+without it).
+
 ## Root cause, found 2026-09-03
 
 **One line, and it is not a logging bug.**

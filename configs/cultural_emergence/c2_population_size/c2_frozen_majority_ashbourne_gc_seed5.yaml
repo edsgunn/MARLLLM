@@ -1,4 +1,6 @@
-# STATUS: QUEUED as job 6279079 on 2026-09-03. First attempt (6261678) died
+# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6310965
+# on 2026-09-04, in 02:10:49. Analysed in
+# runs/cultural_emergence/c2_population_size/NOTES.md (family-level).
 # after 63s on submit_batch's own preflight guard: the node had 549 MiB of a
 # previous tenant's GPU memory still held against its 500 MiB threshold. A
 # node-cleanup race, nothing to do with this config.
