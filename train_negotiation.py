@@ -56,6 +56,10 @@ def parse_args() -> argparse.Namespace:
                    help="Fit the value head to the RAW return even under --normalise-returns, so the baseline can absorb the level of the return rather than regressing onto a z-score. Badly conditioned on large returns; see marlllm/config.py.")
     p.add_argument('--action-loss-denominator', choices=['act', 'obs'], default='act',
                    help="Denominator for the action arm mean. Use obs for the perception arm denominator, restoring the derivation 1:1 weighting; act is the historical default and multiplies the action arm by N_obs/N_act.")
+    p.add_argument('--return-sign', type=float, default=1.0,
+                   help="Sign of the return. +1 minimises future observation "
+                        "surprise, the framework's objective; -1 maximises it, "
+                        "which is novelty search. See marlllm/config.py.")
     p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty coefficient')
     p.add_argument('--seed', type=int, default=42)
@@ -179,7 +183,7 @@ def main() -> None:
         frozen_agents.append(args.api_partner)
     if frozen_agents and args.shared_weights:
         raise ValueError('--freeze-agent-* is incompatible with --shared-weights: both agents share one parameter set, so freezing one would freeze the other.')
-    config = TrainingConfig(gamma=args.gamma, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=model_0, character_prompts={'agent_0': args.prompt_0, 'agent_1': args.prompt_1}, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, output_dir=args.output_dir, device=device_0, seed=args.seed, kl_coef=args.kl_coef, alpha_perc=args.alpha_perc, alpha_act=args.alpha_act, alpha_val=args.alpha_val, frozen_agents=frozen_agents, perception_agents=[a.strip() for a in args.perception_agents.split(',') if a.strip()] if args.perception_agents else [], grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
+    config = TrainingConfig(gamma=args.gamma, return_sign=args.return_sign, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=model_0, character_prompts={'agent_0': args.prompt_0, 'agent_1': args.prompt_1}, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, output_dir=args.output_dir, device=device_0, seed=args.seed, kl_coef=args.kl_coef, alpha_perc=args.alpha_perc, alpha_act=args.alpha_act, alpha_val=args.alpha_val, frozen_agents=frozen_agents, perception_agents=[a.strip() for a in args.perception_agents.split(',') if a.strip()] if args.perception_agents else [], grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules)
     tokeniser = TextTokeniser(agent_0.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

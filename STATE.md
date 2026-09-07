@@ -589,8 +589,12 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ## What we are running
 
-**Nothing.** The 2026-09-02/04 batch is complete: 60 of 66 jobs reached their
-configured iteration count, and every family has a write-up.
+| job | config | what it is for |
+|---|---|---|
+| 6383538, 6383539 | [`c13_novelty_search/`](configs/cultural_emergence/c13_novelty_search/) | C13: `return_sign` −1, maximising future observation surprise instead of minimising it, two seeds. The only change from the reference is the sign, so it is the most direct available test of whether the dark-room failure is the return's direction. |
+
+Everything else from the 2026-09-02/04 batch is complete: 60 of 66 jobs reached
+their configured iteration count, and every family has a write-up.
 
 One config is **held** rather than queued:
 [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md)

@@ -129,6 +129,12 @@ class CCSMLoss(Loss):
         returns = _compute_returns(
             surprises, token_type_mask, config.gamma, seq_ids=seq_ids
         )
+        # Novelty search: -1 pushes the policy toward MORE future surprise
+        # instead of less. Applied to the return itself so everything
+        # downstream — baseline, standardisation, advantage — follows from it.
+        _sign = float(getattr(config, "return_sign", 1.0))
+        if _sign != 1.0:
+            returns = returns * _sign
 
         obs_mask = token_type_mask == int(TokenType.OBS)
         if perception_source_indices is not None and len(perception_source_indices) > 0:
@@ -371,6 +377,7 @@ class CCSMLoss(Loss):
             # computed against.
             "popart/batch_mean": raw_mean,
             "popart/batch_sq_mean": raw_sq_mean,
+            "return_sign": _sign,
             "return_raw_mean": raw_mean,
             "return_raw_std": raw_std,
             "return_raw_abs_max": raw_absmax,

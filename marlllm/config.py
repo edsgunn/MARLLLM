@@ -68,6 +68,23 @@ class TrainingConfig:
     #
     # Supersedes value_target_raw when both are set — PopArt already keeps the
     # value in the return's units.
+    # Sign of the return. +1 is the framework: G_t is future observation
+    # surprise and the advantage is -(G_t - V), so the policy is pushed toward
+    # actions that make the future LESS surprising. -1 flips it, and the policy
+    # is pushed toward actions that make the future MORE surprising.
+    #
+    # That is novelty search / curiosity-driven exploration: the perception arm
+    # still learns to predict the observation stream while the action arm now
+    # acts to make it unpredictable. The two arms therefore pull against each
+    # other by construction, which is the point rather than a defect — it is
+    # the standard intrinsic-motivation setup, and it is the sharpest available
+    # test of whether the dark-room failure is really the return's sign.
+    #
+    # The flip is applied to the return itself, so the value head fits the
+    # negated return and remains a correct baseline, and standardisation (which
+    # is sign-preserving) passes it through unchanged.
+    return_sign: float = 1.0
+
     popart: bool = False
     popart_beta: float = 3e-4   # EMA rate for the running target moments
 

@@ -60,6 +60,10 @@ def parse_args() -> argparse.Namespace:
                    help="Fit the value head to the RAW return even under --normalise-returns, so the baseline can absorb the level of the return rather than regressing onto a z-score. Badly conditioned on large returns; see marlllm/config.py.")
     p.add_argument('--action-loss-denominator', choices=['act', 'obs'], default='act',
                    help="Denominator for the action arm mean. Use obs for the perception arm denominator, restoring the derivation 1:1 weighting; act is the historical default and multiplies the action arm by N_obs/N_act.")
+    p.add_argument('--return-sign', type=float, default=1.0,
+                   help="Sign of the return. +1 minimises future observation "
+                        "surprise, the framework's objective; -1 maximises it, "
+                        "which is novelty search. See marlllm/config.py.")
     p.add_argument('--gamma', type=float, default=0.99, help='Discount on future observation surprise, applied positionally per token. 1.0 is the derived objective; below that trades variance for bias and front-weights credit within a post (see marlllm/config.py).')
     p.add_argument('--kl-coef', type=float, default=0.0, help='KL penalty weight λ * KL(π_θ || π_ref) at action positions. 0 = disabled.  Use a small positive value (0.02–0.1) to prevent catastrophic forgetting between stages.')
     p.add_argument('--grad-accum', type=int, default=4)
@@ -165,7 +169,7 @@ def main() -> None:
                 if args.compile:
                     agents[aid]._backbone = torch.compile(agents[aid]._backbone)
                 print(f'  {aid}: independent weights')
-    config = TrainingConfig(gamma=args.gamma, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts={aid: prompts.get(aid, '') for aid in agents}, episodes_per_iter=args.rollouts, num_iterations=args.iters, max_episode_tokens=args.max_episode_tokens, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=device, seed=args.seed, temperature=args.temperature, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha)
+    config = TrainingConfig(gamma=args.gamma, return_sign=args.return_sign, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts={aid: prompts.get(aid, '') for aid in agents}, episodes_per_iter=args.rollouts, num_iterations=args.iters, max_episode_tokens=args.max_episode_tokens, lr=args.lr, log_every=args.log_every, checkpoint_every=args.checkpoint_every, output_dir=args.output_dir, device=device, seed=args.seed, temperature=args.temperature, kl_coef=args.kl_coef, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, lora_r=args.lora_r, lora_alpha=args.lora_alpha)
     tokeniser = TextTokeniser(primary_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()
