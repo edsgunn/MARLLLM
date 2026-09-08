@@ -1,0 +1,131 @@
+# STATUS: QUEUED as job 6397842 on 2026-09-04.
+#
+# C13b — NOVELTY SEARCH ON A TOOL SUBSTRATE. Seed 2.
+#
+# WHAT THIS CHANGES
+#   Against runs/cultural_emergence/run7_8agent_7B_margin_notes:
+#   return_sign 1.0 -> -1.0, and nothing else. margin_notes with
+#   python_tool_enabled, 8 agents, same hyperparameters and horizon.
+#
+# WHY A TOOL SUBSTRATE IS THE SHARPER TEST
+#   The reference ABANDONS THE TOOL. Python calls per checkpoint go
+#   48 -> 34 -> 14 -> 0 across iterations 25/100/200/300, and the well-formed
+#   post rate goes 0.98 -> 0.34 alongside it. By iteration 300 the population
+#   has stopped calling python entirely.
+#
+#   There is a mechanism for that, and it is the same one as the dark room. A
+#   python call produces a pybot post: extra observation tokens whose content
+#   is the output of code that has not been run yet, so it is among the least
+#   predictable things in the substrate. Under surprise MINIMISATION the tool
+#   is therefore expensive, and abandoning it is rational. Under maximisation it
+#   should be the single best move available.
+#
+#   So this substrate turns the dark-room hypothesis into a prediction about a
+#   capability rather than about token counts, which is what the framework
+#   ultimately has to deliver.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether reversing the sign keeps the tool alive. Predicted: python calls
+#   stay non-zero at iteration 300 where the reference reaches 0, and the
+#   success rate does not collapse.
+#
+#   Read on the tool counters and the post rate, NOT on `alive` — that metric
+#   has reversed several readings and cannot be trusted at low delivery
+#   (runs/cultural_emergence/c6_extended_horizon/NOTES.md).
+#
+# WHAT WOULD FALSIFY THE DARK-ROOM READING OF TOOL ABANDONMENT
+#   Calls reaching zero here too. Tool abandonment would then not be about the
+#   return's direction — it would be the substrate, the tag protocol, or the
+#   action term's mere presence, and the mechanism above is wrong.
+#
+# THE DEGENERATE OUTCOME, AND HOW TO TELL
+#   Maximising surprise has a cheap solution here as well: spam calls whose
+#   output is arbitrary, `print(random.random())` and the like. That would show
+#   as a HIGH call count with a low success rate or near-identical code blocks.
+#   Call count alone cannot separate "using the tool" from "farming noise", so
+#   the traces' python blocks have to be read before this is reported. The
+#   same caveat caught the text substrate's seed 1
+#   (runs/cultural_emergence/c13_novelty_search/NOTES.md).
+#
+# WHAT WOULD VOID THE RUN
+#   Fewer than 300 iterations, or <agent>/return_sign not -1.0 in
+#   metrics.jsonl.
+#
+name: c13_novelty_margin_notes_8agent_seed2
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "14:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+# Memory-tuned for vLLM + DDP co-location on 4 × GH200 (95 GB each):
+#   - lora_modules: q,v only (~5x less LoRA than all-7-projection default)
+#   - use_8bit_adam: bitsandbytes AdamW8bit (halves Adam state)
+#   - vllm_quantization: fp8 (halves vLLM weight memory ~17 GB → ~9 GB)
+use_vllm: true
+vllm_gpu_mem_util: 0.20
+vllm_max_num_seqs: 4
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Renata Solberg
+- Kai Dempsey
+- Mei-Lin Park
+- Devon Aguirre
+- Yusuf Bashir
+- Cass Yamamoto
+- Henrietta 'Henri' Voss
+- Ravi Krishnamurthy
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 42
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+
+# --- rollout pathway: pinned to match the reference run ---
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+# --- the only change: maximise surprise instead of minimising it ---
+return_sign: -1.0
+
+environments:
+- name: margin_notes
+  type: forum
+  characters: inner_loop
+  environment: margin_notes
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+  # The env always runs in tag-extraction mode now: <post> and <python>
+  # are the only "doing-anything" regions, everything else is private
+  # thinking. Tag defaults are fine, no need to override.
+  python_tool_enabled: true
+  python_timeout_seconds: 5.0
+  python_output_max_chars: 2000
+output_dir: runs/cultural_emergence/c13_novelty_search/c13_novelty_margin_notes_8agent_seed2
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

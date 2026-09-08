@@ -89,6 +89,36 @@ Against the reference at the same iteration:
   reference's 0.80, which is the predicted direction for an objective that
   rewards unpredictable futures. — *likely* — this family
 
+## The tool substrate, submitted 2026-09-04
+
+Two seeds of the same manipulation on `margin_notes`, which has
+`python_tool_enabled` — jobs 6397841 and 6397842. It is the sharper test,
+because the reference **abandons the tool**:
+
+| iter | python calls | successes | success rate | post rate |
+|---:|---:|---:|---:|---:|
+| 25 | 48 | 32 | 0.67 | 0.98 |
+| 100 | 34 | 16 | 0.47 | 0.98 |
+| 200 | 14 | 10 | 0.71 | 0.64 |
+| 300 | **0** | 0 | — | 0.34 |
+
+By iteration 300 the population has stopped calling python entirely. And there
+is a mechanism for it that is the dark room again: a python call produces a
+`pybot` post, whose content is the output of code that has not been run, so it
+is among the least predictable things in the substrate. Under minimisation the
+tool is expensive; under maximisation it should be the best move available.
+
+That turns the hypothesis into a prediction about a **capability** rather than
+about token counts, which is what the framework ultimately has to deliver.
+Predicted: calls stay non-zero at iteration 300. Falsified if they reach zero
+here too, in which case abandonment is not about the return's direction.
+
+The degenerate outcome to check for is call-spamming —
+`print(random.random())` and the like — which would show as a high call count
+with a low success rate or near-identical code blocks. **The python blocks have
+to be read before this is reported**, for the same reason seed 1 above needed
+reading: the counter cannot separate using the tool from farming noise.
+
 ## What it does not settle
 
 - **Which seed is representative.** The two differ more than either differs

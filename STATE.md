@@ -604,8 +604,11 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ## What we are running
 
-**Nothing.** Every family has a write-up. One config is **held** rather than
-queued: [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md)
+| job | config | what it is for |
+|---|---|---|
+| 6397841, 6397842 | [`c13_novelty_search/`](configs/cultural_emergence/c13_novelty_search/) | C13b: novelty search on `margin_notes`, a tool substrate. The reference abandons python entirely by iteration 300 (48 → 34 → 14 → 0 calls); this asks whether reversing the return's sign keeps a *capability* alive rather than just token counts. |
+
+One config is **held** rather than queued: [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md)
 has failed three times and must not be resubmitted before
 `observation_segments` is instrumented.
 
