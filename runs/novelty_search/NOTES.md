@@ -7,9 +7,11 @@ as Tier-C item C13; now its own line of experiments.*
 |  |  |
 |---|---|
 | Configs | [`configs/novelty_search/`](../../configs/novelty_search/) |
-| Model | `Qwen2.5-7B-Instruct`, LoRA r64, 8 agents on `study_group_ashbourne_gc` |
-| Ran to | iteration 300 of 300, both · 2h58m and 4h13m |
-| **Differs from** | **`run7_8agent_7B_study_group_ashbourne_gc`** — `return_sign` −1.0. Verified field by field as the only difference. |
+| Model | `Qwen2.5-7B-Instruct`, LoRA r64 |
+| Arms | `study_group_ashbourne_gc` at N = 2, 4, 8, 16 (2 seeds each) and `margin_notes` at N = 8 (2 seeds) |
+| Analysed | 10 of 12 arms · the N=16 seed 2 and `margin_notes` seed 2 were still running on 2026-09-08 |
+| Scripts | [`analyse_novelty_size.py`](../../scripts/analyse_novelty_size.py), [`analyse_novelty_traces.py`](../../scripts/analyse_novelty_traces.py) |
+| **Differs from** | each arm from **its own reference run at the same N** — `return_sign` −1.0 and nothing else. Verified field by field. |
 
 ## What it was for
 
@@ -29,6 +31,32 @@ math-bearing and posts *shorter* than the reference's.
 
 **But delivery still declines in both.** 1.00 → 0.67 and 1.00 → 0.39 across 300
 iterations. The sign matters and it is not the whole story.
+
+### What the 2026-09-08 arms add
+
+**The one thing the sign does reliably, at every size, is raise policy
+entropy.** Seven of seven arms across N = 2, 4, 8 and 16 end above their own
+same-N reference, by 0.16–0.78 nats against a same-seed noise floor of 0.007 —
+while the references *lose* entropy at three of four sizes. Nothing else in this
+project moves entropy that reliably: in the 20-cell regularisation grid no value
+of `beta` produced a small increase at all, and the KL anchor only ever
+suppressed one.
+
+**Population size does nothing here either.** Delivery against N gives
+ρ = −0.073, p = 0.869 — the pre-registered falsifier for "size matters under
+maximisation". The outcome is instead **seed-dominated**: two N=2 runs differing
+only in seed end at delivery 0.926 and 0.325.
+
+**And the highest delivery in the sweep is an artefact.** That 0.926 is a
+two-agent population locked into a 52-character repetition loop. It is the
+fourth metric artefact in this campaign, and the first to hit *delivery* — the
+measure that had survived the other three. Delivery is necessary, not
+sufficient.
+
+**On the tool substrate the sign keeps the capability without reopening the
+channel**: 2.35× the python calls at iteration 300 (52.2/iter against 22.2), at
+an unchanged success rate and with real varied code — while 7 of 16 turns in the
+same episode still deliver nothing. One seed.
 
 ## Delivery, and what the posts contain
 
@@ -90,6 +118,42 @@ Against the reference at the same iteration:
   reference's 0.80, which is the predicted direction for an objective that
   rewards unpredictable futures. — *likely* — this family
 
+### Added 2026-09-08, from the size sweep and the tool substrate
+
+- **The return's sign raises policy entropy at every population size.** 7 of 7
+  arms sit above their own same-N reference, by 0.16–0.78 against a same-seed
+  noise floor of 0.007; references lose entropy at 3 of 4 sizes and novelty
+  arms essentially never do. — *established* — this family vs run10/run7/run8,
+  `scripts/analyse_novelty_size.py`
+- **Population size does not determine the outcome under maximisation either.**
+  Delivery against N gives ρ = −0.073, p = 0.869, and the within-N seed spread
+  (0.601 at N=2) accounts for the entire between-N range. The pre-registered
+  falsifier for "size matters under maximisation" fired. — *established*,
+  7 arms over 4 sizes — same
+- **Under maximisation the outcome is seed-dominated.** Two N=2 runs differing
+  only in seed end at delivery 0.926 and 0.325, 3.5× the rig's delivery noise
+  floor. — *established* — same
+- **Delivery is necessary but not sufficient, and this is the fourth metric
+  artefact.** A two-agent population that locks into a short mutually
+  predictable exchange scores delivery 0.926 on 52-character posts with 38%
+  near-duplicates. Degeneration into `</?` loops cannot raise delivery, because
+  those fail to close their tags; degeneration into a *short well-formed loop*
+  can. Always report a repetition measure beside a delivery figure. —
+  *established*, one direct demonstration plus its own reference behaving worse
+  — same, and `scripts/analyse_novelty_traces.py`
+- **The sign flip keeps the python tool alive without reopening the channel.**
+  52.2 calls per iteration at iteration 300 against the reference's 22.2, at an
+  unchanged success rate (0.53 vs 0.53) and with real, varied, non-duplicated
+  code — while 7 of 16 turns in the same episode still deliver nothing. —
+  *provisional*, one seed — this family vs `run7_8agent_7B_margin_notes`
+- **Trace files hold one episode of sixteen rollouts.** Every trace-derived
+  figure in this project is n = 1 episode unless stated otherwise; this is what
+  produced the tool substrate's overstated "calls reach zero" premise. —
+  *established* — same
+- **The within-speaker repetition measures are structurally biased by N**, since
+  posts per speaker is `max_posts`/N — undefined at N=16, one pair at N=8. Use
+  `thread_sim` across sizes. — *established* — same
+
 ## The tool substrate, submitted 2026-09-04
 
 Two seeds of the same manipulation on `margin_notes`, which has
@@ -119,6 +183,84 @@ The degenerate outcome to check for is call-spamming —
 with a low success rate or near-identical code blocks. **The python blocks have
 to be read before this is reported**, for the same reason seed 1 above needed
 reading: the counter cannot separate using the tool from farming noise.
+
+### Tool substrate results, 2026-09-08 — seed 1 only
+
+Seed 1 (6398717) finished at 300 iterations with `return_sign` −1.0 on all
+eight agents. **Seed 2 (6398719) was still running** at 215 iterations, so
+everything here is **one seed**.
+
+#### The prediction was right: the tool stays alive
+
+Population-level python calls per iteration, ±12-iteration windows:
+
+| iteration | 25 | 50 | 100 | 150 | 200 | 250 | 300 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| reference (+1) | 142.2 | 123.4 | 110.9 | 102.6 | 73.2 | 37.4 | **22.2** |
+| novelty (−1) | 130.3 | 109.7 | 89.2 | 86.7 | 76.4 | 67.2 | **52.2** |
+
+**2.35× the tool use at iteration 300**, and a much shallower decline — −60%
+against the reference's −84%. The header predicted "calls stay non-zero at
+iteration 300 where the reference reaches 0", and the direction holds.
+
+**The success rate is unchanged**, 0.53 against 0.53 at iteration 300 and
+flat at 0.57–0.64 throughout in both arms. So the extra calls are not
+lower-quality ones: the arm is not buying call count with failures.
+
+Delivery also holds up better — **0.555 against 0.383** — though both are far
+down from ~0.96 early.
+
+An incidental one: **unclosed python blocks**. The reference spikes to
+13.2 per iteration at iteration 150 and 10.3 at 200; the novelty arm stays at
+0.5–2.0 throughout. Whatever breaks the reference's tool protocol mid-run does
+not happen here.
+
+#### The pre-registered degenerate check passes
+
+The header required this before reporting: *"Maximising surprise has a cheap
+solution here as well: spam calls whose output is arbitrary,
+`print(random.random())` and the like. That would show as a HIGH call count with
+a low success rate or near-identical code blocks."*
+
+Reading the `pybot` records (1:1 with actual calls) in the traced episode at
+iteration 300: **5 calls, 4 unique, 100% success**, and the code is a genuine
+progression over one topic rather than noise —
+
+```
+a = [0,1,2,3,4,5];  print(a[:3])        -> [0, 1, 2]
+b = ['a','b','c','d'];  print(b[1:3])   -> ['b', 'c']
+c = range(5);  print(list(c[2:4]))      -> [2, 3]
+d = [1,2,3,4,5];  print(d[1:4])         -> [2, 3, 4]
+e = ['x','y','z'];  print(e[1:])        -> ['y', 'z']   (slice end omitted)
+```
+
+Five different slicing forms, each with real output, and the posts around them
+cross-reference each other by name ("Henri, Cass mentioned slicing lists.
+Renata and Kai noted similarity"). One of the five is a verbatim repeat of an
+earlier call in the same episode. **This is not noise-farming.**
+
+#### But the channel still closes, and the protocol still breaks
+
+In the same episode, **7 of 16 turns produced no post at all** — all thinking,
+no public output, discarding 194–2103 characters of it each time. Three more
+posts are under 20 characters (`Ren?!`, `I noticed?`, `?`). And one post leaks
+the chat template outright, emitting a literal `assistant` role token followed
+by a duplicated `<post>` block.
+
+So the sign flip **keeps the capability without reopening the channel.** That
+is a narrower result than "novelty search fixes tool abandonment", and it is
+the one the data supports.
+
+#### A correction to this section's own premise
+
+The header stated that the reference "ABANDONS THE TOOL … By iteration 300 the
+population has stopped calling python entirely", from calls going
+48 → 34 → 14 → **0**. That zero is a **one-episode artefact**: the traced
+episode at iteration 300 does have 0 calls, but the population averages
+**22.2 calls per iteration** at that point. The reference reduces tool use by
+84%; it does not abandon it. The result above survives the correction — 52.2
+against 22.2 is still 2.35× — but the premise was overstated, by exactly the
+n = 1 trace-sampling limit found in the size sweep.
 
 ## The population-size sweep, submitted 2026-09-08
 
@@ -159,6 +301,123 @@ either differs from its reference on post content — 4 of 53 math-bearing
 against 41 of 46 — so any size trend has to clear that spread before it is a
 trend.
 
+### Results, 2026-09-08 — seven of eight arms in
+
+Void conditions checked for all: 300 iterations and `return_sign` = −1.0 on
+every agent. `novelty_size_16agent_…_seed2` (6398727) was **still running** at
+analysis time and is excluded, so N=16 is one seed. Read with
+[`scripts/analyse_novelty_size.py`](../../scripts/analyse_novelty_size.py) and
+[`scripts/analyse_novelty_traces.py`](../../scripts/analyse_novelty_traces.py).
+
+| N | run | deliv 1–25 | deliv end | Δ entropy | perc end | Δ perc |
+|---:|---|---:|---:|---:|---:|---:|
+| 2 | reference (+1) | 0.987 | 0.641 | −0.45 | 1.27 | −1.25 |
+| 2 | novelty s1 | 0.983 | **0.926** | −0.12 | 1.49 | −1.01 |
+| 2 | novelty s2 | 0.986 | 0.325 | +0.07 | 1.43 | −1.05 |
+| 4 | reference (+1) | 0.987 | 0.138 | −0.39 | 1.31 | −0.89 |
+| 4 | novelty s1 | 0.987 | 0.225 | −0.08 | 1.96 | −0.22 |
+| 4 | novelty s2 | 0.989 | 0.651 | +0.39 | 1.86 | −0.34 |
+| 8 | reference (+1) | 0.980 | 0.525 | +0.06 | 2.29 | +0.12 |
+| 8 | novelty s1 | 0.984 | 0.638 | +0.22 | 2.41 | +0.24 |
+| 8 | novelty s2 | 0.983 | 0.455 | +0.23 | 1.71 | −0.46 |
+| 16 | reference (+1) | 0.978 | 0.368 | −0.27 | 1.71 | −0.63 |
+| 16 | novelty s1 | 0.981 | 0.617 | +0.03 | 2.44 | +0.07 |
+
+#### The pre-registered falsifier fired
+
+The configs said: *"WHAT WOULD FALSIFY 'SIZE MATTERS UNDER MAXIMISATION':
+delivery flat across N=2, 4, 8 and 16, as it is under minimisation."*
+
+It is flat. Delivery against N across the novelty arms gives ρ = −0.073,
+p = 0.869. And the **within-N seed spread swamps everything**: 0.601 at N=2
+(0.926 vs 0.325), 0.426 at N=4, 0.183 at N=8, against a between-N range of
+0.225–0.926 that those spreads entirely account for. **Population size does not
+determine the outcome under maximisation either** — the same verdict C2 reached
+under minimisation, now from the other direction.
+
+What the sweep did find is that the outcome is **seed-dominated**. At N=2 two
+runs differing only in seed end at 0.926 and 0.325 — 3.5× the rig's 0.173
+delivery noise floor, so the spread is real and it is not measurement.
+
+#### The one clean result: the sign raises entropy at every size
+
+| N | reference Δ entropy | novelty Δ entropy | both above ref? |
+|---:|---:|---|---|
+| 2 | −0.45 | −0.12, +0.07 | 2/2 |
+| 4 | −0.39 | −0.08, +0.39 | 2/2 |
+| 8 | +0.06 | +0.22, +0.23 | 2/2 |
+| 16 | −0.27 | +0.03 | 1/1 |
+
+**7 of 7 novelty arms have Δentropy above their own reference at the same N.**
+MWU exact p = 0.042 pooled; at the level of independent sizes it is 4 of 4,
+which alone is only p = 0.125 by sign test. What makes it solid is not the
+p-value but the **effect size against the noise floor**: the gaps are 0.16–0.78
+where two runs of one identical config at one seed differ by **0.007**
+(`../cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/NOTES.md`). Every one
+of the seven comparisons is 20–100× the noise.
+
+And the direction is asymmetric: **references lose entropy at 3 of 4 sizes**
+(−0.45, −0.39, −0.27) while only 1 of 7 novelty arms loses more than 0.12.
+Minimisation collapses the policy distribution; maximisation prevents that
+collapse. This is the same effect seen in the regularisation grid, where
+*no* value of `beta` produced a small entropy increase and the KL anchor only
+ever suppressed one — the return's sign moves entropy roughly four times as far
+as any safe `beta` does.
+
+#### The N=2 delivery of 0.926 is a repetition loop, not an open channel
+
+This is the highest late delivery of any full-loss run in the project and it
+**must not be cited as one.** The traced episode at iteration 300 is 16
+well-formed posts averaging **52 characters**, of which 38% near-duplicate an
+earlier post by the same speaker:
+
+```
+[2]  Tom:   ↪ priya: n=0: nC0=1, nC1=0.  n=0 base?
+[4]  Tom:   ↪ priya: n=0: nC0=1, nC1=0.  n=1: nC1=1, nC2=0.  both cases?
+[6]  Tom:   ↪ priya: n=0: nC0=1, nC1=0.  n=1: nC1=1, nC2=0.  Base covered.
+[8]  Tom:   ↪ Priya: n=0: nC0=1, nC1=0.  n=1: nC1=1, nC2=0.  Base cases checked.
+[10] Tom:   ↪ Priya: n=0: nC0=1, nC1=0.  n=1: nC1=1, nC2=0.  Base cases n=0,1 checked.
+[12] Tom:   ↪ Priya: n=0: nC0=1, nC1=0.  n=1: nC1=1, nC2=0.  Base cases n=0,1 check.
+```
+
+Two posts also leak the protocol into content (`Both*)&lt;/post>`,
+`n=n'<post>`). **The loop is a property of N=2, not of the sign** — the N=2
+reference is worse on every repetition measure at iteration 300 (thread
+similarity 0.53 vs 0.44, within-speaker repeat 0.62 vs 0.38, tag leakage 0.44
+vs 0.12) — but that makes the delivery figure uninterpretable rather than good.
+
+**This is the fourth metric artefact in this campaign, and it qualifies the one
+metric that had survived the previous three.** The 09-03 reading called delivery
+"the one measure neither silence nor degeneration can move the wrong way". That
+is true of degeneration into `</?` loops, which fail to close their tags and so
+fail the delivery counter. It is **not** true of degeneration into a short,
+mutually-predictable exchange: those posts are well-formed, and a two-agent
+population that locks into one can score 0.93 while saying nothing new.
+Delivery is **necessary but not sufficient** — a floor on well-formedness, not
+evidence of communication. Report it with a repetition measure beside it.
+
+#### The healthiest late transcript in the sweep is N=4, not N=8
+
+`novelty_size_04agent_…_seed2` at iteration 300: 16 of 16 posts, mean 675
+characters, within-speaker repeat 0.00, thread similarity 0.07, no fragments,
+56% math-bearing, delivery 0.651 against its reference's 0.118. That is the
+best late outcome anywhere in this sweep, and it is one seed of two — its
+sibling ended at 6 posts and 0.225.
+
+#### Two rig limits found while doing this, both now guarded in the script
+
+- **A trace file holds one episode of the iteration's sixteen rollouts.** Every
+  trace-derived number in this family is n = 1 episode. It illustrates; it is
+  not a rate. This is also what produced the tool substrate's "calls reach
+  zero" premise — see below.
+- **The within-speaker repetition measures are structurally biased by N.**
+  Posts per speaker is `max_posts`/N: 8 at N=2, 4 at N=4, 2 at N=8, **1 at
+  N=16**, where a within-speaker repeat cannot occur at all and the measure has
+  no pairs to average. They are reported as `--` where undefined and must never
+  be compared across N; `thread_sim`, over all post pairs regardless of
+  speaker, is the cross-N-safe version.
+
+
 ## What it does not settle
 
 - **Which seed is representative.** The two differ more than either differs
@@ -183,3 +442,22 @@ The header said the run is void if `return_sign` is not −1.0 in
 at top level, because it was added next to the per-agent return statistics. The
 condition is checkable, just not where the header implies; `mean_return` is
 negative throughout, which is the same evidence.
+
+## Status
+
+`OPEN`. Ten of twelve arms analysed; `novelty_size_16agent_…_seed2` (6398727)
+and `c13_novelty_margin_notes_…_seed2` (6398719) were still running on
+2026-09-08 and must be folded in when they land — N=16 and the whole tool
+result are currently one seed each.
+
+**Citable now:** the entropy result (7/7 arms, established), the size null
+(established), the seed-domination (established), and the delivery artefact
+(established).
+
+**Not citable:** the tool result and the N=4 seed-2 transcript, both one seed;
+and the original mathematics headline, which still wants five seeds and a judge
+pass.
+
+---
+*Analysed 2026-09-04 and 2026-09-08 from `metrics.jsonl` and the checkpoint
+traces. Machine output stays local.*
