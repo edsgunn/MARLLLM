@@ -1,9 +1,9 @@
-# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6383538
-# on 2026-09-04, in 02:58:23. Analysed in
-# runs/cultural_emergence/c13_novelty_search/NOTES.md (family-level).
+# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6383539
+# on 2026-09-04, in 04:13:23. Analysed in
+# runs/novelty_search/NOTES.md (family-level).
 #
 # C13 — NOVELTY SEARCH. Maximise future observation surprise instead of
-# minimising it. Seed 1.
+# minimising it. Seed 2.
 #
 # WHAT THIS CHANGES
 #   Against runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc:
@@ -63,7 +63,7 @@
 # WHAT WOULD VOID THE RUN
 #   Fewer than 300 iterations, or return_sign not -1.0 in metrics.jsonl.
 #
-name: c13_novelty_search_8agent_ashbourne_gc_seed1
+name: c13_novelty_search_8agent_ashbourne_gc_seed2
 script: train_population
 slurm:
   gpus_per_node: 4
@@ -97,7 +97,7 @@ lr: 5e-6
 kl_coef: 0.05
 beta: 0.01
 grad_accum: 16
-seed: 1
+seed: 42
 log_every: 5
 checkpoint_every: 25
 num_checkpoint_traces: 8
@@ -121,7 +121,7 @@ environments:
   character_set: extended_8
   max_posts: 16
   post_order: round_robin
-output_dir: runs/cultural_emergence/c13_novelty_search/c13_novelty_search_8agent_ashbourne_gc_seed1
+output_dir: runs/novelty_search/c13_novelty_search_8agent_ashbourne_gc_seed2
 gradient_checkpointing: true
 
 var_decomp_enabled: false

@@ -173,7 +173,7 @@ maximises and what we want are related only by argument.*
   doing collaborative mathematics at iteration 300: 89% of posts math-bearing,
   mean 660 characters, zero malformed fragments, against the reference's 1 of 42
   and five fragments. The other seed does not, at 4 of 53. — *provisional*, one
-  seed of two — `runs/cultural_emergence/c13_novelty_search/NOTES.md`
+  seed of two — `runs/novelty_search/NOTES.md`
 - 🆕 (2026-09-04b) **The dark-room diagnosis is right about the mechanism and incomplete as
   an explanation.** Delivery holds above the reference through iteration 200
   under a reversed sign, then falls anyway — 1.00 to 0.67 and 0.39. Silence is
@@ -606,7 +606,8 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 | job | config | what it is for |
 |---|---|---|
-| 6397841, 6397842 | [`c13_novelty_search/`](configs/cultural_emergence/c13_novelty_search/) | C13b: novelty search on `margin_notes`, a tool substrate. The reference abandons python entirely by iteration 300 (48 → 34 → 14 → 0 calls); this asks whether reversing the return's sign keeps a *capability* alive rather than just token counts. |
+| 6398722–6398727 | [`novelty_search/`](configs/novelty_search/) | The novelty-search population-size sweep: N=2, 4 and 16 at two seeds each, against the references the project already has at those sizes. N=8 is done. A descriptive size series, not a causal decomposition — it inherits the confound C2 separated. |
+| 6398717, 6398719 | [`novelty_search/`](configs/novelty_search/) | Novelty search on `margin_notes`, a tool substrate. The reference abandons python entirely by iteration 300 (48 → 34 → 14 → 0 calls); this asks whether reversing the return's sign keeps a *capability* alive rather than just token counts. |
 
 One config is **held** rather than queued: [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md)
 has failed three times and must not be resubmitted before

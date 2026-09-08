@@ -513,6 +513,11 @@ def parse_args() -> argparse.Namespace:
              "Useful for auditing exactly what was submitted.",
     )
     p.add_argument(
+        "--include-closed", action="store_true",
+        help="Submit configs whose STATUS line says CLOSED/VOID/ARCHIVED/HELD. "
+             "Off by default because re-running a finished arm overwrites its "
+             "data and its analysis.")
+    p.add_argument(
         "--extra-args", default="", metavar="ARGS",
         help="Extra CLI args to append to the train_population.py command in "
              "every generated job, e.g. --extra-args=\"--compile\". Quoted as "
@@ -555,6 +560,35 @@ def main() -> None:
     default_modules = [] if args.no_default_modules else list(ISAMBARD_DEFAULT_MODULES)
 
     configs = find_configs(args.configs)
+
+    # Refuse configs whose STATUS says the run is finished. Submitting a whole
+    # directory otherwise re-runs closed arms and OVERWRITES their data — which
+    # nearly cost two analysed novelty-search runs on 2026-09-08. PROCESS.md
+    # already warns that a stale "queued" line gets an arm resubmitted by
+    # accident; this is the same hazard from the other direction.
+    if not args.include_closed:
+        keep, skipped = [], []
+        for c in configs:
+            try:
+                head = Path(c).read_text(errors="replace")[:400]
+            except OSError:
+                keep.append(c); continue
+            first = head.split("\n", 1)[0]
+            if first.startswith("# STATUS:") and any(
+                    w in first.upper() for w in ("CLOSED", "VOID", "ARCHIVED",
+                                                 "SUPERSEDED", "HELD")):
+                skipped.append((c, first[len("# STATUS: "):].strip()))
+            else:
+                keep.append(c)
+        if skipped:
+            print(f"[SKIP] {len(skipped)} config(s) already closed — their data "
+                  f"would be overwritten. Pass --include-closed to submit anyway:")
+            for c, why in skipped:
+                print(f"         {Path(c).name}  ({why[:60]})")
+        configs = keep
+        if not configs:
+            print("Nothing left to submit.")
+            return
     if not configs:
         sys.exit("No YAML config files found.")
 

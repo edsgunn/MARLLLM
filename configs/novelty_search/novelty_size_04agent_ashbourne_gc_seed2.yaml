@@ -1,0 +1,120 @@
+# STATUS: QUEUED as job 6398725 on 2026-09-08.
+#
+# NOVELTY SEARCH — POPULATION SIZE SWEEP. N=4, seed 2.
+#
+# WHAT THIS CHANGES
+#   Against runs/cultural_emergence/run10_4agent_7B_study_group_ashbourne_gc:
+#   return_sign 1.0 -> -1.0, and nothing else. Each size is built from its own
+#   reference run, so within every arm the sign is the only difference and the
+#   arm is directly readable against the run the project already has at that N.
+#
+# WHAT THE SWEEP IS FOR
+#   Whether population size does anything once the objective points the other
+#   way. Under the standard objective it does not: C2 varied N against partner
+#   count and per-agent gradient volume across five arms at five seeds and
+#   found N=4 and N=16 indistinguishable at matched volume, p = 0.722, with
+#   volume itself at p = 0.810
+#   (runs/cultural_emergence/c2_population_size/NOTES.md). C1 had already
+#   removed the small corner. So the size claim has no support under
+#   minimisation, and the open question is whether that survives the flip.
+#
+#   There is a reason to think it might not. Under maximisation an agent is
+#   rewarded for eliciting unpredictable responses, and how much of that is
+#   available scales with how many distinct partners there are to elicit from.
+#   Size could matter here for a reason it does not there.
+#
+# THE CONFOUND, STATED RATHER THAN CONTROLLED
+#   This is the historical grid: max_posts 16 and rollouts 16 at every N, which
+#   is what run10 / run7 / run8 used and is why the arms are comparable to
+#   them. It therefore inherits the confound C2 was built to separate — N
+#   varies partner count, per-agent gradient volume (max_posts/N posts per
+#   agent per episode) and context composition together. This sweep is a
+#   DESCRIPTIVE size series, not a causal decomposition, and must not be read
+#   as one. If it shows an effect, C2's design is what would attribute it.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether the well-formed post rate at iteration 300 depends on N under a
+#   reversed sign. Read on delivery and on the traces, NOT on `alive` — that
+#   metric has reversed several readings and cannot be trusted at low delivery
+#   (runs/cultural_emergence/c6_extended_horizon/NOTES.md).
+#
+# WHAT WOULD FALSIFY 'SIZE MATTERS UNDER MAXIMISATION'
+#   Delivery flat across N=2, 4, 8 and 16, as it is under minimisation. The
+#   flip would then change what agents do without changing how population size
+#   bears on it.
+#
+# WHAT TO WATCH FOR
+#   Two seeds per size is enough to see a large effect and not enough to
+#   resolve a small one — the N=8 arm's two seeds already differ more from each
+#   other than either differs from its reference on post content (4 of 53
+#   math-bearing against 41 of 46). Any size trend has to clear that spread
+#   before it is a trend.
+#
+# WHAT WOULD VOID THE RUN
+#   Fewer than 300 iterations, or <agent>/return_sign not -1.0 in
+#   metrics.jsonl.
+#
+name: novelty_size_04agent_ashbourne_gc_seed2
+script: train_population
+slurm:
+  gpus_per_node: 4
+  time: "09:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+vllm_gpu_mem_util: 0.30
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 42
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 32768
+
+# --- rollout pathway: pinned to match the reference run ---
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+# --- the only change: maximise surprise instead of minimising it ---
+return_sign: -1.0
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: canonical_4
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/novelty_search/novelty_size_04agent_ashbourne_gc_seed2
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

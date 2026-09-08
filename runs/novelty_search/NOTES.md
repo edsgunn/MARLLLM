@@ -1,11 +1,12 @@
-# c13_novelty_search
+# novelty_search
 
-*Maximise future observation surprise instead of minimising it. The sign of the
-return is the only change. Two seeds, jobs 6383538 and 6383539.*
+*A separate suite: maximise future observation surprise instead of minimising
+it. The sign of the return is the only change from each reference run. Started
+as Tier-C item C13; now its own line of experiments.*
 
 |  |  |
 |---|---|
-| Configs | [`configs/cultural_emergence/c13_novelty_search/`](../../../configs/cultural_emergence/c13_novelty_search/) |
+| Configs | [`configs/novelty_search/`](../../configs/novelty_search/) |
 | Model | `Qwen2.5-7B-Instruct`, LoRA r64, 8 agents on `study_group_ashbourne_gc` |
 | Ran to | iteration 300 of 300, both · 2h58m and 4h13m |
 | **Differs from** | **`run7_8agent_7B_study_group_ashbourne_gc`** — `return_sign` −1.0. Verified field by field as the only difference. |
@@ -118,6 +119,45 @@ The degenerate outcome to check for is call-spamming —
 with a low success rate or near-identical code blocks. **The python blocks have
 to be read before this is reported**, for the same reason seed 1 above needed
 reading: the counter cannot separate using the tool from farming noise.
+
+## The population-size sweep, submitted 2026-09-08
+
+Four sizes on `study_group_ashbourne_gc`, two seeds each, each built from the
+reference run the project already has at that N so that the sign stays the only
+change within every arm.
+
+| N | reference | jobs | limit |
+|---:|---|---|---:|
+| 2 | `run10_2agent_…` | 6398722, 6398723 | 7 h |
+| 4 | `run10_4agent_…` | 6398724, 6398725 | 9 h |
+| 8 | `run7_8agent_…` | **done** — `c13_novelty_search_8agent_…_seed{1,2}` above | — |
+| 16 | `run8_16agent_…` | 6398726, 6398727 | 15 h |
+
+The N=8 arm is the pair already analysed here; it keeps its original name
+rather than being renamed into the sweep's scheme, because renaming analysed
+data costs more than the consistency is worth.
+
+**The question.** Under the standard objective population size does nothing:
+C2 varied N against partner count and gradient volume across five arms at five
+seeds and found N=4 and N=16 indistinguishable at matched volume, p = 0.722,
+with volume itself at p = 0.810, and C1 had already removed the small corner.
+Whether that survives the flip is open — and there is a reason it might not,
+since maximising surprise rewards eliciting unpredictable responses and how
+much of that is available scales with the number of distinct partners.
+
+**The confound, stated rather than controlled.** This is the historical grid:
+`max_posts` 16 and `rollouts` 16 at every N, which is what run10 / run7 / run8
+used and is why each arm is readable against its own reference. It therefore
+inherits exactly what C2 was built to separate — N moves partner count,
+per-agent gradient volume (`max_posts`/N posts per agent per episode) and
+context composition together. **This is a descriptive size series, not a causal
+decomposition.** If it shows an effect, C2's design is what would attribute it.
+
+**Power.** Two seeds per size sees a large effect and cannot resolve a small
+one. The N=8 arm's own two seeds already differ more from each other than
+either differs from its reference on post content — 4 of 53 math-bearing
+against 41 of 46 — so any size trend has to clear that spread before it is a
+trend.
 
 ## What it does not settle
 
