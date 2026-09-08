@@ -1,4 +1,6 @@
-# STATUS: QUEUED as job 6383538 on 2026-09-04.
+# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6383538
+# on 2026-09-04, in 02:58:23. Analysed in
+# runs/cultural_emergence/c13_novelty_search/NOTES.md (family-level).
 #
 # C13 — NOVELTY SEARCH. Maximise future observation surprise instead of
 # minimising it. Seed 1.
