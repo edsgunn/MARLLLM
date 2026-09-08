@@ -56,7 +56,8 @@ noise and only the 0.05-vs-0.2 step is safe to read.**
   alive 0.00 and entropy above 1.9. — *established*
 - **The entropy bonus and the KL anchor act on different things.** All four
   cells hold KL from base at 0.46–0.64 while entropy ranges over a factor of
-  four. — *established*
+  four. — *established*, but see the correction below: they act on different
+  *outcomes*, not on different *quantities*.
 - **`beta = 0.05` at `kl_coef = 0.5` is the best-performing setting found on
   Ashbourne GC.** Perception loss 1.75, alive 1.00 at iteration 200. —
   *provisional*, single run, and see the duplicate above
@@ -67,10 +68,41 @@ Whether `beta = 0.05` beats `beta = 0.01`, which is the campaign default: the
 two were never run against each other at the same `kl_coef`, and the run-to-run
 spread would swamp the difference if they had been.
 
+## Correction, 2026-09-08: the anchor does fight the bonus
+
+This scan's headline claim — that **"the entropy bonus destroys populations
+without moving them away from the base policy, which is why the KL anchor cannot
+protect against it"** — was drawn from four cells at a single `kl_coef`, and
+**with `kl_coef` varied it does not hold.** Re-reading the coarse sweep together
+with this scan
+([`../kl_beta_sweep_8agent_ashbourne_gc/NOTES.md`](../kl_beta_sweep_8agent_ashbourne_gc/NOTES.md),
+§4 of the re-reading), the change in entropy at `beta` = 0.10 is:
+
+| `kl_coef` | 0.00 | 0.01 | 0.10 | 0.50 |
+|---|---:|---:|---:|---:|
+| Δ entropy, first-25 → last-25 | +1.04 | +0.92 | +0.79 | +0.16 |
+
+Monotone over four points, with this family's `beta` = 0.10 cell and the coarse
+sweep's duplicate of it agreeing to 0.01. The anchor suppresses the entropy rise
+sixfold. Both terms act only at ACT positions, so they compete for the same
+distribution.
+
+What survives from the original claim is narrower and still true: **the anchor
+cannot protect at `beta` ≥ 0.20.** This family's (0.5, 0.2) cell ends at
+Δentropy +1.19 and Δperception +0.71 despite the strongest anchor on the grid.
+The cliff is real; it is the *reason* given for it that was wrong.
+
+Also: this family's `alive` figures should not be cited without the delivery rate
+beside them. The `beta` = 0.05 cell's "best result in the campaign" (alive 0.75,
+perception 1.75) ends at delivery 0.474 — the channel had closed by half, like
+every other cell in both families.
+
 ## Status
 
-`CLOSED`. Cite the cliff; treat the best-cell claim as provisional.
+`CLOSED`. Cite the cliff. The best-cell claim is **withdrawn** — it rests on
+`alive` at delivery 0.474. The mechanism claim is **corrected** above.
 
 ---
-*Analysed retrospectively on 2026-09-01 from `metrics.jsonl` and `config.json`.
+*Analysed retrospectively on 2026-09-01, corrected on 2026-09-08, from
+`metrics.jsonl` and `config.json`.
 Machine output stays local.*

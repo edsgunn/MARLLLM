@@ -119,10 +119,113 @@ was built for and only partly delivers.
 Also unsettled: whether `beta` between 0.01 and 0.1 has a usable optimum. The
 zoom was run only at `kl_coef = 0.5`.
 
+## The 2026-09-08 re-reading: on delivery, and on the CHANGE in entropy
+
+Both this family and the [`beta` zoom](../beta_zoom_kl0p5_8agent_ashbourne_gc/NOTES.md)
+were originally read on the `alive` fraction. Across the 20 cells of the two
+families together, **`alive` is uncorrelated with the well-formed post rate**
+(Spearman −0.10, p = 0.66). The readings above that touch on population health
+therefore cannot support claims about the channel. The delivery rate was
+recorded all along, as `tool/post_success_total` / `tool/post_turns_total`; no
+agent is frozen in any of these runs, so the population-level rate is valid.
+
+Re-read with [`scripts/analyse_kl_beta_grid.py`](../../../scripts/analyse_kl_beta_grid.py),
+comparing iterations 1–25 against the last 25. Four things come out of it that
+the original reading missed.
+
+### 1. Neither regulariser touches the channel
+
+Delivery falls from 0.98 to 0.50 in **all 20 cells**. No trend in `beta`
+(ρ = −0.25, p = 0.28) or in `kl_coef` (ρ = −0.16, p = 0.49); the whole spread is
+0.395–0.613 and **not one cell ends above 0.8**. Across a fifty-fold range in
+both knobs, regularisation does not touch the dark-room collapse. Whatever
+closes the public channel, it is not something either regulariser reaches.
+
+### 2. The entropy bonus is a step function, not a dial
+
+| `beta` | cells | Δ entropy, first-25 → last-25 |
+|---|---:|---|
+| ≤ 0.05 | 9 | −0.12 … +0.06 |
+| ≥ 0.10 | 11 | +0.16 … +6.20 |
+
+The two groups separate **completely** — max of the low group +0.064, min of the
+high group +0.160 — MWU exact p = 1.2 × 10⁻⁵. Below the step the bonus is inert
+and its sign is as often negative as positive. **There is no `beta` that raises
+entropy a little.**
+
+### 3. Above the step, entropy and perception loss are locked together
+
+Spearman Δentropy vs Δperception = **+0.853, p = 4.4 × 10⁻¹²**, n = 20. The two
+cells where entropy rose and perception loss did not are the two runs of the
+duplicate `(0.5, 0.1)` — see the noise floor below, which is exactly the size of
+that effect. **On this grid, the regime where policy entropy rises without the
+perception loss collapsing does not occur.**
+
+### 4. The KL anchor does fight the entropy bonus
+
+At `beta` = 0.10, Δentropy falls monotonically as the anchor tightens:
+
+| `kl_coef` | 0.00 | 0.01 | 0.10 | 0.50 |
+|---|---:|---:|---:|---:|
+| Δ entropy | +1.04 | +0.92 | +0.79 | +0.16 |
+
+Four points, monotone, and the duplicate pair agrees on the last one to 0.01.
+Both terms act only at ACT positions — the entropy bonus inside `l_act`, the KL
+alongside it (`marlllm/loss.py`) — so they are competing for the same
+distribution: the bonus flattens it, the anchor pins it to base.
+
+**This corrects the claim carried from the zoom** that "the entropy bonus
+destroys populations without moving them away from base, so the KL anchor cannot
+protect against it." At `beta` = 0.10 the anchor *does* protect, and by a factor
+of six. It stops protecting by `beta` = 0.20, where `kl_coef` 0.5 still ends at
+Δentropy +1.19 and Δperception +0.71.
+
+### The noise floor this rig actually has
+
+The accidental duplicate of `(0.5, 0.1)` was run at the **same seed**. The two
+runs differ by:
+
+| | Δ entropy | Δ perception | delivery |
+|---|---:|---:|---:|
+| spread, same config, same seed | **0.007** | **0.431** | **0.173** |
+
+So the duplicate is not only a reproducibility failure — it is a calibration.
+**Δentropy is the low-noise observable on this rig and carries weight from a
+single run; Δperception and delivery do not.** Differences below ~0.4 in
+Δperception or ~0.17 in delivery are unreadable from one run, here or anywhere
+else in the campaign. Read against that floor, the entire delivery spread across
+this grid (0.395–0.613) is consistent with pure noise about 0.50.
+
+### What raises entropy instead
+
+Through the same window, on the same substrate and roster:
+
+| run | Δ entropy | Δ perception | delivery |
+|---|---:|---:|---|
+| reference `run7` (`return_sign` +1) | +0.06 | +0.12 | 0.980 → 0.525 |
+| novelty search seed 1 (`return_sign` −1) | +0.22 | +0.24 | 0.984 → 0.638 |
+| novelty search seed 2 (`return_sign` −1) | +0.23 | **−0.46** | 0.983 → 0.455 |
+
+Reversing the return's sign moves entropy roughly four times as far as any safe
+`beta` does, and on seed 2 it did so while perception loss *improved*. That
+Δperception of −0.46 is only just above the noise floor and rests on one seed, so
+it is not a result — but the entropy change is, and it points at the return
+rather than at the regularisers as the term that governs policy entropy here.
+
+### What this section opens
+
+Whether a stronger anchor raises the safe ceiling on the bonus, putting the
+target regime somewhere on a diagonal in (`kl_coef`, `beta`). `kl_coef` above
+0.5 has never been run. Tested in
+[`../entropy_anchor_ridge_8agent_ashbourne_gc/`](../entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md).
+
 ## Status
 
-`CLOSED` as a screen. Cite the `beta` result; do not cite a cell ranking.
+`CLOSED` as a screen. Cite the `beta` result and the 2026-09-08 re-reading; do
+not cite a cell ranking, and do not cite any `alive` figure from this family
+without the delivery rate beside it.
 
 ---
-*Analysed retrospectively on 2026-09-01 from `metrics.jsonl` and `config.json`.
+*Analysed retrospectively on 2026-09-01, re-read on 2026-09-08, from
+`metrics.jsonl` and `config.json`.
 Machine output stays local.*

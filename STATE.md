@@ -140,21 +140,21 @@ maximises and what we want are related only by argument.*
   on R², AIC and leave-one-out error. — *established* —
   `runs/cultural_emergence/_regime_threshold_sweep_3d/REBUTTAL_NOTES.md`
 
-- 🔸 **Removing the normalisation destroys the run; removing the discount does
+- **Removing the normalisation destroys the run; removing the discount does
   nothing.** γ=1 with normalisation kept delivers 0.50 against the reference's
   0.56 — the earlier "helps survival" reading rested on `alive` and is
   withdrawn. γ=1 without it reaches perception loss
   **37**, entropy 0.00, and 62 of 64 turns delivering nothing — the pure
   dark-room outcome, worse than C10's action-only arm. — *provisional*, one
   seed each — `runs/cultural_emergence/c11_discount_normalisation/NOTES.md`
-- 🔸 **The un-normalised arms test the arm mis-scaling, not the derived
+- **The un-normalised arms test the arm mis-scaling, not the derived
   objective.** At γ=1 the raw return is ~2300 against a perception loss of
   ~1.4, so the action arm enters the summed loss ~1600× larger and the run is
   action-only in all but name. This was predicted in the config headers before
   submission. Whether the derived objective trains with a *working* baseline is
   open until the PopArt arm reports. — *established* — same
 
-- 🔶 **A working baseline does not make the derived objective trainable, and
+- 🔸 **A working baseline does not make the derived objective trainable, and
   the scale mismatch is an arm-weighting problem rather than a baseline one.**
   PopArt takes the value head from diverging at 1.45e8 to a stable O(10) loss —
   a seven-million-fold improvement, value kept in the return's units — and the
@@ -162,23 +162,23 @@ maximises and what we want are related only by argument.*
   of 64. A fitted baseline centres the advantage but cannot shrink it: its scale
   is the return's spread, which PopArt measures at σ = 1552. — *established* —
   `runs/cultural_emergence/c11_discount_normalisation/NOTES.md`
-- 🔶 **The return's scale is genuinely non-stationary**, so the per-batch
+- 🔸 **The return's scale is genuinely non-stationary**, so the per-batch
   standardisation was papering over something real: PopArt's running moments
   move μ 697 → 861 and σ 344 → 1552 across 300 iterations. — *established* —
   same
 
-- 🆕 (2026-09-04b) **Reversing the return's sign produces the behaviour the framework was
+- 🔶 **Reversing the return's sign produces the behaviour the framework was
   built to produce, on one of two seeds.** Maximising future observation
   surprise instead of minimising it — a one-key change — gives a population
   doing collaborative mathematics at iteration 300: 89% of posts math-bearing,
   mean 660 characters, zero malformed fragments, against the reference's 1 of 42
   and five fragments. The other seed does not, at 4 of 53. — *provisional*, one
   seed of two — `runs/novelty_search/NOTES.md`
-- 🆕 (2026-09-04b) **The dark-room diagnosis is right about the mechanism and incomplete as
+- 🔶 **The dark-room diagnosis is right about the mechanism and incomplete as
   an explanation.** Delivery holds above the reference through iteration 200
   under a reversed sign, then falls anyway — 1.00 to 0.67 and 0.39. Silence is
   not only about the direction the return points. — *likely*, two seeds — same
-- 🆕 (2026-09-04b) **Entropy rises under a reversed sign** rather than collapsing, 0.75 →
+- 🔶 **Entropy rises under a reversed sign** rather than collapsing, 0.75 →
   0.96 and 0.98 against the reference's 0.80 — the predicted direction for an
   objective that rewards unpredictable futures. — *likely* — same
 
@@ -287,27 +287,27 @@ measurement downstream is void.*
   *likely* for the necessity half, *inconclusive* for the rest —
   `runs/cultural_emergence/c3_frozen_population/NOTES.md`
 
-- 🔸 **The N=16 reference spans `alive` 0.38–0.88 at iteration 300 across
+- **The N=16 reference spans `alive` 0.38–0.88 at iteration 300 across
   five seeds**, mean 0.70, where it was previously a single run at 0.88 — the
   top of the range. Comparisons drawn against that single seed were comparing
   against the best case. — *established* —
   `runs/cultural_emergence/c2_population_size/NOTES.md`
-- 🔸 ~~**Matching per-agent gradient volume downward gives the healthiest cell.**~~
+- ~~**Matching per-agent gradient volume downward gives the healthiest cell.**~~
   **Withdrawn.** It rested on `alive` 0.95; by delivery it is 0.263 against
   0.200, p = 0.810. — *withdrawn* —
   `runs/cultural_emergence/c2_population_size/NOTES.md`
 
-- 🔶 **Population size does not determine the outcome, at either end.** All
+- 🔸 **Population size does not determine the outcome, at either end.** All
   five arms of the decomposition are in: N=4 against N=16 at matched gradient
   volume gives 0.263 vs 0.225 delivery, p = 0.722 on five seeds a side, and
   volume itself gives p = 0.810. With C1 having removed the small corner, the
   population-size claim has no support left. — *established* —
   `runs/cultural_emergence/c2_population_size/NOTES.md`
-- 🔶 **Co-adaptation degrades delivery, and it is the only variable in that
+- 🔸 **Co-adaptation degrades delivery, and it is the only variable in that
   design that separates.** Learners against a frozen majority deliver 0.475
   against 0.225 for agents in a co-adapting population of the same size,
   p = 0.032, every seed above the baseline's median. — *likely* — same
-- 🔶 **Partner count is the one size-adjacent variable worth more seeds**:
+- 🔸 **Partner count is the one size-adjacent variable worth more seeds**:
   0.316 at three partners against 0.225 at fifteen with N held at 16, but
   p = 0.135 is not a result at five seeds. — *suspected* — same
 
@@ -345,7 +345,7 @@ time, because every published analysis evaluates at a fixed iteration.*
   the only multi-agent run in the project that does. — *likely*, two runs —
   `runs/social_terminal/run06_8agent_7B_ashbourne_school/NOTES.md`
 
-- 🔸 **`alive` is invalid wherever delivery is low: its dominant input moves
+- **`alive` is invalid wherever delivery is low: its dominant input moves
   with the failure it is meant to detect.** Perception loss is computed over
   observation tokens, so as agents stop posting the stream becomes
   deterministic scaffolding and `perc_loss` falls through the classifier's
@@ -355,7 +355,7 @@ time, because every published analysis evaluates at a fixed iteration.*
   references invert — `run7` delivers 56% of turns and scores 0.00, `run8`
   delivers 27% and scores 0.88. — *established* —
   `runs/cultural_emergence/c6_extended_horizon/NOTES.md`
-- 🔸 **The extended populations do not recover; they fall silent.** At
+- **The extended populations do not recover; they fall silent.** At
   iteration 900 the 8-agent reference delivers 5 well-formed posts in 64 turns
   while scoring `alive` 0.62, with four of five "alive" agents posting nothing.
   Whether the decline bottoms out is unanswered and not answerable with this
@@ -417,22 +417,73 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 ### Regularisation
 
-- **The entropy bonus is the dangerous knob.** `beta ≥ 0.1` destroys the
-  population at every KL coefficient tried; `beta = 0.5` is catastrophic, ending
-  with entropy above 6.5 nats. The cliff is below 0.2. — *established* —
-  `runs/cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/NOTES.md`,
-  `runs/cultural_emergence/beta_zoom_kl0p5_8agent_ashbourne_gc/NOTES.md`
-- **The entropy bonus destroys populations without moving them from base**, so
-  the KL anchor cannot protect against it. — *established* — same
-- **The KL coefficient controls drift and little else.** Raising it from 0 to
-  0.5 halves end-of-training KL from base and barely changes the alive fraction.
-  — *likely* — same
-- **No cell ranking among the surviving settings is supported.** The
+All five entries below rest on the 20 cells of
+`runs/cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/` and
+`.../beta_zoom_kl0p5_8agent_ashbourne_gc/`, re-read on 2026-09-08 on the
+delivery rate and on the *change* in entropy
+(`scripts/analyse_kl_beta_grid.py`; the re-reading is written up in the sweep's
+NOTES).
+
+- 🆕 (2026-09-08) **Neither regulariser touches the public channel.** Delivery falls from 0.98
+  to 0.50 in all 20 cells, with no trend in `beta` (ρ = −0.25, p = 0.28) or
+  `kl_coef` (ρ = −0.16, p = 0.49), and not one cell ends above 0.8. Across a
+  fifty-fold range in both knobs, regularisation does not reach the dark-room
+  collapse. — *established* — sweep NOTES, the 2026-09-08 re-reading
+- 🆕 (2026-09-08) **The entropy bonus is a step function, not a dial.** For `beta` ≤ 0.05
+  (9 cells) |Δentropy| ≤ 0.12 with the sign as often negative as positive; for
+  `beta` ≥ 0.10 (11 cells) Δentropy ≥ +0.16. The groups separate completely,
+  MWU exact p = 1.2 × 10⁻⁵. **There is no `beta` that raises entropy a little.**
+  — *established* — same
+- 🆕 (2026-09-08) **Above the step, entropy and perception loss are locked together.** Spearman
+  Δentropy vs Δperception = +0.853, p = 4.4 × 10⁻¹², n = 20. **The regime where
+  policy entropy rises without the perception loss collapsing does not occur
+  anywhere on this grid.** — *established* — same
+- **`beta` ≥ 0.1 destroys the population, and `beta` = 0.5 catastrophically**
+  (entropy above 6.5 nats, perception above 5.2). The cliff is below 0.2. —
+  *established* — same
+- 🆕 (2026-09-08) **The KL anchor does fight the entropy bonus.** At `beta` = 0.10, Δentropy
+  falls monotonically +1.04 → +0.92 → +0.79 → +0.16 as `kl_coef` goes
+  0 → 0.01 → 0.10 → 0.50; the duplicate pair agrees on the last point to 0.01.
+  Both terms act only at ACT positions, so they compete for the same
+  distribution. The anchor stops protecting by `beta` = 0.20. — *established* —
+  same
+  - **CORRECTS** the previous entry "the entropy bonus destroys populations
+    without moving them from base, so the KL anchor cannot protect against it",
+    which was drawn from four cells at one `kl_coef`. **Withdrawn.**
+- 🆕 (2026-09-08) **The KL coefficient controls drift, and the entropy bonus.** Raising it from
+  0 to 0.5 halves end-of-training KL from base; it also suppresses the entropy
+  rise sixfold, per the entry above. It does not change delivery. — *likely* —
+  same
+- 🆕 (2026-09-08) **`alive` does not track the channel.** Across the 20 cells it is uncorrelated
+  with the well-formed post rate, ρ = −0.10, p = 0.66. Fourth independent
+  confirmation. Do not cite an `alive` figure from these families without the
+  delivery rate beside it. — *established* — same
+- 🆕 (2026-09-08) **No cell ranking among the surviving settings is supported.** The
   differences between the good cells are smaller than the spread between two
-  runs of one identical configuration. — *established* — same
+  runs of one identical configuration. The zoom's "best cell in the campaign"
+  (`kl` 0.5, `beta` 0.05, alive 0.75, perception 1.75) is **withdrawn**: it ends
+  at delivery 0.474, like everything else. — *established* — same
 - **Removing both regularisers made one population *better*, not worse.** —
   *provisional*, one run each side —
   `runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc_no_reg/NOTES.md`
+- 🆕 (2026-09-08) **What raises policy entropy is the return's sign, not the regularisers.**
+  Through the same window on the same substrate, `return_sign` = −1 gives
+  Δentropy +0.22/+0.23 against the reference's +0.06 — roughly four times any
+  safe `beta` — and on seed 2 perception loss *fell* 0.46 while entropy rose.
+  The Δperception rests on one seed and only just clears the noise floor; the
+  Δentropy does not. — *likely* for the entropy, *provisional* for the
+  perception — `runs/novelty_search/NOTES.md`
+- 🆕 (2026-09-08) **Open: whether a stronger anchor licenses a larger bonus.** `kl_coef` above
+  0.5 had never been run. Being tested at (2.0, 0.01/0.2/0.4) and (5.0, 0.4),
+  two seeds each — `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`,
+  jobs 6404722–6404729, submitted 2026-09-08.
+
+🆕 (2026-09-08) **The noise floor of this rig, which every entry above is read against.** The
+old grid contains an accidental duplicate run at the **same seed**; the two runs
+differ by 0.007 in Δentropy, **0.431 in Δperception** and **0.173 in delivery**.
+So Δentropy carries weight from a single run and Δperception and delivery do
+not — differences below ~0.4 and ~0.17 respectively are unreadable from one run,
+anywhere in the campaign. — *established* — sweep NOTES
 
 ### Engineering and reproducibility
 
@@ -516,7 +567,7 @@ time, because every published analysis evaluates at a fixed iteration.*
 
 *Read the first entry before citing any `alive` number.*
 
-- 🔸 **Measuring perception loss on post content only does not
+- **Measuring perception loss on post content only does not
   repair the classifier — predictability is simply the wrong target.** Content
   is *more* predictable than scaffolding at 12 of 13 checkpoints, and
   content-only loss is lowest where delivery is lowest (0.78 nats/token at
@@ -525,12 +576,12 @@ time, because every published analysis evaluates at a fixed iteration.*
   Any loss over a stream the agents control can be reduced by emitting less or
   by emitting something trivially repetitive. — *established* —
   `runs/_tier_b/content_perception/NOTES.md`
-- 🔸 **The environment's framing is not deterministic**, because
+- **The environment's framing is not deterministic**, because
   it carries the speaker's name — which of eight agents posts next is the least
   predictable thing in the stream. Scaffolding NLL runs 1.8–2.7, above content
   almost everywhere. Any future token split has to account for that rather than
   treat framing as free. — *established* — same
-- 🔸 **The regime classifier cannot be trusted at low delivery,
+- **The regime classifier cannot be trusted at low delivery,
   and this is the second time its inputs have been fooled by the failure they
   measure.** The first was a policy looping `</post>` while still scoring
   healthy, which is why `degenerate` was split in two. This one is deeper: the
