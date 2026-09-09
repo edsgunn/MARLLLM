@@ -94,6 +94,92 @@ now reversed four readings.
 Use `scripts/analyse_kl_beta_grid.py` for the window and the statistics; it will
 need its `FAMILIES` dict pointed at this directory.
 
+## RETRACTED, same day: the ceiling result is a rescaling
+
+**The headline below — "the ridge is real: a stronger anchor roughly doubles the
+safe ceiling" — does not survive the obvious objection, which is that
+`kl_coef` 2.0–5.0 is so strong that it locks training to the base model. It
+does not survive, and the design cannot answer the question it was built for.**
+
+Two hypotheses predict everything this family showed:
+
+- **H1**, what was claimed: the anchor lets a larger bonus be used productively.
+- **H2**: the anchor shrinks total policy movement, so a larger bonus does less
+  of *everything*, including less damage.
+
+H2 is right, and the evidence was already in the table.
+
+### `beta` and `kl_coef` act through their ratio
+
+| | Spearman vs Δentropy | p | n |
+|---|---:|---:|---:|
+| `beta` / `kl_coef` | **+0.831** | 7.8 × 10⁻¹¹ | 21 |
+| `beta` alone | +0.755 | 5.1 × 10⁻⁷ | 21 |
+
+The ratio predicts the entropy change better than `beta` does. At the matched
+ratio of 0.2:
+
+| `beta` | `kl_coef` | Δ entropy | Δ perception |
+|---:|---:|---:|---:|
+| 0.10 | 0.5 | +0.16, +0.17 | −0.47, −0.04 |
+| 0.40 | 2.0 | +0.28, +0.59 | −0.17, −0.11 |
+
+**`beta` = 0.4 at `kl_coef` 2.0 is the same operating point as `beta` = 0.1 at
+`kl_coef` 0.5, not a higher one.** The ceiling did not rise; both axes were
+rescaled. "A 2× ceiling for a 4× anchor" describes a coordinate change.
+
+### The key comparison was never at the same operating point
+
+The pre-registered test was `beta` = 0.2 at `kl_coef` 2.0 against 0.5:
+
+| | Δ entropy | Δ perception |
+|---|---:|---:|
+| `kl_coef` 0.5 | **+1.19** | +0.71 |
+| `kl_coef` 2.0 | +0.15, +0.33 | −0.22, −0.34 |
+
+The entropy change differs by four to eight times. **The intervention did not
+become safer; it became smaller.** And the largest Δentropy anywhere in this
+family is +0.59, against the +1.19 of the cell it was supposed to rescue — so
+*no cell here ever operated at the entropy level where damage appears.*
+
+### What is left of H1
+
+Fitting Δperception on Δentropy over the 20 old-grid cells and placing the ridge
+cells against that line: all 8 sit below it, mean residual **−0.275** against an
+old-grid residual sd of 0.312. Eight of eight in one direction is a sign test at
+p ≈ 0.008 — but the magnitude is **inside the 0.431 same-seed noise floor on
+Δperception**, and only 2 of 8 clear one sd. So a genuine ridge effect is at
+most marginal and not resolvable from eight runs.
+
+### The delivery finding also shrinks
+
+Excluding the two `kl_coef` 5.0 cells, which are pinned at KL-from-base 0.02,
+the ridge mean falls from 0.722 to 0.655 against the old grid's 0.501 — an
+effect of +0.155, now **below** the 0.173 delivery noise floor. At the only
+matched-ratio pairing available it is +0.147, also below it. The channel
+correction stated in "what this settles" stands as a *group* difference
+(MWU p = 1.5 × 10⁻³ excluding `kl_coef` 5.0) but not as a per-cell one, and
+much of it is the pinned cells.
+
+### What the design was missing
+
+No control separating "anchor licenses bonus" from "anchor suppresses
+everything". A movement-matched arm — same KL-from-base, different `beta` — was
+never specified, and without it H1 and H2 are indistinguishable. That is a
+design error, not an analysis one: it was not pre-registered because I did not
+notice the two hypotheses were confounded.
+
+### What replaces it
+
+The question this was meant to serve — **released entropy: interesting
+behaviour or noisy TV?** — needs the anchor *low* and `beta` moved alone, under
+novelty search rather than minimisation. Submitted as
+[`configs/novelty_search/entropy_release/`](../../../configs/novelty_search/entropy_release/),
+jobs 6434469–6434474, `kl_coef` held at 0.05 so nothing is pinned.
+
+**Read everything below with this section in force.** The trace observations
+stand — they are descriptions, not inferences. The ceiling claim does not.
+
 ## Results
 
 All eight cells ran to iteration 300 with `kl_coef` and `beta` in `config.json`
@@ -252,10 +338,20 @@ are not evidence of absence.
 
 ## Status
 
-`CLOSED` for the ridge question, which it answers. Cite the ceiling result and
-the channel correction. Do **not** cite the `kl_coef` 5.0 numbers as a training
-outcome, and do not cite the target regime as reached without saying it is one
-seed of two.
+`CLOSED, HEADLINE RETRACTED`. See the retraction at the top: the ceiling result
+is a rescaling, because `beta` and `kl_coef` act through their ratio, and the
+design has no control separating "the anchor licenses a larger bonus" from "the
+anchor suppresses everything".
+
+**Do not cite:** the ceiling claim, the target-regime claim (its cell never
+operated at the entropy level where damage appears), or any `kl_coef` 5.0
+number as a training outcome.
+
+**Still citable:** that `beta` and `kl_coef` act through roughly their ratio
+(ρ = +0.831, p = 7.8 × 10⁻¹¹, n = 21) — which is what this family actually
+established, and it is the reason the design could not work; that `kl_coef` 5.0
+pins the policy at KL-from-base 0.02; and the trace descriptions, which are
+observations rather than inferences.
 
 ---
 *Analysed 2026-09-08 from `metrics.jsonl`, `config.json` and the checkpoint

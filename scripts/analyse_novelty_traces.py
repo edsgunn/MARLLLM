@@ -30,6 +30,30 @@ What is measured per episode, from `env_trace.thread`:
                the protocol bleeding into content.
   frag         posts under 20 characters.
 
+  stopword     fraction of word tokens that are common English function words.
+               **The only measure here that word salad cannot pass.**
+  nonlatin     fraction of characters outside basic Latin -- token-soup marker.
+
+WHY `stopword` EXISTS, AND WHAT IT FIXES
+
+  Every other measure in this file was fooled by high-entropy collapse. At end
+  entropy 6.59 a population emitting "sweet baked contentious oats propaganda
+  zipper bepace correlcusAuthenticate Muslim..." scores 15 posts, 724 mean
+  characters, `repeat` 0.00 and `frag` 0.00 -- indistinguishable from a healthy
+  transcript on all of them, because word salad is long and non-repetitive.
+  Only `thread_sim` hinted at it, dropping to 0.01, and that reads as
+  "diverse" rather than "broken".
+
+  `stopword` catches exactly that case: the four collapsed populations score
+  0.035-0.090 where coherent ones score 0.28-0.45, and it correlates with end
+  entropy at rho = -0.531, p = 1.4e-3 over 28 runs. **Never report a
+  high-entropy run's trace quality without it.**
+
+  But it is a SCREEN, NOT A VERDICT. It is reliable only below 0.10; between
+  0.10 and 0.28 it cannot tell dense technical prose from word salad, and it
+  mislabels at least one genuinely coherent transcript in that band. Anything
+  it marks ambiguous has to be read.
+
 TWO LIMITS THAT BOUND EVERY NUMBER HERE
 
   1. A trace file holds ONE episode of the iteration's 16 rollouts. Every
@@ -49,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from itertools import combinations
 from pathlib import Path
@@ -62,6 +87,42 @@ MATH = re.compile(
     r"|(\b(?:sum|mod|prod|lemma|proof|induction|theorem|binomial)\b)"
 )
 LEAK = re.compile(r"</?post>|&lt;/?post&gt;|&lt;/?post>|</?think>")
+
+# Common English function words. Coherent English prose runs 0.28-0.45 of its
+# word tokens in this set; word salad keeps length and non-repetition but loses
+# the grammatical glue, so it falls below ~0.18. This is the ONLY measure here
+# that word salad cannot pass -- see the warning in the docstring.
+STOPWORDS = set("""the a an and or but if then than that this these those of to in on at by for
+with from as is are was were be been being it its his her their our your my we you they he she
+i have has had do does did not no so all any some can could will would should may might must
+about into over under out up down off again more most other such only own same too very just
+there here what which who whom when where why how""".split())
+
+WORD = re.compile(r"[A-Za-z']+")
+
+
+def coherence(text: str) -> tuple[float, float]:
+    """(stopword fraction, non-latin character fraction) for one post.
+
+    stopword < 0.10  -> word salad, reliably
+    0.10 - 0.28      -> AMBIGUOUS, must be read by hand (see below)
+    >= 0.28          -> coherent
+
+    KNOWN FALSE POSITIVE. Dense technical prose scores low without being
+    degraded: `novelty_size_04agent_..._seed2` at iteration 300 scores 0.118
+    and is a genuine discussion of induction base cases under modular
+    arithmetic, written in a compressed clause-heavy style with LaTeX and few
+    function words. A run at 0.139 on the same band (`kl0p0_beta0p1`) really is
+    salad. The measure cannot separate those two; only reading can.
+    """
+    chars = [c for c in text if not c.isspace()]
+    if not chars:
+        return float("nan"), float("nan")
+    nonlatin = sum(1 for c in chars if ord(c) > 0x24F) / len(chars)
+    words = WORD.findall(text.lower())
+    stop = sum(1 for w in words if w in STOPWORDS) / len(words) if words else 0.0
+    return stop, nonlatin
+
 
 RUNS = {
     "N=2  ref  (+1)": "runs/cultural_emergence/run10_2agent_7B_study_group_ashbourne_gc",
@@ -111,9 +172,14 @@ def score_thread(thread: list[dict]) -> dict | None:
     repeatable = any(len(v) > 1 for v in by_speaker.values())
     all_tokens = [toks(t) for _, t in posts]
     all_pairs = list(combinations(all_tokens, 2))
+    coh = [coherence(t) for _, t in posts]
+    stops = [c[0] for c in coh if not math.isnan(c[0])]
+    nonl = [c[1] for c in coh if not math.isnan(c[1])]
     return {
         "posts": n,
         "chars": sum(len(t) for _, t in posts) / n,
+        "stopword": (sum(stops) / len(stops)) if stops else float("nan"),
+        "nonlatin": (sum(nonl) / len(nonl)) if nonl else float("nan"),
         "thread_sim": (sum(jaccard(a, b) for a, b in all_pairs) / len(all_pairs))
         if all_pairs else float("nan"),
         "repeat": (repeats / n) if repeatable else float("nan"),
@@ -133,8 +199,6 @@ def at_iter(run: Path, it: int) -> dict | None:
     scored = [s for s in scored if s]
     if not scored:
         return None
-    import math
-
     keys = scored[0].keys()
     out = {}
     for k in keys:
@@ -153,10 +217,17 @@ def main() -> None:
     for it in iters:
         print(f"\n=== iteration {it} ===")
         hdr = (f"{'run':16} {'eps':>3} | {'posts':>5} {'chars':>6} {'thrdsim':>7} | "
+               f"{'stopwd':>6} {'nonlat':>6} {'verdict':>10} | "
                f"{'repeat':>6} {'selfsim':>7} | {'math':>5} {'leak':>5} {'frag':>5}")
         print(hdr)
         print("-" * len(hdr))
-        import math
+
+        def verdict(s):
+            if math.isnan(s):
+                return "--"
+            if s < 0.10:
+                return "WORD SALAD"
+            return "coherent" if s >= 0.28 else "READ IT"
 
         def f(v, w, prec=2):
             return f"{'--':>{w}}" if (isinstance(v, float) and math.isnan(v)) else f"{v:{w}.{prec}f}"
@@ -167,10 +238,15 @@ def main() -> None:
                 print(f"{label:16} {'-':>3} | (no trace)")
                 continue
             print(f"{label:16} {s['_n_eps']:3} | {s['posts']:5.1f} {s['chars']:6.0f} "
-                  f"{f(s['thread_sim'], 7)} | {f(s['repeat'], 6)} {f(s['self_sim'], 7)} | "
+                  f"{f(s['thread_sim'], 7)} | {f(s['stopword'], 6, 3)} {f(s['nonlatin'], 6, 3)} "
+                  f"{verdict(s['stopword']):>10} | {f(s['repeat'], 6)} {f(s['self_sim'], 7)} | "
                   f"{f(s['math'], 5)} {f(s['leak'], 5)} {f(s['frag'], 5)}")
 
-    print("\neps      = episodes in the trace file (of the iteration's 16 rollouts)")
+    print("\nstopwd   = English function-word fraction. <0.10 is reliably word salad;")
+    print("           0.10-0.28 is AMBIGUOUS and must be read (dense technical prose")
+    print("           scores low without being degraded); >=0.28 is coherent.")
+    print("nonlat   = characters outside basic Latin")
+    print("eps      = episodes in the trace file (of the iteration's 16 rollouts)")
     print("thrdsim  = mean pairwise token overlap over ALL post pairs -- comparable across N")
     print("repeat   = posts near-duplicating an earlier post by the SAME speaker")
     print("selfsim  = mean pairwise overlap within a speaker's own posts")

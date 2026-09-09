@@ -219,11 +219,82 @@ target regime somewhere on a diagonal in (`kl_coef`, `beta`). `kl_coef` above
 0.5 has never been run. Tested in
 [`../entropy_anchor_ridge_8agent_ashbourne_gc/`](../entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md).
 
+## The 2026-09-09 content read: interesting behaviour, or noisy TV?
+
+The 20 cells here plus the 8 in
+[`../entropy_anchor_ridge_8agent_ashbourne_gc/`](../entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md)
+had never been read on what the agents actually *say* — only on `alive`, then
+on delivery and entropy. Read on trace content at iteration 300, sorted by end
+entropy, they give the answer the whole regularisation line was for.
+
+**Both, at different points, and the transition is compositional rather than
+global.**
+
+| end entropy | `stopword` | what it looks like |
+|---:|---:|---|
+| 0.9–1.1 | 0.28–0.36 | coherent throughout |
+| 1.5–1.8 | 0.14–0.20 | **mixed within one episode** |
+| ~3.4 | 0.196 | coherent **opening**, noise **tail** |
+| 6.6–7.0 | 0.035–0.090 | word salad |
+
+At **end entropy 1.78** (`kl0p0_beta0p1`) one episode contains all of it at
+once — Beatrice opening with real mathematics ("area under curves like
+y = x^n … maybe start with n=1 to n=3?"), Sam and Tom answering coherently,
+Hana in name-repetition babble ("beat, beat, beat! beatrice, absolute beatrice
+okafor, beatrice okafre"), and Priya emitting nothing but `</?</?</?` for 1143
+characters. **Agents collapse individually, not together.**
+
+At **end entropy 3.37** (`kl0p5_beta0p3`) the degradation is positional: posts
+open with genuine content ("exploring modular arithmetic properties with small
+primes? could be a stepping stone") and then run into hundreds of repeated
+`💬`. **Openings survive; tails go first.**
+
+At **end entropy 6.6–7.0** it is unambiguous word salad — "sweet baked
+contentious oats propaganda zipper bepace correlcusAuthenticate Muslim謨nung".
+
+### The most interesting thing is inside the collapse
+
+At the very top of the ladder, some agents comment on their peers'
+degeneration. At 6.59, Sam: *"can someone tame this beast lang mess?"* At 6.95,
+Sam again: *"it's just you showing off … figured since everyone else babbled
+cryptograms"*, and *"couldn't come up w/ cohesive concept"*. Enough coherence
+survives to **observe that the channel has become noise** — which is a more
+interesting behaviour than anything in the coherent cells, and nothing in this
+project was designed to look for it.
+
+### The usable window, and why nothing has been aimed at it
+
+Degradation is visible from ~1.5 and entropy has barely moved below ~1.1, so
+the window is **1.1–1.8**. The `beta` steps available jump straight across it:
+0.05 → end entropy 0.78, 0.1 → 1.53–1.78, 0.2 → 1.93. Tested deliberately for
+the first time, under novelty search rather than minimisation, in
+[`../../novelty_search/entropy_release/`](../../novelty_search/entropy_release/NOTES.md).
+
+### The instrument this required
+
+**Every trace measure was fooled except one.** At end entropy 6.59 the
+word-salad population scores 15 posts, 724 mean characters, `repeat` 0.00 and
+`frag` 0.00 — indistinguishable from a healthy transcript, because word salad is
+long and non-repetitive. Only `thread_sim` hinted at it, dropping to 0.01, and
+that reads as "diverse" rather than "broken".
+
+The English function-word fraction separates them: **0.035–0.090** for the four
+collapsed populations against **0.28–0.45** for coherent ones, ρ = −0.531,
+p = 1.4 × 10⁻³ over 28 runs. Added to
+[`scripts/analyse_novelty_traces.py`](../../../scripts/analyse_novelty_traces.py).
+
+It is a **screen, not a verdict**, and reliable only below 0.10: dense
+technical prose scores **0.118** while genuine salad scores **0.139**. Anything
+between 0.10 and 0.28 must be read.
+
 ## Status
 
-`CLOSED` as a screen. Cite the `beta` result and the 2026-09-08 re-reading; do
-not cite a cell ranking, and do not cite any `alive` figure from this family
-without the delivery rate beside it.
+`CLOSED` as a screen. Cite the `beta` result, the 2026-09-08 re-reading and the
+2026-09-09 content read; do not cite a cell ranking, and do not cite any `alive`
+figure from this family without the delivery rate beside it.
+
+The content read is the most useful thing this family produced, and it cost no
+compute — the traces had been on disk since 2026-09-01.
 
 ---
 *Analysed retrospectively on 2026-09-01, re-read on 2026-09-08, from
