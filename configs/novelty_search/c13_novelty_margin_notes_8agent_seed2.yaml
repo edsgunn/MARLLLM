@@ -1,4 +1,6 @@
-# STATUS: QUEUED as job 6398719 on 2026-09-08.
+# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6398719 on
+# 2026-09-08, in 07:37:56. Analysed in runs/novelty_search/NOTES.md
+# (family-level). Void conditions PASSED: 300 iterations, return_sign -1.0.
 #
 # C13b — NOVELTY SEARCH ON A TOOL SUBSTRATE. Seed 2.
 #

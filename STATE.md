@@ -167,18 +167,18 @@ maximises and what we want are related only by argument.*
   move μ 697 → 861 and σ 344 → 1552 across 300 iterations. — *established* —
   same
 
-- 🔸 **Reversing the return's sign produces the behaviour the framework was
+- **Reversing the return's sign produces the behaviour the framework was
   built to produce, on one of two seeds.** Maximising future observation
   surprise instead of minimising it — a one-key change — gives a population
   doing collaborative mathematics at iteration 300: 89% of posts math-bearing,
   mean 660 characters, zero malformed fragments, against the reference's 1 of 42
   and five fragments. The other seed does not, at 4 of 53. — *provisional*, one
   seed of two — `runs/novelty_search/NOTES.md`
-- 🔸 **The dark-room diagnosis is right about the mechanism and incomplete as
+- **The dark-room diagnosis is right about the mechanism and incomplete as
   an explanation.** Delivery holds above the reference through iteration 200
   under a reversed sign, then falls anyway — 1.00 to 0.67 and 0.39. Silence is
   not only about the direction the return points. — *likely*, two seeds — same
-- 🔸 **Entropy rises under a reversed sign** rather than collapsing, 0.75 →
+- **Entropy rises under a reversed sign** rather than collapsing, 0.75 →
   0.96 and 0.98 against the reference's 0.80 — the predicted direction for an
   objective that rewards unpredictable futures. — *likely* — same
 
@@ -311,25 +311,29 @@ measurement downstream is void.*
   0.316 at three partners against 0.225 at fifteen with N held at 16, but
   p = 0.135 is not a result at five seeds. — *suspected* — same
 
-- 🆕 (2026-09-08b) **The return's sign raises policy entropy at every population size.**
-  Seven of seven novelty-search arms across N = 2, 4, 8 and 16 end above their
-  own same-N reference, by 0.16–0.78 nats against a same-seed noise floor of
-  0.007; the references *lose* entropy at three of four sizes. Nothing else in
-  the project moves entropy this reliably. — *established* —
-  `runs/novelty_search/NOTES.md`
-- 🆕 (2026-09-08b) **Population size does not determine the outcome under maximisation
-  either.** Delivery against N gives ρ = −0.073, p = 0.869, firing the
+- 🆕 (2026-09-08c) **The return's sign raises policy entropy at every population size.**
+  **Eight of eight** novelty-search arms across N = 2, 4, 8 and 16 end above
+  their own same-N reference, by 0.16–0.80 nats against a same-seed noise floor
+  of 0.007; the references *lose* entropy at three of four sizes and only one of
+  eight arms loses more than 0.12. MWU exact p = 0.028. Nothing else in the
+  project moves entropy this reliably. — *established*, promoted from seven arms
+  — `runs/novelty_search/NOTES.md`
+- 🔶 **Population size does not determine the outcome under maximisation
+  either.** Delivery against N gives ρ = −0.098, p = 0.810, firing the
   pre-registered falsifier; the within-N seed spread accounts for the whole
   between-N range. Same verdict as C2 reached under minimisation, from the
-  other direction. — *established*, 7 arms over 4 sizes — same
-- 🆕 (2026-09-08b) **Under maximisation the outcome is seed-dominated.** Two N=2 runs
+  other direction. — *established*, 8 arms over 4 sizes — same
+- 🔶 **Under maximisation the outcome is seed-dominated.** Two N=2 runs
   differing only in seed end at delivery 0.926 and 0.325 — 3.5× the rig's
   delivery noise floor. — *established* — same
-- 🆕 (2026-09-08b) **The sign flip keeps the python tool alive without reopening the
-  channel.** 52.2 calls per iteration at iteration 300 against the reference's
-  22.2, at an unchanged success rate (0.53 vs 0.53) and with real, varied,
-  largely non-duplicated code — while 7 of 16 turns in the same episode still
-  deliver nothing. — *provisional*, one seed — same
+- 🆕 (2026-09-08c) **The sign flip slows tool abandonment without reopening the channel,
+  and its effect size does not replicate.** Both seeds end above the reference
+  on python calls at iteration 300 (52.2 and 28.1 against 22.2) and both are
+  well above it at 200, at an unchanged success rate and with real varied code —
+  but the two seeds differ from each other by 1.9×, and seed 2's delivery ends
+  *below* the reference (0.317 vs 0.383). Direction replicates, magnitude does
+  not. **Corrects** the one-seed reading of "keeps the tool alive". —
+  *provisional*, two seeds — same
 
 ### Training horizon — what happens if you keep going
 
@@ -444,24 +448,49 @@ delivery rate and on the *change* in entropy
 (`scripts/analyse_kl_beta_grid.py`; the re-reading is written up in the sweep's
 NOTES).
 
-- 🔶 **Neither regulariser touches the public channel.** Delivery falls from 0.98
-  to 0.50 in all 20 cells, with no trend in `beta` (ρ = −0.25, p = 0.28) or
-  `kl_coef` (ρ = −0.16, p = 0.49), and not one cell ends above 0.8. Across a
-  fifty-fold range in both knobs, regularisation does not reach the dark-room
-  collapse. — *established* — sweep NOTES, the 2026-09-08 re-reading
-- 🔶 **The entropy bonus is a step function, not a dial.** For `beta` ≤ 0.05
+- 🔸 **Neither regulariser touches the public channel *within* `kl_coef` ≤ 0.5.**
+  Delivery falls from 0.98 to 0.50 in all 20 cells of the old grid, with no
+  trend in `beta` (ρ = −0.25, p = 0.28) or `kl_coef` (ρ = −0.16, p = 0.49), and
+  not one cell above 0.8. — *established*, over `kl_coef` ∈ [0, 0.5] only —
+  sweep NOTES, the 2026-09-08 re-reading
+- 🆕 (2026-09-08c) **But it does above that, and this corrects the entry above, which was
+  stated without its range earlier the same day.** At `kl_coef` 2.0–5.0 delivery
+  is 0.519–0.975 (mean 0.722) against the old grid's 0.395–0.613 (mean 0.501),
+  MWU exact p = 1.2 × 10⁻⁴, with 6 of 8 cells above the old grid's *maximum* and
+  an effect on the mean of +0.222 against a 0.173 noise floor. — *established* —
+  `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`
+- 🆕 (2026-09-08c) **A stronger KL anchor raises the safe ceiling on the entropy bonus,
+  roughly doubling it.** `beta` = 0.2 goes from Δperception +0.71 at `kl_coef`
+  0.5 to −0.22 and −0.34 at 2.0; `beta` = 0.4, catastrophic at every `kl_coef`
+  the old grid tried, ends at perception 2.00 and 2.06. The ceiling moves from
+  below 0.2 to at least 0.4 for a 4× anchor. — *established*, two seeds per cell
+  — same
+- 🆕 (2026-09-08c) **The target regime — policy entropy up without perception loss
+  collapsing — is reachable.** (2.0, 0.4) seed 2: Δentropy +0.59 with
+  Δperception −0.11, on healthy transcripts. Its sibling seed reached +0.28,
+  missing the pre-registered +0.30 bar by 0.02, so the bar was cleared on one
+  seed of two. — *provisional* — same
+- 🆕 (2026-09-08c) **Delivery tracks how little the policy moved from base.** Spearman
+  ρ = −0.503, p = 0.003 over all 28 regularisation cells. The least-drifted cell
+  delivers 0.975; the most-drifted 0.395. So the anchor may buy the channel by
+  suppressing learning rather than by training better. — *likely* — same
+- 🆕 (2026-09-08c) **`kl_coef` = 5.0 prevents learning outright.** KL from base 0.02 with
+  entropy pinned (+0.09, +0.15); its delivery of 0.975 is the base model, which
+  delivers ~0.98 untrained. Its numbers must not be cited as a training outcome.
+  — *established* — same
+- 🔸 **The entropy bonus is a step function, not a dial.** For `beta` ≤ 0.05
   (9 cells) |Δentropy| ≤ 0.12 with the sign as often negative as positive; for
   `beta` ≥ 0.10 (11 cells) Δentropy ≥ +0.16. The groups separate completely,
   MWU exact p = 1.2 × 10⁻⁵. **There is no `beta` that raises entropy a little.**
   — *established* — same
-- 🔶 **Above the step, entropy and perception loss are locked together.** Spearman
+- 🔸 **Above the step, entropy and perception loss are locked together.** Spearman
   Δentropy vs Δperception = +0.853, p = 4.4 × 10⁻¹², n = 20. **The regime where
   policy entropy rises without the perception loss collapsing does not occur
   anywhere on this grid.** — *established* — same
 - **`beta` ≥ 0.1 destroys the population, and `beta` = 0.5 catastrophically**
   (entropy above 6.5 nats, perception above 5.2). The cliff is below 0.2. —
   *established* — same
-- 🔶 **The KL anchor does fight the entropy bonus.** At `beta` = 0.10, Δentropy
+- 🔸 **The KL anchor does fight the entropy bonus.** At `beta` = 0.10, Δentropy
   falls monotonically +1.04 → +0.92 → +0.79 → +0.16 as `kl_coef` goes
   0 → 0.01 → 0.10 → 0.50; the duplicate pair agrees on the last point to 0.01.
   Both terms act only at ACT positions, so they compete for the same
@@ -470,15 +499,15 @@ NOTES).
   - **CORRECTS** the previous entry "the entropy bonus destroys populations
     without moving them from base, so the KL anchor cannot protect against it",
     which was drawn from four cells at one `kl_coef`. **Withdrawn.**
-- 🔶 **The KL coefficient controls drift, and the entropy bonus.** Raising it from
+- 🔸 **The KL coefficient controls drift, and the entropy bonus.** Raising it from
   0 to 0.5 halves end-of-training KL from base; it also suppresses the entropy
   rise sixfold, per the entry above. It does not change delivery. — *likely* —
   same
-- 🔶 **`alive` does not track the channel.** Across the 20 cells it is uncorrelated
+- 🔸 **`alive` does not track the channel.** Across the 20 cells it is uncorrelated
   with the well-formed post rate, ρ = −0.10, p = 0.66. Fourth independent
   confirmation. Do not cite an `alive` figure from these families without the
   delivery rate beside it. — *established* — same
-- 🔶 **No cell ranking among the surviving settings is supported.** The
+- 🔸 **No cell ranking among the surviving settings is supported.** The
   differences between the good cells are smaller than the spread between two
   runs of one identical configuration. The zoom's "best cell in the campaign"
   (`kl` 0.5, `beta` 0.05, alive 0.75, perception 1.75) is **withdrawn**: it ends
@@ -486,19 +515,19 @@ NOTES).
 - **Removing both regularisers made one population *better*, not worse.** —
   *provisional*, one run each side —
   `runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc_no_reg/NOTES.md`
-- 🔶 **What raises policy entropy is the return's sign, not the regularisers.**
+- 🔸 **What raises policy entropy is the return's sign, not the regularisers.**
   Through the same window on the same substrate, `return_sign` = −1 gives
   Δentropy +0.22/+0.23 against the reference's +0.06 — roughly four times any
   safe `beta` — and on seed 2 perception loss *fell* 0.46 while entropy rose.
   The Δperception rests on one seed and only just clears the noise floor; the
   Δentropy does not. — *likely* for the entropy, *provisional* for the
   perception — `runs/novelty_search/NOTES.md`
-- 🔶 **Open: whether a stronger anchor licenses a larger bonus.** `kl_coef` above
+- 🔸 **Open: whether a stronger anchor licenses a larger bonus.** `kl_coef` above
   0.5 had never been run. Being tested at (2.0, 0.01/0.2/0.4) and (5.0, 0.4),
   two seeds each — `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`,
   jobs 6404722–6404729, submitted 2026-09-08.
 
-🔶 **The noise floor of this rig, which every entry above is read against.** The
+🔸 **The noise floor of this rig, which every entry above is read against.** The
 old grid contains an accidental duplicate run at the **same seed**; the two runs
 differ by 0.007 in Δentropy, **0.431 in Δperception** and **0.173 in delivery**.
 So Δentropy carries weight from a single run and Δperception and delivery do
@@ -688,7 +717,7 @@ has failed three times and must not be resubmitted before
 
 ## What we want to learn
 
-- 🆕 (2026-09-08b) **Delivery is necessary but not sufficient, and this is the fourth
+- 🔶 **Delivery is necessary but not sufficient, and this is the fourth
   metric artefact.** A two-agent population locked into a short mutually
   predictable exchange scores delivery 0.926 on 52-character posts of which 38%
   near-duplicate an earlier post by the same speaker. Degeneration into `</?`
@@ -698,16 +727,23 @@ has failed three times and must not be resubmitted before
   repetition measure beside a delivery figure. — *established*, one direct
   demonstration — `runs/novelty_search/NOTES.md`,
   `scripts/analyse_novelty_traces.py`
-- 🆕 (2026-09-08b) **A trace file holds one episode of the iteration's sixteen rollouts.**
+- 🔶 **A trace file holds one episode of the iteration's sixteen rollouts.**
   Every trace-derived figure in this project is n = 1 episode unless stated
   otherwise. This is what produced the tool substrate's overstated "python
   calls reach zero" premise — the traced episode had 0 calls while the
   population averaged 22.2 per iteration. — *established* — same
-- 🆕 (2026-09-08b) **Within-speaker repetition measures are structurally biased by
+- 🔶 **Within-speaker repetition measures are structurally biased by
   population size.** Posts per speaker is `max_posts`/N — 8 at N=2, 1 at N=16,
   where a within-speaker repeat cannot occur at all. Never compare them across
   N; use pairwise similarity over all post pairs instead. — *established* —
   same
+
+- 🆕 (2026-09-08c) **The `math` regex under-counts mathematical reasoning expressed in
+  prose.** A population working correctly through subset counting — "one
+  element, one valid subset; adding another shows how this could grow" — scores
+  0.00, because the regex wants symbols, LaTeX or proof vocabulary. It measures
+  notation, not reasoning; its zeros are not evidence of absence. — *established*
+  — `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`
 
 ### What we cannot currently see
 

@@ -9,7 +9,7 @@ as Tier-C item C13; now its own line of experiments.*
 | Configs | [`configs/novelty_search/`](../../configs/novelty_search/) |
 | Model | `Qwen2.5-7B-Instruct`, LoRA r64 |
 | Arms | `study_group_ashbourne_gc` at N = 2, 4, 8, 16 (2 seeds each) and `margin_notes` at N = 8 (2 seeds) |
-| Analysed | 10 of 12 arms · the N=16 seed 2 and `margin_notes` seed 2 were still running on 2026-09-08 |
+| Analysed | all 12 arms, 2026-09-08 |
 | Scripts | [`analyse_novelty_size.py`](../../scripts/analyse_novelty_size.py), [`analyse_novelty_traces.py`](../../scripts/analyse_novelty_traces.py) |
 | **Differs from** | each arm from **its own reference run at the same N** — `return_sign` −1.0 and nothing else. Verified field by field. |
 
@@ -53,10 +53,12 @@ fourth metric artefact in this campaign, and the first to hit *delivery* — the
 measure that had survived the other three. Delivery is necessary, not
 sufficient.
 
-**On the tool substrate the sign keeps the capability without reopening the
-channel**: 2.35× the python calls at iteration 300 (52.2/iter against 22.2), at
-an unchanged success rate and with real varied code — while 7 of 16 turns in the
-same episode still deliver nothing. One seed.
+**On the tool substrate the sign slows tool abandonment without reopening the
+channel** — but the effect size does not replicate. Both seeds end above the
+reference on python calls at iteration 300 (52.2 and 28.1 against 22.2) and both
+are well above it at 200, at an unchanged success rate and with real varied
+code; but the two seeds differ from each other by 1.9×, and seed 2's delivery
+ends *below* the reference. Direction consistent, magnitude not.
 
 ## Delivery, and what the posts contain
 
@@ -120,11 +122,11 @@ Against the reference at the same iteration:
 
 ### Added 2026-09-08, from the size sweep and the tool substrate
 
-- **The return's sign raises policy entropy at every population size.** 7 of 7
-  arms sit above their own same-N reference, by 0.16–0.78 against a same-seed
-  noise floor of 0.007; references lose entropy at 3 of 4 sizes and novelty
-  arms essentially never do. — *established* — this family vs run10/run7/run8,
-  `scripts/analyse_novelty_size.py`
+- **The return's sign raises policy entropy at every population size.** 8 of 8
+  arms sit above their own same-N reference, by 0.16–0.80 against a same-seed
+  noise floor of 0.007; references lose entropy at 3 of 4 sizes and only 1 of 8
+  novelty arms loses more than 0.12. MWU exact p = 0.028. — *established* —
+  this family vs run10/run7/run8, `scripts/analyse_novelty_size.py`
 - **Population size does not determine the outcome under maximisation either.**
   Delivery against N gives ρ = −0.073, p = 0.869, and the within-N seed spread
   (0.601 at N=2) accounts for the entire between-N range. The pre-registered
@@ -141,11 +143,13 @@ Against the reference at the same iteration:
   can. Always report a repetition measure beside a delivery figure. —
   *established*, one direct demonstration plus its own reference behaving worse
   — same, and `scripts/analyse_novelty_traces.py`
-- **The sign flip keeps the python tool alive without reopening the channel.**
-  52.2 calls per iteration at iteration 300 against the reference's 22.2, at an
-  unchanged success rate (0.53 vs 0.53) and with real, varied, non-duplicated
-  code — while 7 of 16 turns in the same episode still deliver nothing. —
-  *provisional*, one seed — this family vs `run7_8agent_7B_margin_notes`
+- **The sign flip slows tool abandonment without reopening the channel.** Both
+  seeds end above the reference on python calls at iteration 300 (52.2 and 28.1
+  against 22.2) and both are well above it at 200, at an unchanged success rate
+  and with real, varied code. But the seeds differ from each other by 1.9× and
+  seed 2's delivery ends *below* the reference, so the direction replicates and
+  the magnitude does not. — *provisional*, two seeds — this family vs
+  `run7_8agent_7B_margin_notes`
 - **Trace files hold one episode of sixteen rollouts.** Every trace-derived
   figure in this project is n = 1 episode unless stated otherwise; this is what
   produced the tool substrate's overstated "calls reach zero" premise. —
@@ -251,6 +255,37 @@ So the sign flip **keeps the capability without reopening the channel.** That
 is a narrower result than "novelty search fixes tool abandonment", and it is
 the one the data supports.
 
+#### Correction: seed 2 does not replicate the effect size
+
+Seed 2 (6398719) finished at 300 iterations, and **the tool result is much
+weaker than one seed suggested.** Python calls per iteration:
+
+| iteration | 25 | 100 | 200 | 300 |
+|---|---:|---:|---:|---:|
+| reference (+1) | 142.2 | 110.9 | 73.2 | **22.2** |
+| novelty (−1) seed 1 | 130.3 | 89.2 | 76.4 | **52.2** |
+| novelty (−1) seed 2 | 143.0 | 131.2 | 118.9 | **28.1** |
+
+Seed 2 holds tool use far above the reference through iteration 200 — 118.9
+against 73.2, the largest gap anywhere in the pair — and then falls off a cliff
+between 200 and 300, ending at 28.1. Seed 1 declines gradually and ends at 52.2.
+
+So at iteration 300 both seeds end above the reference, but by **2.35× and
+1.27×** — the two seeds differ from each other by more than seed 2 differs from
+the reference. And **delivery does not survive at all**: seed 2 ends at 0.317
+against the reference's 0.383, i.e. *worse*.
+
+**What survives.** Both seeds end above the reference on call count, and both
+are well above it at iteration 200. The direction is consistent across two
+seeds; the magnitude is not, and the delivery half of the claim is gone.
+Downgraded from the reading below: the sign flip **slows** tool abandonment
+rather than preventing it, and does not keep the channel open. — *provisional*,
+two seeds, direction consistent and effect size varying by 1.9×.
+
+The degenerate check still passes on seed 1's traces, and nothing about seed 2
+changes that reading — it is a claim about what the calls contain, not how many
+there are.
+
 #### A correction to this section's own premise
 
 The header stated that the reference "ABANDONS THE TOOL … By iteration 300 the
@@ -303,9 +338,8 @@ trend.
 
 ### Results, 2026-09-08 — seven of eight arms in
 
-Void conditions checked for all: 300 iterations and `return_sign` = −1.0 on
-every agent. `novelty_size_16agent_…_seed2` (6398727) was **still running** at
-analysis time and is excluded, so N=16 is one seed. Read with
+Void conditions checked and **passed for all eight arms**: 300 iterations and
+`return_sign` = −1.0 on every agent. Read with
 [`scripts/analyse_novelty_size.py`](../../scripts/analyse_novelty_size.py) and
 [`scripts/analyse_novelty_traces.py`](../../scripts/analyse_novelty_traces.py).
 
@@ -322,16 +356,17 @@ analysis time and is excluded, so N=16 is one seed. Read with
 | 8 | novelty s2 | 0.983 | 0.455 | +0.23 | 1.71 | −0.46 |
 | 16 | reference (+1) | 0.978 | 0.368 | −0.27 | 1.71 | −0.63 |
 | 16 | novelty s1 | 0.981 | 0.617 | +0.03 | 2.44 | +0.07 |
+| 16 | novelty s2 | 0.978 | 0.384 | +0.41 | 2.69 | +0.35 |
 
 #### The pre-registered falsifier fired
 
 The configs said: *"WHAT WOULD FALSIFY 'SIZE MATTERS UNDER MAXIMISATION':
 delivery flat across N=2, 4, 8 and 16, as it is under minimisation."*
 
-It is flat. Delivery against N across the novelty arms gives ρ = −0.073,
-p = 0.869. And the **within-N seed spread swamps everything**: 0.601 at N=2
-(0.926 vs 0.325), 0.426 at N=4, 0.183 at N=8, against a between-N range of
-0.225–0.926 that those spreads entirely account for. **Population size does not
+It is flat. Delivery against N across all eight novelty arms gives ρ = −0.098,
+p = 0.810. And the **within-N seed spread swamps everything**: 0.601 at N=2
+(0.926 vs 0.325), 0.426 at N=4, 0.233 at N=16, 0.183 at N=8, against a
+between-N range of 0.225–0.926 that those spreads entirely account for. **Population size does not
 determine the outcome under maximisation either** — the same verdict C2 reached
 under minimisation, now from the other direction.
 
@@ -346,18 +381,18 @@ delivery noise floor, so the spread is real and it is not measurement.
 | 2 | −0.45 | −0.12, +0.07 | 2/2 |
 | 4 | −0.39 | −0.08, +0.39 | 2/2 |
 | 8 | +0.06 | +0.22, +0.23 | 2/2 |
-| 16 | −0.27 | +0.03 | 1/1 |
+| 16 | −0.27 | +0.03, +0.41 | 2/2 |
 
-**7 of 7 novelty arms have Δentropy above their own reference at the same N.**
-MWU exact p = 0.042 pooled; at the level of independent sizes it is 4 of 4,
+**8 of 8 novelty arms have Δentropy above their own reference at the same N.**
+MWU exact p = 0.028 pooled; at the level of independent sizes it is 4 of 4,
 which alone is only p = 0.125 by sign test. What makes it solid is not the
-p-value but the **effect size against the noise floor**: the gaps are 0.16–0.78
+p-value but the **effect size against the noise floor**: the gaps are 0.16–0.80
 where two runs of one identical config at one seed differ by **0.007**
 (`../cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/NOTES.md`). Every one
-of the seven comparisons is 20–100× the noise.
+of the eight comparisons is 20–110× the noise.
 
 And the direction is asymmetric: **references lose entropy at 3 of 4 sizes**
-(−0.45, −0.39, −0.27) while only 1 of 7 novelty arms loses more than 0.12.
+(−0.45, −0.39, −0.27) while only 1 of 8 novelty arms loses more than 0.12.
 Minimisation collapses the policy distribution; maximisation prevents that
 collapse. This is the same effect seen in the regularisation grid, where
 *no* value of `beta` produced a small entropy increase and the KL anchor only
@@ -445,18 +480,19 @@ negative throughout, which is the same evidence.
 
 ## Status
 
-`OPEN`. Ten of twelve arms analysed; `novelty_size_16agent_…_seed2` (6398727)
-and `c13_novelty_margin_notes_…_seed2` (6398719) were still running on
-2026-09-08 and must be folded in when they land — N=16 and the whole tool
-result are currently one seed each.
+`CLOSED` at 300 iterations. All twelve arms ran and passed their void
+conditions.
 
-**Citable now:** the entropy result (7/7 arms, established), the size null
+**Citable:** the entropy result (8/8 arms, established), the size null
 (established), the seed-domination (established), and the delivery artefact
 (established).
 
-**Not citable:** the tool result and the N=4 seed-2 transcript, both one seed;
-and the original mathematics headline, which still wants five seeds and a judge
-pass.
+**Not citable:** the tool effect size, which does not replicate across its two
+seeds — the direction does; the N=4 seed-2 transcript, one seed; and the
+original mathematics headline, which still wants five seeds and a judge pass.
+The `math` regex is also now known to under-count reasoning expressed in prose
+(`../cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`), so
+its zeros are not evidence of absence.
 
 ---
 *Analysed 2026-09-04 and 2026-09-08 from `metrics.jsonl` and the checkpoint

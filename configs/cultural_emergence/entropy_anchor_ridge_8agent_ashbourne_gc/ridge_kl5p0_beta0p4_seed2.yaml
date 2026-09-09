@@ -1,3 +1,8 @@
+# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6404729 on 2026-09-08,
+# in 04:04:05. Analysed in
+# runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md
+# (family-level). Void conditions PASSED: 300 iterations, kl_coef/beta match.
+#
 # ENTROPY-ANCHOR RIDGE. Does a stronger KL anchor raise the safe ceiling on
 # the entropy bonus, opening a setting where policy entropy rises WITHOUT the
 # perception loss collapsing?
