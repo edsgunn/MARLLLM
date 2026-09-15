@@ -1,5 +1,30 @@
-# STATUS: NOT SUBMITTED. Hold until Tier 1 shows the correction moves
-# something; a knob on an inert mechanism is not worth 6 GPU-hours.
+# STATUS: SUBMITTED 2026-09-15 as job 6580461, against commit 9e9e25d.
+#
+# THE HOLD, AND WHY IT WAS RELEASED
+#   This config was written to wait until Tier 1 showed the correction moves
+#   something. Released at Tier 1 iteration ~120-175 of 300, on the partial
+#   run, against the pre-registered gate:
+#
+#     * lp/return_rank_corr is -0.39 to -0.81 in all four arms. The gate was
+#       "near 1.0 means the correction reorders nothing and cannot matter".
+#       It is not near 1.0 — it is strongly NEGATIVE, so the corrected return
+#       orders actions close to opposite to the surrogate. The null is cleared
+#       by a wide margin and this is the result that licenses the rest.
+#     * lp/in_use == 1.0 on every record of all four runs, and
+#       lp/reference_age_iters runs [1, 50] in the lagged arms — exactly the
+#       [1, 2L] the two-slot buffer is designed to give. Neither void
+#       condition has fired.
+#     * The lagged and base arms have separated on lp/progress_per_token,
+#       which is what the pair was built to test: base rises monotonically to
+#       ~0.10 nats/token, lagged peaks near 0.06 at iteration 50 and decays
+#       (to ~0.00 on seed 1, 0.03 on seed 2). The reference tracking is doing
+#       what it was supposed to do.
+#
+#   Released on partial runs rather than finished ones, which is a real
+#   weakening of the gate: none of these arms has passed iteration 175 of 300,
+#   and this project's runs change character late — the 8-agent reference goes
+#   from perception loss 1.783 at iteration 150 to 2.476 at 300. Read that as
+#   a decision to spend queue time early, not as Tier 1 having reported.
 #
 # TIER 2 — THE LAG KNOB AT L=100. 8 agents, Ashbourne GC, seed 1.
 #

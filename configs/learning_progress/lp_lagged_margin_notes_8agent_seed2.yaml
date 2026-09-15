@@ -1,4 +1,41 @@
-# STATUS: NOT SUBMITTED. Hold until Tier 1 reports.
+# STATUS: SUBMITTED 2026-09-15 as job 6580464, against commit 9e9e25d.
+#
+# THE HOLD, AND WHY IT WAS RELEASED
+#   This config was written to wait until Tier 1 showed the correction moves
+#   something. Released at Tier 1 iteration ~120-175 of 300, on the partial
+#   run, against the pre-registered gate:
+#
+#     * lp/return_rank_corr is -0.39 to -0.81 in all four arms. The gate was
+#       "near 1.0 means the correction reorders nothing and cannot matter".
+#       It is not near 1.0 — it is strongly NEGATIVE, so the corrected return
+#       orders actions close to opposite to the surrogate. The null is cleared
+#       by a wide margin and this is the result that licenses the rest.
+#     * lp/in_use == 1.0 on every record of all four runs, and
+#       lp/reference_age_iters runs [1, 50] in the lagged arms — exactly the
+#       [1, 2L] the two-slot buffer is designed to give. Neither void
+#       condition has fired.
+#     * The lagged and base arms have separated on lp/progress_per_token,
+#       which is what the pair was built to test: base rises monotonically to
+#       ~0.10 nats/token, lagged peaks near 0.06 at iteration 50 and decays
+#       (to ~0.00 on seed 1, 0.03 on seed 2). The reference tracking is doing
+#       what it was supposed to do.
+#
+#   Released on partial runs rather than finished ones, which is a real
+#   weakening of the gate: none of these arms has passed iteration 175 of 300,
+#   and this project's runs change character late — the 8-agent reference goes
+#   from perception loss 1.783 at iteration 150 to 2.476 at 300. Read that as
+#   a decision to spend queue time early, not as Tier 1 having reported.
+#   ONE PREDICTION IN THE SUITE README IS ALREADY IN DOUBT. It says this
+#   correction does not touch the length channel, because KL(p_env || p_theta)
+#   stays extensive in observation tokens. In Tier 1 the posts are getting
+#   LONGER — mean post tokens per turn 49-58 at iteration 25 against 76-149
+#   now, with silent turn rate at 0.000-0.035 — where the public channel
+#   closes in 20 of 20 runs of c1 and 63 of 65 of B4. The reference run
+#   predates these two metrics so there is no matched comparison yet, and the
+#   trace-based delivery rate has not been computed; treat it as unexplained
+#   rather than as a result. It makes the tool substrate more interesting, not
+#   less: python calls are the sharper readout and they do not depend on
+#   either metric.
 #
 # TIER 4 — LEARNING PROGRESS ON A TOOL SUBSTRATE. 8 agents, margin_notes with
 # the python tool, seed 2.

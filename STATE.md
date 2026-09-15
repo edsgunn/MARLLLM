@@ -780,21 +780,31 @@ anywhere in the campaign. — *established* — sweep NOTES
 |---|---|---|
 | 6571670, 6571671 | [`learning_progress/lp_lagged_*`](configs/learning_progress/README.md) | Tier 1 of the learning-progress suite, two seeds. The return's per-observation summand becomes `M_s - M_s^-` against this agent's own adapter from 26–50 iterations ago, which cancels `H(p_env)` exactly. Read against `run7_8agent_7B_study_group_ashbourne_gc` on policy entropy first — the one quantity the sign flip moved at 8 of 8 arms — and on `lp/return_rank_corr`, which decides whether the correction could have mattered at all. |
 | 6571672, 6571673 | [`learning_progress/lp_base_*`](configs/learning_progress/README.md) | The same correction against the frozen pre-trained model instead. The cancellation is exact for any second reference, so this arm separates "the cancellation is what matters" from "the reference has to track". Nearly free — the reference forward already runs for the KL term. |
+| 6580460, 6580461 | [`learning_progress/lp_lag{005,100}_*`](configs/learning_progress/README.md) | The lag knob at L=5 and L=100, bracketing Tier 1's L=25. Lag is the scheme's only knob and it interpolates the whole family: 0 makes the return identically zero, infinite makes it novelty relative to base. |
+| 6580462 | [`learning_progress/lp_lagged_nonorm_*`](configs/learning_progress/README.md) | The same correction with `normalise_returns` off. Motivated *by* Tier 1: lagged seed 1 has `lp/progress_per_token` at ~0.000 while KL climbs past 3.2, which is a policy moving hard on a reward that has gone to zero — the signature of standardisation rescaling estimator noise back to unit variance. |
+| 6580463, 6580464 | [`learning_progress/lp_lagged_margin_notes_*`](configs/learning_progress/README.md) | The tool substrate, two seeds. The reference abandons python entirely by iteration 300; a return that pays for improvement should make tool output — structured, learnable, and not suppressible by the population — worth eliciting. Read on the python counters and the traces, not on `alive`. |
 
-Two things to hold against these before reading them. The correction does
-**not** address the length channel: `KL(p_env ‖ p_theta)` summed over positions
-is still extensive in observation tokens, so a falling delivery rate is not
-evidence against it. And `lp/progress_per_token` is *expected* to decay, because
-the perception arm drives the improvement the action arm is paid for — an arm
-ending at low KL with entropy intact is the action term self-extinguishing, not
-the objective working, and has to be compared against C10's perception-only arm
-before it is read as a success.
+Held against these before reading them. `lp/progress_per_token` is *expected*
+to decay, because the perception arm drives the improvement the action arm is
+paid for — an arm ending at low KL with entropy intact is the action term
+self-extinguishing, not the objective working, and has to be read against C10's
+perception-only arm before it counts as a success.
+
+**And the pre-registration's other prediction is already in doubt.** It says
+this correction cannot touch the length channel, because `KL(p_env ‖ p_theta)`
+stays extensive in observation tokens. At iteration 120–175 the Tier 1 posts
+are getting *longer* — mean post tokens per turn 49–58 at iteration 25 against
+76–149 now — with silent turn rate at 0.000–0.035, where the public channel
+closes in 20 of 20 runs of C1 and 63 of 65 of B4. **This is not a result yet**:
+the runs are unfinished and unanalysed, `mean_post_tokens` and
+`silent_turn_rate` postdate the reference run so there is no matched
+comparison, and the trace-based well-formed post rate — the measure PROCESS.md
+requires beside any of this — has not been computed. Recorded here so that if
+it holds up it is not mistaken for something that was expected.
 
 One config is **held** rather than queued: [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md)
 has failed three times and must not be resubmitted before
-`observation_segments` is instrumented. Tiers 2–4 of the learning-progress
-suite (the lag sweep, the un-normalised arm and the `margin_notes` tool
-substrate, 5 jobs) are written and held on Tier 1 reporting.
+`observation_segments` is instrumented.
 
 The novelty-search jobs previously listed here (6398717–6398727) have finished
 and are analysed in `runs/novelty_search/NOTES.md`. The entropy-release family
