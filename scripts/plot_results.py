@@ -96,6 +96,17 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
         "gen",           # per-env generation-token diagnostics
         "eval",          # var-decomp diagnostics
         "tool",          # env tool-use counters
+        # Namespaces that look like `<prefix>/<metric>` but are not agents.
+        # Without these the legend gains phantom members and, worse, the
+        # agent colour index shifts — `per_agent` (wall-time breakdown) sorts
+        # between real names.
+        "per_agent",     # per-agent wall-time breakdown (its own sub-keys)
+        "async",         # async-rollout stage counters
+        "pop",           # population-level counts (n_trainable, n_frozen)
+        "util",          # utilisation summary
+        "envlp",         # environment-likelihood provenance diagnostics
+        "loss",          # loss-internal token counts
+        "popart",        # PopArt moment tracking
     }
     entity_metrics: dict[str, set[str]] = {}  # prefix -> set of metric names
     for k in keys:
@@ -131,11 +142,19 @@ def load_metrics(exp_dir: Path) -> dict[str, np.ndarray] | None:
         for p in ordered_prefixes:
             all_metrics |= entity_metrics.get(p, set())
 
+        # A metric is not necessarily emitted by every agent: under partial
+        # freezing only the learner has loss metrics, while ALL members have
+        # generation metrics. Stacking silently dropped the absentees but kept
+        # the full name list, so row i of a short stack was labelled with
+        # `agent_names[i]` — the learner's curves came out under whichever
+        # agent happened to sort first. Record the contributing names per
+        # metric so every panel can label its own rows.
         for metric in all_metrics:
-            series = [data[f"{p}/{metric}"] for p in ordered_prefixes
-                      if f"{p}/{metric}" in data]
-            if series:
-                data[f"agents/{metric}"] = np.stack(series)  # (n_agents, T)
+            contributors = [p for p in ordered_prefixes if f"{p}/{metric}" in data]
+            if contributors:
+                data[f"agents/{metric}"] = np.stack(
+                    [data[f"{p}/{metric}"] for p in contributors])   # (n, T)
+                data[f"agent_names/{metric}"] = contributors
 
         data["agent_names"] = ordered_prefixes
 
@@ -239,26 +258,48 @@ def _agent_color(i: int, n: int):
     return _distinct_palette(n)[i]
 
 
-def _plot_per_agent(ax, iters, agents_arr, agent_names, *, alpha=0.95, lw=1.2):
+def _plot_per_agent(ax, iters, agents_arr, agent_names, *, alpha=0.95, lw=1.2,
+                    colour_index=None, n_colours=None):
     """Plot one line per agent on ``ax`` using the shared agent palette.
+
+    ``agent_names`` must name the rows of ``agents_arr`` — under partial
+    freezing a loss metric has one row (the learner) while a generation metric
+    has one per member, so the two panels carry different name lists.
+
+    ``colour_index`` maps an agent name to its position in the FULL population
+    so a given agent keeps one colour across every panel; without it a panel
+    with fewer rows would recolour everyone. Falls back to row order.
 
     No legend is created on the axis itself — agent identity is conveyed by
     a single figure-level legend assembled in ``plot_training_curves``.
     """
-    n = len(agents_arr)
+    n = n_colours or len(agents_arr)
     for i, series in enumerate(agents_arr):
         label = agent_names[i] if i < len(agent_names) else f"agent_{i}"
+        ci = colour_index.get(label, i) if colour_index else i
         ax.plot(iters, smooth(series),
-                color=_agent_color(i, n),
+                color=_agent_color(ci, n),
                 label=label, alpha=alpha, linewidth=lw)
 
 
 def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     iters = data.get("iteration", np.arange(len(data["total_loss"])))
     has_kl = np.any(data.get("agents/kl", np.zeros(1)) != 0)
-    agent_names: list[str] = data.get("agent_names", [])
-    n_agents = (data.get("agents/mean_return").shape[0]
-                if "agents/mean_return" in data else len(agent_names))
+    agent_names: list[str] = list(data.get("agent_names", []))
+    # The full roster, not the row count of any one metric: under partial
+    # freezing `agents/mean_return` has a single row (the learner) and using it
+    # collapsed the legend to one name for an eight-member population.
+    n_agents = len(agent_names)
+    _cidx = {name: i for i, name in enumerate(agent_names)}
+
+    def per_agent(ax, metric, **kw):
+        """Plot `agents/<metric>` labelled with ITS OWN contributing names."""
+        key = f"agents/{metric}"
+        if key not in data:
+            return
+        names = list(data.get(f"agent_names/{metric}", agent_names))
+        _plot_per_agent(ax, iters, data[key], names,
+                        colour_index=_cidx, n_colours=max(n_agents, 1), **kw)
 
     # Layout (4 rows × 2 cols):
     #   row 0 : total loss              | loss components (mean over agents)
@@ -321,8 +362,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
                         all_returns.min(axis=0),
                         all_returns.max(axis=0),
                         alpha=0.12, color="#4C72B0")
-        _plot_per_agent(ax, iters, all_returns, agent_names,
-                        alpha=0.55, lw=0.9)
+        per_agent(ax, "mean_return", alpha=0.55, lw=0.9)
         mean_line, = ax.plot(iters, smooth(mean_ret), color="#222222",
                              linewidth=1.8, label="population mean")
         # Only legend the population-mean handle here — the figure-level
@@ -334,28 +374,24 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
 
     # ── Row 1 col 1: value loss per agent ───────────────────────────────────
     ax = axes[1, 1]
-    if "agents/value_loss" in data:
-        _plot_per_agent(ax, iters, data["agents/value_loss"], agent_names)
+    per_agent(ax, "value_loss")
     ax.set_title("Value loss (per agent)")
     ax.set_ylabel("loss")
 
     # ── Row 2: ACTION ‖ PERCEPTION  (paired side-by-side) ───────────────────
     ax = axes[2, 0]
-    if "agents/act_loss" in data:
-        _plot_per_agent(ax, iters, data["agents/act_loss"], agent_names)
+    per_agent(ax, "act_loss")
     ax.set_title("Action loss — REINFORCE (per agent)")
     ax.set_ylabel("loss")
 
     ax = axes[2, 1]
-    if "agents/perc_loss" in data:
-        _plot_per_agent(ax, iters, data["agents/perc_loss"], agent_names)
+    per_agent(ax, "perc_loss")
     ax.set_title("Perception loss — NTP on obs (per agent)")
     ax.set_ylabel("loss")
 
     # ── Row 3: KL ‖ ENTROPY  (paired side-by-side) ──────────────────────────
     ax = axes[3, 0]
-    if "agents/kl" in data:
-        _plot_per_agent(ax, iters, data["agents/kl"], agent_names)
+    per_agent(ax, "kl")
     ax.set_title("KL from reference (per agent)"
                  + ("" if has_kl else "  [kl_coef=0]"))
     ax.set_ylabel("KL (nats)")
@@ -363,8 +399,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
         ax.set_ylim(-1, 1)
 
     ax = axes[3, 1]
-    if "agents/entropy" in data:
-        _plot_per_agent(ax, iters, data["agents/entropy"], agent_names)
+    per_agent(ax, "entropy")
     ax.set_title("Policy entropy — PER TOKEN (per agent)")
     ax.set_ylabel("nats / action token")
 
@@ -378,7 +413,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     if has_len:
         ax = axes[4, 0]
         if "agents/mean_post_tokens" in data:
-            _plot_per_agent(ax, iters, data["agents/mean_post_tokens"], agent_names)
+            per_agent(ax, "mean_post_tokens")
             cap = _post_token_cap(exp_dir)
             if cap:
                 ax.axhline(cap, color="#888888", linestyle=":", linewidth=0.9)
@@ -390,7 +425,7 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
 
         ax = axes[4, 1]
         if "agents/mean_action_tokens" in data:
-            _plot_per_agent(ax, iters, data["agents/mean_action_tokens"], agent_names)
+            per_agent(ax, "mean_action_tokens")
             cap = _total_token_cap(exp_dir)
             if cap:
                 ax.axhline(cap, color="#888888", linestyle=":", linewidth=0.9)
@@ -410,15 +445,14 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     # under the length row and shares its x-axis.
     if has_len:
         ax = axes[5, 0]
-        if "agents/entropy_action_total" in data:
-            _plot_per_agent(ax, iters, data["agents/entropy_action_total"], agent_names)
+        per_agent(ax, "entropy_action_total")
         ax.set_title("Policy entropy — TOTAL per action (per agent)")
         ax.set_ylabel("nats / turn")
         ax.set_ylim(bottom=0)
 
         ax = axes[5, 1]
         if "agents/silent_turn_rate" in data:
-            _plot_per_agent(ax, iters, data["agents/silent_turn_rate"], agent_names)
+            per_agent(ax, "silent_turn_rate")
             ax.set_ylim(-0.02, 1.02)
         ax.set_title("Silent turns — no post emitted (per agent)")
         ax.set_ylabel("fraction of turns")
