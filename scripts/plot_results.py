@@ -169,6 +169,37 @@ def plot_experiment(exp_dir: Path) -> Path | None:
     return out
 
 
+def _token_caps(exp_dir: Path) -> tuple[float | None, float | None]:
+    """(post cap, total cap) from config.json, or (None, None).
+
+    Takes the max across environments: the caps are drawn as a reference line
+    on per-agent panels that pool environments, so a single-env run — which is
+    every population run here — gets its exact cap and a multi-env run gets the
+    loosest one rather than a misleadingly tight line.
+    """
+    try:
+        cfg = json.loads((Path(exp_dir) / "config.json").read_text())
+    except Exception:
+        return None, None
+    post, total = [], []
+    for env_cfg in cfg.get("environments", []) or []:
+        pb = env_cfg.get("post_token_budget") or env_cfg.get("token_budget")
+        tb = env_cfg.get("total_token_budget") or env_cfg.get("token_budget")
+        if pb is not None:
+            post.append(float(pb))
+        if tb is not None:
+            total.append(float(tb))
+    return (max(post) if post else None), (max(total) if total else None)
+
+
+def _post_token_cap(exp_dir: Path) -> float | None:
+    return _token_caps(exp_dir)[0]
+
+
+def _total_token_cap(exp_dir: Path) -> float | None:
+    return _token_caps(exp_dir)[1]
+
+
 def smooth(x: np.ndarray, w: int = 10) -> np.ndarray:
     if len(x) < w:
         return x
@@ -240,9 +271,15 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     # squashed by a tall legend strip when n_agents is large (e.g. 32).
     legend_ncol = min(max(n_agents, 1), 16)
     legend_rows = math.ceil(max(n_agents, 1) / legend_ncol)
-    fig_h = 13.5 + 0.35 * max(legend_rows - 1, 0)
-    fig, axes = plt.subplots(4, 2, figsize=(12, fig_h), squeeze=False,
-                             sharex=True)
+    # Row 4 (response length) only exists for runs logged after per-agent
+    # token accounting was added. Older runs keep the original 4-row layout
+    # rather than gaining a pair of empty panels.
+    has_len = ("agents/mean_post_tokens" in data
+               or "agents/mean_action_tokens" in data)
+    n_panel_rows = 6 if has_len else 4
+    fig_h = (13.5 if not has_len else 20.0) + 0.35 * max(legend_rows - 1, 0)
+    fig, axes = plt.subplots(n_panel_rows, 2, figsize=(12, fig_h),
+                             squeeze=False, sharex=True)
     fig.suptitle(exp_dir.name, fontsize=12, fontweight="bold", y=0.995)
 
     # ── Row 0 col 0: total loss ──────────────────────────────────────────────
@@ -328,8 +365,63 @@ def plot_training_curves(exp_dir: Path, data: dict[str, np.ndarray]) -> Path:
     ax = axes[3, 1]
     if "agents/entropy" in data:
         _plot_per_agent(ax, iters, data["agents/entropy"], agent_names)
-    ax.set_title("Policy entropy (per agent)")
-    ax.set_ylabel("entropy (nats)")
+    ax.set_title("Policy entropy — PER TOKEN (per agent)")
+    ax.set_ylabel("nats / action token")
+
+    # ── Row 4: RESPONSE LENGTH — public ‖ total  (paired side-by-side) ──────
+    # Public is what the other agents actually observe; total is everything
+    # the agent generated to produce it. Reading them together separates a
+    # population that has stopped talking from one that is still deliberating
+    # and discarding, which the population-mean `gen/<env>/…` curves cannot do
+    # — and which is the whole point under partial freezing, where most
+    # members cannot move at all.
+    if has_len:
+        ax = axes[4, 0]
+        if "agents/mean_post_tokens" in data:
+            _plot_per_agent(ax, iters, data["agents/mean_post_tokens"], agent_names)
+            cap = _post_token_cap(exp_dir)
+            if cap:
+                ax.axhline(cap, color="#888888", linestyle=":", linewidth=0.9)
+                ax.text(0.99, cap, f" post cap {cap:.0f}", transform=ax.get_yaxis_transform(),
+                        ha="right", va="bottom", fontsize=7, color="#888888")
+        ax.set_title("Public response length (per agent)")
+        ax.set_ylabel("post tokens / turn")
+        ax.set_ylim(bottom=0)
+
+        ax = axes[4, 1]
+        if "agents/mean_action_tokens" in data:
+            _plot_per_agent(ax, iters, data["agents/mean_action_tokens"], agent_names)
+            cap = _total_token_cap(exp_dir)
+            if cap:
+                ax.axhline(cap, color="#888888", linestyle=":", linewidth=0.9)
+                ax.text(0.99, cap, f" total cap {cap:.0f}", transform=ax.get_yaxis_transform(),
+                        ha="right", va="bottom", fontsize=7, color="#888888")
+        ax.set_title("Total response length — think + post (per agent)")
+        ax.set_ylabel("action tokens / turn")
+        ax.set_ylim(bottom=0)
+
+    # ── Row 5: TOTAL action entropy ‖ silent-turn rate ─────────────────────
+    # Row 3's entropy panel is PER TOKEN. That is the right quantity for "how
+    # uncertain is the next token" and the wrong one for "how much does this
+    # agent's whole response vary": 8 tokens at 1.2 nats is a far more
+    # determinate response than 300 at 0.9. By the chain rule the entropy of
+    # the whole action is the sum of its per-token conditional entropies, so
+    # the total is per-token × length — which is why this row sits directly
+    # under the length row and shares its x-axis.
+    if has_len:
+        ax = axes[5, 0]
+        if "agents/entropy_action_total" in data:
+            _plot_per_agent(ax, iters, data["agents/entropy_action_total"], agent_names)
+        ax.set_title("Policy entropy — TOTAL per action (per agent)")
+        ax.set_ylabel("nats / turn")
+        ax.set_ylim(bottom=0)
+
+        ax = axes[5, 1]
+        if "agents/silent_turn_rate" in data:
+            _plot_per_agent(ax, iters, data["agents/silent_turn_rate"], agent_names)
+            ax.set_ylim(-0.02, 1.02)
+        ax.set_title("Silent turns — no post emitted (per agent)")
+        ax.set_ylabel("fraction of turns")
 
     # X labels + integer ticks on the bottom row only (sharex handles the rest).
     for ax in axes[-1]:

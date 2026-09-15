@@ -656,14 +656,34 @@ class PopulationTrainer:
     def _compute_generation_metrics(
         self, raw_episodes: list["_RawEpisode"]
     ) -> dict[str, float]:
-        """Per-env aggregates of action / thinking / post token usage.
+        """Per-env and per-agent aggregates of action / thinking / post tokens.
 
         Lets us see how the model spends its token budget: average post
         length, average thinking length, fraction of the action spent in
         thinking, and how often the post or total budget gets clipped.
+
+        Two namespaces come out of this:
+
+        * ``gen/<env>/…`` — the population-wide view, per environment.
+        * ``<agent>/mean_post_tokens`` (PUBLIC response length),
+          ``<agent>/mean_action_tokens`` (TOTAL, think + post) and
+          ``<agent>/mean_thinking_tokens`` — the per-agent view, which is what
+          separates a population where one member goes quiet from one where
+          everybody does. Population means hide that, and hide it completely
+          under partial freezing, where most members cannot move at all.
+
+        The per-agent keys deliberately sit in the same ``<agent>/<metric>``
+        namespace as the loss metrics, so `plot_results.load_metrics` discovers
+        them without being told and `_parse_agent_metrics` ignores them (it
+        requires kl/perc_loss/entropy together).
+
+        Per-agent figures aggregate across environments. Every population run
+        in this project is single-environment; on a multi-env run these would
+        pool an agent's turns over all of its envs.
         """
         env_by_name = {spec.name: spec.env for spec in self.environments}
         agg: dict[str, dict[str, float]] = {}
+        per_agent: dict[str, dict[str, float]] = {}
         for raw in raw_episodes:
             history, _info, _pairing, _pids, env_name, _ctx, _trace = raw
             env_t = env_by_name.get(env_name)
@@ -732,6 +752,17 @@ class PopulationTrainer:
                 a["sum_action_tokens"] += n_act
                 a["sum_thinking_tokens"] += thinking_tokens
                 a["sum_post_tokens"] += post_tokens
+                pa = per_agent.setdefault(step.agent_id, {
+                    "n_actions": 0, "sum_action_tokens": 0,
+                    "sum_thinking_tokens": 0, "sum_post_tokens": 0,
+                    "n_silent": 0,
+                })
+                pa["n_actions"] += 1
+                pa["sum_action_tokens"] += n_act
+                pa["sum_thinking_tokens"] += thinking_tokens
+                pa["sum_post_tokens"] += post_tokens
+                if post_tokens == 0:
+                    pa["n_silent"] += 1
                 if n_act > a["max_action_tokens"]:
                     a["max_action_tokens"] = n_act
                 if tag_extraction and thinking_tokens > 0:
@@ -770,6 +801,25 @@ class PopulationTrainer:
             out[f"{p}/mean_posts_per_episode"] = a["sum_posts_per_episode"] / n_eps
             out[f"{p}/max_action_tokens"] = float(a["max_action_tokens"])
             out[f"{p}/max_episode_total_tokens"] = float(a["max_episode_total_tokens"])
+
+        # Per-agent response length. `mean_post_tokens` is the PUBLIC length —
+        # what the others actually observe — and `mean_action_tokens` the TOTAL
+        # the agent generated to produce it. Their gap is deliberation that
+        # never reaches the forum. `silent_turn_rate` is the share of turns
+        # that produced no post at all, which is what drags a mean length down
+        # without any surviving post getting shorter.
+        for agent_id, pa in per_agent.items():
+            n = pa["n_actions"] or 1
+            out[f"{agent_id}/mean_action_tokens"]   = pa["sum_action_tokens"] / n
+            out[f"{agent_id}/mean_thinking_tokens"] = pa["sum_thinking_tokens"] / n
+            out[f"{agent_id}/mean_post_tokens"]     = pa["sum_post_tokens"] / n
+            out[f"{agent_id}/silent_turn_rate"]     = pa["n_silent"] / n
+            n_posting = n - pa["n_silent"]
+            # Mean length of the posts that exist, so a falling public mean can
+            # be read as "fewer posts" vs "shorter posts".
+            out[f"{agent_id}/mean_post_tokens_when_posting"] = (
+                pa["sum_post_tokens"] / n_posting if n_posting > 0 else 0.0
+            )
         return out
 
     def _setup_frozen_agents(self, population, config) -> list:
@@ -1384,6 +1434,41 @@ class PopulationTrainer:
             # single-rank run with the same total episodes_per_iter.
             if self.ddp:
                 all_metrics = self._ddp_reduce_metrics(all_metrics)
+
+            # Total action entropy, per agent — derived AFTER the reduce so both
+            # factors are the population-consistent values rather than a product
+            # of per-rank locals.
+            #
+            # `<agent>/entropy` is the mean entropy PER ACTION TOKEN (nats):
+            # marlllm/loss.py divides the accumulated entropy by the number of
+            # act positions, in both the chunked and unchunked paths. That is
+            # the right quantity for "how uncertain is the next token" and the
+            # wrong one for "how much does this agent's whole response vary" —
+            # an agent emitting 8 tokens at 1.2 nats each is far more
+            # determinate than one emitting 300 at 0.9.
+            #
+            # By the chain rule the entropy of the whole action is the sum of
+            # its per-token conditional entropies, so:
+            #
+            #     H(action) ≈ per-token entropy × action length
+            #
+            # APPROXIMATION, stated because it matters for how hard this may be
+            # read: this is a product of two per-iteration means, so it misses
+            # Cov(length, per-token entropy) within the batch. It is the entropy
+            # of a response of typical length at the typical per-token rate, not
+            # the mean over responses of their individual totals. The two agree
+            # when length and per-token entropy are uncorrelated across an
+            # agent's turns in one iteration.
+            for _pn in self.population:
+                _ent = all_metrics.get(f"{_pn}/entropy")
+                _len_tot = all_metrics.get(f"{_pn}/mean_action_tokens")
+                if _ent is None or _len_tot is None:
+                    continue
+                all_metrics[f"{_pn}/entropy_action_total"] = _ent * _len_tot
+                # No post-only counterpart: per-token entropy is measured over
+                # ALL act positions, thinking included, so applying that rate to
+                # the post length would extrapolate a quantity we never measured
+                # in the post region.
 
             # ── 4b. Variance-decomposition diagnostic (cooperative DDP) ──
             # Run after the optimizer step so we measure the *current*
