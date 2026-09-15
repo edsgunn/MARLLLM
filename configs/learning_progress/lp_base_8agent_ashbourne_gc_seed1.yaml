@@ -1,4 +1,5 @@
-# STATUS: NOT SUBMITTED.
+# STATUS: SUBMITTED 2026-09-15 as job 6571672, against commit 9e9e25d.
+# Tier 1 of the suite; tiers 2-4 are written and held.
 #
 # TIER 1 — LEARNING PROGRESS, FROZEN-BASE REFERENCE. 8 agents, Ashbourne GC,
 # seed 1.
