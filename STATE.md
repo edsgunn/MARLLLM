@@ -182,6 +182,31 @@ maximises and what we want are related only by argument.*
   0.96 and 0.98 against the reference's 0.80 — the predicted direction for an
   objective that rewards unpredictable futures. — *likely* — same
 
+- 🆕 (2026-09-15) **The surrogate return is the stated objective plus the
+  entropy of the environment.** Per observation position
+  `E[-ln p_theta] = KL(p_env ‖ p_theta) + H(p_env)`, so dropping `E_s` does not
+  add noise — it adds a REINFORCE ascent step on `-H(p_env)`, a policy gradient
+  whose reward is the negative entropy of the agent's own world. In a
+  population that world is other agents, and they are plastic, so the term pays
+  each agent to *manufacture* a quiet environment rather than merely to find
+  one. — *established* (derivation), unmeasured in our substrates —
+  `environment_likelihood_derivation.md`, `marlllm/config.py`
+- 🆕 (2026-09-15) **`H(p_env)` cancels in a difference of any two
+  cross-entropies, so the fix needs a second model and not `p_env`.**
+  `H(p_env, p_theta^-) − H(p_env, p_theta) = KL(p_env ‖ p_theta^-) − KL(p_env ‖ p_theta)`
+  for *any* reference, however poor a model of the environment it is. That
+  makes the correction cheap where measuring `p_env` is not — B5 priced that at
+  a forward pass per agent per episode — and it is why the frozen base the KL
+  anchor already holds is a valid second reference. — *established*
+  (derivation) — `marlllm/config.py`, `configs/learning_progress/README.md`
+- 🆕 (2026-09-15) **Correcting the entropy term does not touch the length
+  channel.** `KL(p_env ‖ p_theta)` summed over positions is still extensive in
+  the number of observation tokens, so "post less, elicit less, pay less"
+  survives any second-reference correction untouched. The two mechanisms need
+  separate fixes, and a falling delivery rate is not evidence against the
+  entropy one. — *established* (derivation) —
+  `configs/learning_progress/README.md`
+
 ### The substrate — what a world must be for anything to run at all
 
 *Not a research question. These are preconditions: get one wrong and every
@@ -311,22 +336,22 @@ measurement downstream is void.*
   0.316 at three partners against 0.225 at fifteen with N held at 16, but
   p = 0.135 is not a result at five seeds. — *suspected* — same
 
-- 🔶 **The return's sign raises policy entropy at every population size.**
+- 🔸 **The return's sign raises policy entropy at every population size.**
   **Eight of eight** novelty-search arms across N = 2, 4, 8 and 16 end above
   their own same-N reference, by 0.16–0.80 nats against a same-seed noise floor
   of 0.007; the references *lose* entropy at three of four sizes and only one of
   eight arms loses more than 0.12. MWU exact p = 0.028. Nothing else in the
   project moves entropy this reliably. — *established*, promoted from seven arms
   — `runs/novelty_search/NOTES.md`
-- 🔸 **Population size does not determine the outcome under maximisation
+- **Population size does not determine the outcome under maximisation
   either.** Delivery against N gives ρ = −0.098, p = 0.810, firing the
   pre-registered falsifier; the within-N seed spread accounts for the whole
   between-N range. Same verdict as C2 reached under minimisation, from the
   other direction. — *established*, 8 arms over 4 sizes — same
-- 🔸 **Under maximisation the outcome is seed-dominated.** Two N=2 runs
+- **Under maximisation the outcome is seed-dominated.** Two N=2 runs
   differing only in seed end at delivery 0.926 and 0.325 — 3.5× the rig's
   delivery noise floor. — *established* — same
-- 🔶 **The sign flip slows tool abandonment without reopening the channel,
+- 🔸 **The sign flip slows tool abandonment without reopening the channel,
   and its effect size does not replicate.** Both seeds end above the reference
   on python calls at iteration 300 (52.2 and 28.1 against 22.2) and both are
   well above it at 200, at an unchanged success rate and with real varied code —
@@ -335,7 +360,7 @@ measurement downstream is void.*
   not. **Corrects** the one-seed reading of "keeps the tool alive". —
   *provisional*, two seeds — same
 
-- 🆕 (2026-09-09) **Released entropy gives interesting behaviour *and* noisy TV, at
+- 🔶 **Released entropy gives interesting behaviour *and* noisy TV, at
   different points on a ladder, and the transition is compositional rather than
   global.** Read from the trace content of the 28 regularisation runs, which had
   never been read on content before. End entropy ~0.9–1.1: coherent. ~1.5–1.8:
@@ -346,10 +371,10 @@ measurement downstream is void.*
   longest, tails go first, and agents collapse individually rather than
   together. — *established* —
   `runs/cultural_emergence/kl_beta_sweep_8agent_ashbourne_gc/NOTES.md`
-- 🆕 (2026-09-09) **The usable window is around end entropy 1.1–1.8 and no run has ever
+- 🔶 **The usable window is around end entropy 1.1–1.8 and no run has ever
   been aimed at it.** Above 1.8 degradation is visible; below 1.1 entropy has
   barely moved. — *likely* — same
-- 🆕 (2026-09-09) **Agents comment on their peers' degeneration from inside the
+- 🔶 **Agents comment on their peers' degeneration from inside the
   collapse.** At end entropy 6.6–7.0, amid word salad: "can someone tame this
   beast lang mess?", "figured since everyone else babbled cryptograms",
   "couldn't come up w/ cohesive concept". Enough coherence survives to observe
@@ -473,7 +498,7 @@ NOTES).
   trend in `beta` (ρ = −0.25, p = 0.28) or `kl_coef` (ρ = −0.16, p = 0.49), and
   not one cell above 0.8. — *established*, over `kl_coef` ∈ [0, 0.5] only —
   sweep NOTES, the 2026-09-08 re-reading
-- 🔶 **But it does above that, and this corrects the entry above, which was
+- 🔸 **But it does above that, and this corrects the entry above, which was
   stated without its range earlier the same day.** At `kl_coef` 2.0–5.0 delivery
   is 0.519–0.975 (mean 0.722) against the old grid's 0.395–0.613 (mean 0.501),
   MWU exact p = 1.2 × 10⁻⁴. **But most of it is the pinned cells:** excluding
@@ -482,7 +507,7 @@ NOTES).
   difference (p = 1.5 × 10⁻³), not a per-cell one. — *likely*, downgraded from
   *established* —
   `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`
-- 🆕 (2026-09-09) **RETRACTED: "a stronger KL anchor raises the safe ceiling on the
+- 🔶 **RETRACTED: "a stronger KL anchor raises the safe ceiling on the
   entropy bonus".** `beta` and `kl_coef` act through roughly their **ratio** —
   Spearman Δentropy vs `beta`/`kl_coef` = +0.831, p = 7.8 × 10⁻¹¹, n = 21,
   better than `beta` alone (+0.755). `beta` 0.4 at `kl_coef` 2.0 is the *same*
@@ -493,19 +518,19 @@ NOTES).
   damage appears (max +0.59 against the +1.19 it was meant to rescue). The
   intervention became smaller, not safer. — *established* —
   `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`
-- 🆕 (2026-09-09) **`beta` and `kl_coef` are one knob, not two, over most of their range.**
+- 🔶 **`beta` and `kl_coef` are one knob, not two, over most of their range.**
   Because they act through their ratio, raising both together cannot reach a new
   regime by construction — which is why the ridge design could not answer the
   question it was built for. — *established* — same
-- 🆕 (2026-09-09) **WITHDRAWN: "the target regime is reachable" at (2.0, 0.4).** That
+- 🔶 **WITHDRAWN: "the target regime is reachable" at (2.0, 0.4).** That
   cell ends at entropy 1.36, below the 1.5–1.8 band where degradation begins,
   so it never tested the trade-off. It is a low-entropy cell, not a solved
   high-entropy one. — *withdrawn* — same
-- 🔶 **Delivery tracks how little the policy moved from base.** Spearman
+- 🔸 **Delivery tracks how little the policy moved from base.** Spearman
   ρ = −0.503, p = 0.003 over all 28 regularisation cells. The least-drifted cell
   delivers 0.975; the most-drifted 0.395. So the anchor may buy the channel by
   suppressing learning rather than by training better. — *likely* — same
-- 🔶 **`kl_coef` = 5.0 prevents learning outright.** KL from base 0.02 with
+- 🔸 **`kl_coef` = 5.0 prevents learning outright.** KL from base 0.02 with
   entropy pinned (+0.09, +0.15); its delivery of 0.975 is the base model, which
   delivers ~0.98 untrained. Its numbers must not be cited as a training outcome.
   — *established* — same
@@ -584,6 +609,22 @@ anywhere in the campaign. — *established* — sweep NOTES
   `runs/social_terminal/run03_8agent_7B_ashbourne_school/NOTES.md`
 - **`uv run` breaks the hand-built vLLM venv.** Use `.venv/bin/python`. —
   *established* — `README.md`
+- 🆕 (2026-09-15) **PEFT selects an adapter's weights by plain substring, so
+  any auxiliary adapter whose name contains a live adapter's name is written
+  into that adapter's save file.** `get_peft_model_state_dict` filters on
+  `adapter_name in key`, and `save_pretrained(selected_adapters=[...])` sits on
+  the vLLM sync path after every optimiser step — so the rollout engine would
+  have been handed a file holding two policies' weights. Caught before it ran;
+  auxiliary adapters are now named from a hash of the live name, with a
+  regression test. Any future second adapter must do the same. — *established*
+  — `marlllm/agent.py`, `tests/test_learning_progress.py`
+- 🆕 (2026-09-15) **`compute_loss_chunked` silently ignored `return_sign`.**
+  The single-shot path has applied it since the novelty-search ablation landed;
+  the chunked path never did, so a chunked novelty run would have trained the
+  unflipped objective. **No run was affected** — every novelty config leaves
+  `seq_chunk_size` unset — but it is the same failure class as the six dead
+  keys and as arm B training on the surrogate: a setting the code accepts and
+  one code path does not honour. Fixed. — *established* — `marlllm/loss.py`
 - **A config in git can stop describing the run that used it.** One Phase A
   arm ran on the base model while its tracked config was later edited to name
   the Instruct model, confounding the prompt-swap diagnostic the design turned
@@ -764,7 +805,7 @@ reads **RUNNING** — that file needs closing out against what is on disk.
 
 ## What we want to learn
 
-- 🔸 **Delivery is necessary but not sufficient, and this is the fourth
+- **Delivery is necessary but not sufficient, and this is the fourth
   metric artefact.** A two-agent population locked into a short mutually
   predictable exchange scores delivery 0.926 on 52-character posts of which 38%
   near-duplicate an earlier post by the same speaker. Degeneration into `</?`
@@ -774,25 +815,25 @@ reads **RUNNING** — that file needs closing out against what is on disk.
   repetition measure beside a delivery figure. — *established*, one direct
   demonstration — `runs/novelty_search/NOTES.md`,
   `scripts/analyse_novelty_traces.py`
-- 🔸 **A trace file holds one episode of the iteration's sixteen rollouts.**
+- **A trace file holds one episode of the iteration's sixteen rollouts.**
   Every trace-derived figure in this project is n = 1 episode unless stated
   otherwise. This is what produced the tool substrate's overstated "python
   calls reach zero" premise — the traced episode had 0 calls while the
   population averaged 22.2 per iteration. — *established* — same
-- 🔸 **Within-speaker repetition measures are structurally biased by
+- **Within-speaker repetition measures are structurally biased by
   population size.** Posts per speaker is `max_posts`/N — 8 at N=2, 1 at N=16,
   where a within-speaker repeat cannot occur at all. Never compare them across
   N; use pairwise similarity over all post pairs instead. — *established* —
   same
 
-- 🔶 **The `math` regex under-counts mathematical reasoning expressed in
+- 🔸 **The `math` regex under-counts mathematical reasoning expressed in
   prose.** A population working correctly through subset counting — "one
   element, one valid subset; adding another shows how this could grow" — scores
   0.00, because the regex wants symbols, LaTeX or proof vocabulary. It measures
   notation, not reasoning; its zeros are not evidence of absence. — *established*
   — `runs/cultural_emergence/entropy_anchor_ridge_8agent_ashbourne_gc/NOTES.md`
 
-- 🆕 (2026-09-09) **Every trace-content measure except one is fooled by
+- 🔶 **Every trace-content measure except one is fooled by
   high-entropy collapse.** At end entropy 6.59 a word-salad population scored
   15 posts, 724 mean characters, `repeat` 0.00 and `frag` 0.00 —
   indistinguishable from a healthy transcript, because word salad is long and
@@ -800,7 +841,7 @@ reads **RUNNING** — that file needs closing out against what is on disk.
   them: 0.035–0.090 for the four collapsed populations against 0.28–0.45 for
   coherent ones, ρ = −0.531, p = 1.4 × 10⁻³ over 28 runs. — *established* —
   `scripts/analyse_novelty_traces.py`
-- 🆕 (2026-09-09) **But `stopword` is a screen, not a verdict, and is reliable only below
+- 🔶 **But `stopword` is a screen, not a verdict, and is reliable only below
   0.10.** Between 0.10 and 0.28 it cannot tell dense technical prose from word
   salad: a genuine discussion of induction base cases scores 0.118 while real
   salad scores 0.139. Anything in that band must be read. **This also withdraws
@@ -883,10 +924,27 @@ reads **RUNNING** — that file needs closing out against what is on disk.
 - **How large is the private-prefix correction?** Predicted near zero early and
   growing with the pre-post region; pre-registered with its falsification
   conditions in `scripts/tier_b/c7_env_likelihood_bias.py`, not yet run.
-- **Does the corrected return still produce policy movement?** Restoring `p_env`
-  makes the return a proper divergence whose optimum is flat across worlds, so
-  advantages may vanish at convergence where the surrogate's do not. That may be
-  why the surrogate moves policies at all. — `environment_likelihood_derivation.md`
+- 🆕 (2026-09-15) **Does the corrected return still produce policy movement?**
+  Restoring `p_env` makes the return a proper divergence whose optimum is flat
+  across worlds, so advantages may vanish at convergence where the surrogate's
+  do not. That may be why the surrogate moves policies at all. **Now being
+  asked directly**: jobs 6571670–6571673 train on a difference of two
+  cross-entropies, whose reward goes to zero exactly where there is nothing
+  left to learn. `lp/progress_per_token` decaying to zero with entropy intact
+  and low KL would be the action arm self-extinguishing — which has to be read
+  against C10's perception-only arm, not as the objective working. —
+  `environment_likelihood_derivation.md`,
+  `configs/learning_progress/README.md`
+- 🆕 (2026-09-15) **Does the correction reorder actions at all?** The one prior
+  measurement of a return correction in this project found it changed magnitude
+  and not ordering — the dropped environment term is ~43% of the return with
+  rank correlation 1.000 — and a correction that does not reorder cannot change
+  learning however large it is. The learning-progress return is a different
+  object (a difference of two surprises, not a same-signed additive term) so
+  the prior does not transfer, but it is the pre-registered null.
+  `lp/return_rank_corr` is logged per batch to settle it, and it is the first
+  thing to read at iteration 25. — `runs/_tier_b/c9_post_hoc_env_term/NOTES.md`,
+  `configs/learning_progress/README.md`
 - **Does absorption survive a horizon-clean window on more than one dataset?**
   It does on the Inner Loop seed replication and largely does not on the
   cross-environment pool, where restricting to healthy-window measurements also
