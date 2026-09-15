@@ -1,0 +1,139 @@
+# STATUS: NOT SUBMITTED. Hold until Tier 1 reports.
+#
+# TIER 4 — LEARNING PROGRESS ON A TOOL SUBSTRATE. 8 agents, margin_notes with
+# the python tool, seed 1.
+#
+# WHAT THIS CHANGES
+#   Against runs/cultural_emergence/run7_8agent_7B_margin_notes: the return's
+#   summand becomes M_s - M_s^-, and nothing else.
+#
+# WHY THE TOOL SUBSTRATE IS THE SHARPER TEST
+#   The reference ABANDONS THE TOOL. Python calls per checkpoint go
+#   48 -> 34 -> 14 -> 0 across iterations 25/100/200/300, with the well-formed
+#   post rate falling 0.98 -> 0.34 alongside it.
+#
+#   There is a mechanism for that, and it is the dropped entropy term. A python
+#   call produces a pybot post whose content is the output of code that has not
+#   been run yet — among the least predictable things in the substrate. Under
+#   the surrogate the tool is therefore expensive and abandoning it is
+#   rational. Under a return that pays for IMPROVEMENT rather than accuracy the
+#   calculation reverses: tool output is exactly the kind of structured,
+#   learnable, agent-unsuppressible material on which a model can get better
+#   than its own past self, so calling python should pay.
+#
+#   This turns the claim into a prediction about a CAPABILITY rather than about
+#   token counts, which is what the framework ultimately has to deliver.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether python calls stay non-zero at iteration 300 where the reference
+#   reaches 0, at an unchanged success rate. Read on the tool counters and the
+#   post rate, NOT on `alive` — that metric has reversed several readings and
+#   cannot be trusted at low delivery
+#   (runs/cultural_emergence/c6_extended_horizon/NOTES.md).
+#
+# THE DEGENERATE OUTCOME, AND HOW TO TELL
+#   Unlike the sign flip, farming noise does NOT pay here: print(random.random())
+#   is unpredictable to the reference and to the current model equally, so its
+#   contribution to M_s - M_s^- is zero. A high call count with near-identical
+#   code blocks would therefore be evidence AGAINST this account rather than the
+#   cheap win it is under maximisation. Either way the traces' python blocks have
+#   to be read before anything is reported; call count alone has already misled
+#   once (runs/novelty_search/NOTES.md).
+#
+# WHAT WOULD VOID THE RUN
+#   Fewer than 300 iterations; any iteration whose metrics.jsonl record lacks
+#   <agent>/lp/in_use == 1.0; or lp/reference_age_iters outside [1, 2L] after
+#   iteration 1. The first two mean the corrected return was not the one that
+#   trained. The third means the reference rotated wrongly, and a reference
+#   that coincides with the current weights gives an identically zero return —
+#   a silent action-arm ablation dressed as an experiment.
+#
+name: lp_lagged_margin_notes_8agent_seed1
+script: train_population
+slurm:
+  gpus_per_node: 4
+  # p90 = 102.8 s/iter on runs/cultural_emergence/run7_8agent_7B_margin_notes
+  # (326 records) — the python tool makes this substrate 1.6x the text one.
+  # +9% for the reference forward gives 112 s; PROCESS.md's rule — p90 x iters
+  # x 1.5, plus 30 min — gives 14.5 h.
+  time: "15:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+# 0.18 rather than the reference run's 0.20. The lagged reference adds one
+# frozen LoRA adapter per agent on the GPU: at r=64 on q_proj/v_proj over
+# Qwen2.5-7B's 28 layers that is 20.2M fp32 parameters, 81 MB each, 0.65 GB
+# across 8 agents. The pending snapshot is held on CPU and costs no GPU.
+vllm_gpu_mem_util: 0.18
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Renata Solberg
+- Kai Dempsey
+- Mei-Lin Park
+- Devon Aguirre
+- Yusuf Bashir
+- Cass Yamamoto
+- Henrietta 'Henri' Voss
+- Ravi Krishnamurthy
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 1
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+
+# --- rollout pathway: pinned to match the reference run ---
+# run7_8agent_7B_study_group_ashbourne_gc predates these keys and ran the
+# synchronous path with a single-shot loss and plain REINFORCE. Pinned rather
+# than inherited so a change of default cannot silently move this experiment
+# off the pathway it is meant to be comparable with. seq_chunk_size is
+# deliberately left unset (None = single-shot, as the reference).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+# --- the only change: what the return's summand is measured against ---
+# G_t sums (M_s - M_s^-) instead of M_s, where M_s^- is this agent's own
+# surprise under its adapter from L+1 to 2L iterations ago. H(p_env) is common
+# to both and cancels. The perception arm is untouched.
+learning_progress_return: true
+learning_progress_reference: lagged
+learning_progress_lag: 25
+
+environments:
+- name: margin_notes
+  type: forum
+  characters: inner_loop
+  environment: margin_notes
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+  python_tool_enabled: true
+  python_timeout_seconds: 5.0
+  python_output_max_chars: 2000
+output_dir: runs/learning_progress/lp_lagged_margin_notes_8agent_seed1
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

@@ -467,6 +467,10 @@ class PopulationTrainer:
                 [val] if isinstance(val, str) else list(val)
             )
 
+        # Attach the lagged reference policies BEFORE the parameter list is
+        # built: the reference adapters must already exist and be frozen when
+        # their parameters are enumerated, or they end up under gradient.
+        self._setup_learning_progress(population, config)
         # Resolve frozen vs trainable members and build the parameter list the
         # optimizer gets. See _setup_frozen_agents.
         all_params = self._setup_frozen_agents(population, config)
@@ -822,6 +826,91 @@ class PopulationTrainer:
             )
         return out
 
+    def _setup_learning_progress(self, population, config) -> None:
+        """Attach the lagged reference policy to every trainable member.
+
+        The return then pays for ``ln p_theta - ln p_theta^-`` per future
+        observation token instead of ``ln p_theta``, which cancels
+        ``H(p_env)`` exactly and with it the incentive to make the population
+        simpler. See ``TrainingConfig.learning_progress_return``.
+
+        Frozen members are skipped: their weights never move, so their
+        learning progress is identically zero and they receive no gradient
+        anyway. Under ``learning_progress_reference='base'`` nothing is
+        attached — the reference is the frozen pre-trained model the KL anchor
+        already keeps in memory.
+        """
+        self._lp_enabled = bool(getattr(config, "learning_progress_return", False))
+        self._lp_reference = str(
+            getattr(config, "learning_progress_reference", "lagged"))
+        self._lp_lag = max(1, int(getattr(config, "learning_progress_lag", 25)))
+        if not self._lp_enabled:
+            return
+        if self._lp_reference not in ("lagged", "base"):
+            raise ValueError(
+                f"learning_progress_reference must be 'lagged' or 'base', "
+                f"got {self._lp_reference!r}"
+            )
+        if getattr(config, "use_env_likelihood_return", False):
+            raise ValueError(
+                "learning_progress_return and use_env_likelihood_return are "
+                "two different corrections of the same dropped term and both "
+                "rewrite the return. Enable one."
+            )
+        frozen = set(getattr(config, "frozen_agents", []) or [])
+        if self._lp_reference == "base":
+            for name, agent in population.items():
+                if name in frozen:
+                    continue
+                if not getattr(agent, "_keep_ref_model", False):
+                    raise ValueError(
+                        "learning_progress_reference='base' scores every "
+                        "observation token under the frozen pre-trained model, "
+                        "which is only kept in memory when kl_coef > 0 or "
+                        "always_log_kl is set. Set one of those, or use "
+                        "learning_progress_reference='lagged'."
+                    )
+            return
+        first_backbone = getattr(next(iter(population.values())), "_backbone", None)
+        from marlllm.fsdp_utils import is_fsdp
+        if first_backbone is not None and is_fsdp(first_backbone):
+            raise ValueError(
+                "learning_progress_reference='lagged' adds a second LoRA "
+                "adapter to the backbone, which cannot be injected into an "
+                "FSDP-wrapped module after wrapping. Use "
+                "learning_progress_reference='base', which needs no extra "
+                "adapter, or run without --use-fsdp."
+            )
+        for name, agent in population.items():
+            if name in frozen:
+                continue
+            agent.enable_learning_progress_reference(iteration=0)
+        # torch.compile traces the backbone's forward; switching adapters
+        # inside it forces a recompile per switch, and the reference forward
+        # switches twice per micro-batch. Loud rather than mysteriously slow.
+        if getattr(config, "compile", False):
+            print("[learning-progress] WARNING: the reference forward switches "
+                  "adapters twice per micro-batch, which defeats a compiled "
+                  "backbone's graph cache. Expect repeated recompilation.")
+
+    def _rotate_learning_progress(self, iteration: int) -> None:
+        """Advance the two-slot reference buffer at the lag cadence.
+
+        Rotation happens at the START of iterations ``L+1, 2L+1, ...``. The
+        slot that becomes the active reference is the one captured at the
+        PREVIOUS rotation, never the current weights, so the effective lag
+        runs from ``L+1`` to ``2L`` and the return is never identically zero.
+        """
+        if not getattr(self, "_lp_enabled", False) or self._lp_reference != "lagged":
+            return
+        if iteration <= 1 or (iteration - 1) % self._lp_lag != 0:
+            return
+        frozen = set(self.frozen_agents or [])
+        for name, agent in self.population.items():
+            if name in frozen:
+                continue
+            agent.rotate_learning_progress_reference(iteration - 1)
+
     def _setup_frozen_agents(self, population, config) -> list:
         """Resolve ``config.frozen_agents`` and return the trainable parameters.
 
@@ -1041,6 +1130,9 @@ class PopulationTrainer:
                 for i in range(torch.cuda.device_count()):
                     torch.cuda.reset_peak_memory_stats(i)
 
+            # Advance the lagged reference policy before anything reads it.
+            self._rotate_learning_progress(iteration)
+
             # ── 1. Collect episodes ───────────────────────────────────────
             _t_phase = time.perf_counter()
             if async_enabled:
@@ -1212,12 +1304,32 @@ class PopulationTrainer:
                         )
                         total_loss_scalar += loss_scalar / num_micros
                     else:
+                        # The lagged-reference forward runs FIRST: PEFT's
+                        # set_adapter() toggles requires_grad on every adapter,
+                        # so doing it before evaluate_hidden() means the
+                        # training graph is built under the live adapter with
+                        # nothing having touched it since _activate().
+                        last_hidden_lp = None
+                        if getattr(self, "_lp_enabled", False) and self._lp_reference == "lagged":
+                            last_hidden_lp = agent.evaluate_hidden_lp(
+                                mb_input_ids, mb_attn_for_model, position_ids=mb_position_ids,
+                            )
                         last_hidden, values = agent.evaluate_hidden(
                             mb_input_ids, mb_attn_for_model, position_ids=mb_position_ids,
                         )
                         last_hidden_ref = agent.evaluate_hidden_ref(
                             mb_input_ids, mb_attn_for_model, position_ids=mb_position_ids,
                         )
+                        lm_head_lp = None
+                        if getattr(self, "_lp_enabled", False) and self._lp_reference == "base":
+                            last_hidden_lp = last_hidden_ref
+                            # Score the base model's hidden states through the
+                            # base model's head. lm_head is not LoRA-wrapped in
+                            # any current config so the two coincide, but that
+                            # is a property of lora_modules rather than of the
+                            # code, and a config that targeted the head would
+                            # otherwise mix two policies without saying so.
+                            lm_head_lp = agent.lm_head_ref
                         mb_lp_old = batch.act_log_probs_old[micro_start:micro_end].to(dev)
                         if not batch.packed:
                             mb_lp_old = mb_lp_old[:, :actual_len]
@@ -1246,6 +1358,8 @@ class PopulationTrainer:
                             env_lp_known=mb_env_known,
                             bias_values=agent.bias_values(last_hidden),
                             value_head=agent._value_head,
+                            last_hidden_lp=last_hidden_lp,
+                            lm_head_lp=lm_head_lp,
                         )
 
                         (loss_val * scale).backward()
@@ -1365,6 +1479,21 @@ class PopulationTrainer:
             n_eps = len(episode_results)
             all_metrics["total_loss"]  = total_loss_scalar
             all_metrics["iteration"]   = iteration
+            if getattr(self, "_lp_enabled", False):
+                # How stale the reference policy actually is, in iterations.
+                # Under the two-slot buffer this ramps from 1 to 2L and resets
+                # to L+1 at each rotation; it is the knob's realised value and
+                # the thing to plot the return against.
+                if self._lp_reference == "lagged":
+                    ages = [
+                        a.learning_progress_reference_age(iteration)
+                        for n, a in self.population.items()
+                        if n not in self.frozen_agents
+                    ]
+                    all_metrics["lp/reference_age_iters"] = (
+                        float(sum(ages)) / max(1, len(ages)))
+                else:
+                    all_metrics["lp/reference_age_iters"] = float(iteration)
             all_metrics["wall_time"]   = time.time() - self._start_time
             all_metrics["time/rollout_s"] = rollout_s
             all_metrics["time/loss_s"]    = loss_s

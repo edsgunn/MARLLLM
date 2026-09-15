@@ -83,6 +83,15 @@ def extract_agent_state(agent: Any) -> dict[str, Any]:
         # Fallback: dump everything, type-tagged as "unknown"
         payload["agent_type"] = "unknown"
         payload["backbone"] = agent._backbone.state_dict()
+    # Learning-progress reference, when one is attached. Keyed by the LIVE
+    # adapter's names so the migration remap in inject_agent_state rewrites it
+    # with the same rule as the live weights. Without it a resumed run
+    # restarts with reference == current weights and a return that is
+    # identically zero until the first rotation.
+    lp_state = (agent.learning_progress_state()
+                if hasattr(agent, "learning_progress_state") else None)
+    if lp_state is not None:
+        payload["learning_progress"] = lp_state
     return payload
 
 
@@ -142,6 +151,7 @@ def inject_agent_state(
         if missing:
             _LOG.warning("Skipped %d unmatched adapter keys", len(missing))
         agent._value_head.load_state_dict(payload["value_head"])
+        _restore_learning_progress(agent, payload, src_adapter, target_adapter)
         _LOG.info("Loaded %d adapter tensors + value_head into %s",
                   loaded, agent._agent_id)
     elif _is_independent(agent):
@@ -152,12 +162,69 @@ def inject_agent_state(
             )
         agent._backbone.load_state_dict(payload["backbone"])
         agent._value_head.load_state_dict(payload["value_head"])
+        _restore_learning_progress(agent, payload)
     else:
         # Best-effort fallback
         if "backbone" in payload:
             agent._backbone.load_state_dict(payload["backbone"])
         agent._value_head.load_state_dict(payload["value_head"])
+        _restore_learning_progress(agent, payload)
 
+
+def _restore_learning_progress(
+    agent: Any,
+    payload: dict[str, Any],
+    src_adapter: str | None = None,
+    target_adapter: str | None = None,
+) -> None:
+    """Put the learning-progress reference back after the live weights land.
+
+    Three cases, and the third is the one that matters:
+
+    * the run has a reference and the checkpoint carries one — restore it, so
+      the effective lag is continuous across the resume;
+    * the run has none and the checkpoint carries one — discard it, loudly;
+    * **the run has a reference and the checkpoint does not** — re-seed both
+      slots from the weights just loaded. This is a warm start from a run that
+      predates the correction (or a migration), and leaving the reference at
+      the freshly-initialised adapter would silently make the return measure
+      progress relative to the *base model* for the first 2L iterations rather
+      than relative to the loaded policy.
+    """
+    if getattr(agent, "_lp_adapter_name", None) is None:
+        if payload.get("learning_progress") is not None:
+            _LOG.warning(
+                "Checkpoint for %s carries a learning-progress reference but "
+                "this run has none attached; it is being discarded.",
+                getattr(agent, "_agent_id", "?"))
+        return
+    lp_state = payload.get("learning_progress")
+    if lp_state is None:
+        agent.reseed_learning_progress_reference()
+        _LOG.warning(
+            "Checkpoint for %s carries no learning-progress reference, so "
+            "both slots have been re-seeded from the loaded weights. The "
+            "return is zero until the first rotation and measures progress "
+            "from the resume point, not from the base model.",
+            getattr(agent, "_agent_id", "?"))
+        return
+    if src_adapter is not None and target_adapter is not None and src_adapter != target_adapter:
+        lp_state = {
+            **lp_state,
+            "reference": {
+                k.replace(f".{src_adapter}.", f".{target_adapter}."): v
+                for k, v in lp_state["reference"].items()
+            },
+            "pending": {
+                k.replace(f".{src_adapter}.", f".{target_adapter}."): v
+                for k, v in lp_state["pending"].items()
+            },
+        }
+    agent.load_learning_progress_state(lp_state)
+    _LOG.info("Restored the learning-progress reference for %s "
+              "(reference from iteration %d)",
+              getattr(agent, "_agent_id", "?"),
+              lp_state.get("reference_iteration", 0))
 
 # ---------------------------------------------------------------------------
 # Directory-level helpers

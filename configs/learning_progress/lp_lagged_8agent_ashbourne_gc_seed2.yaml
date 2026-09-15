@@ -1,0 +1,158 @@
+# STATUS: NOT SUBMITTED.
+#
+# TIER 1 — LEARNING PROGRESS, LAGGED SELF. 8 agents, Ashbourne GC, seed 2.
+#
+# WHAT THIS CHANGES
+#   Against runs/cultural_emergence/run7_8agent_7B_study_group_ashbourne_gc:
+#   the return's per-observation summand becomes M_s - M_s^- instead of M_s,
+#   where M_s^- is this agent's own surprise under its adapter from 26-50
+#   iterations ago. Nothing else moves — same substrate, same roster, same
+#   hyperparameters, same 300-iteration horizon, same synchronous pathway.
+#
+# WHY A SECOND MODEL AT ALL
+#   The surrogate's per-token expectation is KL(p_env || p_theta) + H(p_env).
+#   The entropy term is not an approximation error that happens to be small;
+#   it is an explicit REINFORCE reward for lowering the entropy of the
+#   incoming token stream, and in a population that stream is other agents,
+#   who are plastic. H(p_env) is common to any cross-entropy against p_env, so
+#   it cancels identically in a DIFFERENCE of two of them — which is why the
+#   reference's quality is irrelevant and why we never needed p_env itself.
+#
+# WHAT WE EXPECT TO LEARN
+#   Whether removing the term changes what the population becomes. The primary
+#   read is policy entropy at iteration 300 against the same-N reference:
+#   entropy is the one quantity the sign flip moved reliably, at 7 of 7 arms
+#   and 0.16-0.78 nats against a same-seed noise floor of 0.007
+#   (runs/novelty_search/NOTES.md), so it is the measure with a demonstrated
+#   ability to register a change in the return. Secondary: regime composition
+#   at 300, KL from base, and the well-formed post rate.
+#
+#   The diagnostic that decides whether ANY of this could have mattered is
+#   lp/return_rank_corr — the Spearman between the corrected return and the
+#   one it replaced, on the same batch. If it sits near 1.0 throughout, the
+#   correction reorders nothing and no downstream difference can be attributed
+#   to it however large the returns' difference in level. That is the same
+#   discriminator arm B of the environment-likelihood study was read on.
+#
+# THE TRAP, PRE-REGISTERED
+#   lp/progress_per_token is expected to DECLINE toward zero, because the
+#   perception arm is driving exactly the improvement the action arm is paid
+#   for, and because a lagged reference chases the model it is lagging. So the
+#   action term is expected to weaken over training. If this run ends at low KL
+#   with entropy intact, that is the action arm self-extinguishing and the
+#   population drifting toward perception-only training — NOT the objective
+#   working. Compare against C10's perception-only arm before claiming
+#   otherwise. The discriminating evidence is whether the advantages retain
+#   variance late, and whether progress_per_token plateaus above zero rather
+#   than reaching it.
+#
+#   A second trap: normalise_returns is ON here, matching the reference. As
+#   progress_per_token falls, batch standardisation rescales whatever is left —
+#   including pure noise — back to unit variance and feeds it to REINFORCE at
+#   full strength. The nonorm arm exists to separate that from the objective.
+#
+# WHAT WOULD FALSIFY 'THE DROPPED ENTROPY TERM IS WHY POPULATIONS COLLAPSE'
+#   Entropy, regime composition and delivery indistinguishable from the
+#   reference at matched seeds, with lp/return_rank_corr well below 1.0. The
+#   correction would then have reordered the actions and changed nothing,
+#   which is the strongest available evidence that H(p_env) is not the
+#   mechanism.
+#
+# WHAT WOULD VOID THE RUN
+#   Fewer than 300 iterations; any iteration whose metrics.jsonl record lacks
+#   <agent>/lp/in_use == 1.0; or lp/reference_age_iters outside [1, 2L] after
+#   iteration 1. The first two mean the corrected return was not the one that
+#   trained. The third means the reference rotated wrongly, and a reference
+#   that coincides with the current weights gives an identically zero return —
+#   a silent action-arm ablation dressed as an experiment.
+#
+name: lp_lagged_8agent_ashbourne_gc_seed2
+script: train_population
+slurm:
+  gpus_per_node: 4
+  # p90 = 66.3 s/iter on the reference run's own metrics.jsonl (315 records).
+  # The reference forward adds one no-grad pass per micro-batch, which touches
+  # only the 59% of the iteration that is not rollout: +9% overall, 72.3 s.
+  # PROCESS.md's rule — p90 x iters x 1.5, plus 30 min — gives 9.5 h.
+  time: "10:00:00"
+model: Qwen/Qwen2.5-7B-Instruct
+dtype: bfloat16
+device: cuda:0
+attn_impl: sdpa
+use_vllm: true
+# 0.28 rather than the reference run's 0.30. The lagged reference adds one
+# frozen LoRA adapter per agent on the GPU: at r=64 on q_proj/v_proj over
+# Qwen2.5-7B's 28 layers that is 20.2M fp32 parameters, 81 MB each, 0.65 GB
+# across 8 agents. The pending snapshot is held on CPU and costs no GPU. The
+# loss step also carries a third set of hidden states, tens of MB at these
+# sequence lengths. Two points off vLLM's share covers it with room to spare;
+# taking more would shrink the KV cache and slow the rollout, which is the
+# larger half of the iteration at N=8.
+vllm_gpu_mem_util: 0.28
+vllm_max_num_seqs: 8
+vllm_quantization: fp8
+lora_modules: q_proj,v_proj
+use_8bit_adam: true
+characters:
+- Priya Shah
+- Tom Whitaker
+- Hana Yilmaz
+- Olu Adeyemi
+- Beatrice Okafor
+- Sam Pritchard
+- Imogen Carter
+- Marcus Webb
+lora_shared_base: true
+lora_r: 64
+lora_alpha: 128
+pairing_strategy: random_no_self
+iters: 300
+rollouts: 16
+lr: 5e-6
+kl_coef: 0.05
+beta: 0.01
+grad_accum: 16
+seed: 2
+log_every: 5
+checkpoint_every: 25
+num_checkpoint_traces: 8
+max_episode_tokens: 24576
+
+# --- rollout pathway: pinned to match the reference run ---
+# run7_8agent_7B_study_group_ashbourne_gc predates these keys and ran the
+# synchronous path with a single-shot loss and plain REINFORCE. Pinned rather
+# than inherited so a change of default cannot silently move this experiment
+# off the pathway it is meant to be comparable with. seq_chunk_size is
+# deliberately left unset (None = single-shot, as the reference).
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+# --- the only change: what the return's summand is measured against ---
+# G_t sums (M_s - M_s^-) instead of M_s, where M_s^- is this agent's own
+# surprise under its adapter from L+1 to 2L iterations ago. H(p_env) is common
+# to both and cancels. The perception arm is untouched.
+learning_progress_return: true
+learning_progress_reference: lagged
+learning_progress_lag: 25
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 128
+  total_token_budget: 384
+  character_set: extended_8
+  max_posts: 16
+  post_order: round_robin
+output_dir: runs/learning_progress/lp_lagged_8agent_ashbourne_gc_seed2
+gradient_checkpointing: true
+
+var_decomp_enabled: false
+var_decomp_n_contexts: 64
+var_decomp_K: 4
+var_decomp_M: 2
+var_decomp_n_eval_early: 10
+var_decomp_n_eval_late: 25
+var_decomp_switch_iter: 50

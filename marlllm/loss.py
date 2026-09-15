@@ -103,6 +103,8 @@ class CCSMLoss(Loss):
         env_lp_known: torch.Tensor | None = None,
         bias_values: torch.Tensor | None = None,
         value_head: Any | None = None,
+        last_hidden_lp: torch.Tensor | None = None,
+        lm_head_lp: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, dict]:
         # Single chunked pass through lm_head produces shifted per-token
         # log p(input_ids[t+1] | hidden[t]). Both surprises and act log-probs
@@ -126,15 +128,41 @@ class CCSMLoss(Loss):
             surprises = torch.cat(
                 [zero_pad, surprises[:, 1:] * valid_shift], dim=1
             )
-        returns = _compute_returns(
-            surprises, token_type_mask, config.gamma, seq_ids=seq_ids
+        # Learning progress: the per-observation reward becomes
+        # ln p_theta - ln p_theta^-, i.e. the improvement over a second
+        # reference policy, rather than the level of our own accuracy. The
+        # environment's entropy is common to both cross-entropies and cancels.
+        # Only the RETURN's summand changes — ``surprises`` itself is left
+        # alone so the perception arm is byte-for-byte what it was.
+        return_surprises, lp_metrics = _learning_progress_surprises(
+            surprises, last_hidden_lp, lm_head_lp or lm_head, input_ids,
+            token_type_mask, seq_ids, config,
         )
+        if not lp_metrics:
+            returns = _compute_returns(
+                surprises, token_type_mask, config.gamma, seq_ids=seq_ids
+            )
+        else:
+            # One backward scan over a doubled batch gives both the
+            # learning-progress return and the surrogate it replaces, so the
+            # two can be compared without paying for a second O(T) scan.
+            # no_grad because the return is pre-computed data — every consumer
+            # detaches it (see the stop-gradient contract at the top of this
+            # file) — and the scan is T sequential steps whose graph would
+            # otherwise be built and thrown away.
+            with torch.no_grad():
+                returns, surrogate_returns = _compute_returns_pair(
+                    return_surprises, surprises, token_type_mask, config.gamma,
+                    seq_ids=seq_ids,
+                )
         # Novelty search: -1 pushes the policy toward MORE future surprise
         # instead of less. Applied to the return itself so everything
         # downstream — baseline, standardisation, advantage — follows from it.
         _sign = float(getattr(config, "return_sign", 1.0))
         if _sign != 1.0:
             returns = returns * _sign
+            if lp_metrics:
+                surrogate_returns = surrogate_returns * _sign
 
         obs_mask = token_type_mask == int(TokenType.OBS)
         if perception_source_indices is not None and len(perception_source_indices) > 0:
@@ -157,6 +185,46 @@ class CCSMLoss(Loss):
             invalid = torch.zeros_like(act_mask)
             invalid[:, 1:] = _seq_boundary_shifted(seq_ids)
             act_mask = act_mask & ~invalid
+
+        # ---- Learning-progress diagnostics ----
+        # Whether the corrected return ORDERS actions differently from the one
+        # it replaces is the quantity that decides whether the correction can
+        # change learning, independent of its magnitude. Same pair of
+        # statistics the environment-likelihood correction reports, so the two
+        # corrections are read on the same scale.
+        if lp_metrics:
+            with torch.no_grad():
+                if obs_mask.any():
+                    # return_surprises = own - reference, so the reference's
+                    # own surprise is recovered by subtraction and the
+                    # per-token progress in nats is its negation: positive
+                    # means the current policy predicts this token better than
+                    # the reference did.
+                    own = surprises[obs_mask].detach()
+                    ref = own - return_surprises[obs_mask].detach()
+                    progress = ref - own
+                    lp_metrics["lp/ref_surprise_mean"] = float(ref.mean())
+                    lp_metrics["lp/progress_per_token"] = float(progress.mean())
+                    lp_metrics["lp/progress_per_token_std"] = (
+                        float(progress.std()) if progress.numel() > 1 else 0.0)
+                    lp_metrics["lp/progress_positive_frac"] = float(
+                        (progress > 0).to(torch.float32).mean())
+                if act_mask.any():
+                    lp_r = returns[act_mask].detach()
+                    sg_r = surrogate_returns[act_mask].detach()
+                    lp_metrics["lp/return_mean"] = float(lp_r.mean())
+                    lp_metrics["lp/return_surrogate_mean"] = float(sg_r.mean())
+                    lp_metrics["lp/return_std"] = (
+                        float(lp_r.std()) if lp_r.numel() > 1 else 0.0)
+                    lp_metrics["lp/return_surrogate_std"] = (
+                        float(sg_r.std()) if sg_r.numel() > 1 else 0.0)
+                    lp_metrics["lp/return_rank_corr"] = _spearman(lp_r, sg_r)
+                    if lp_r.numel() > 1:
+                        a = lp_r - lp_r.mean()
+                        b = sg_r - sg_r.mean()
+                        d = a.norm() * b.norm()
+                        lp_metrics["lp/return_pearson"] = (
+                            float((a @ b) / d) if float(d) > 0 else 0.0)
 
         # ---- Perception loss ----
         obs_surprises = surprises[obs_mask]
@@ -393,6 +461,7 @@ class CCSMLoss(Loss):
             "ppo/ratio_max": ratio_max,
         }
         metrics.update(_envlp_metrics)
+        metrics.update(lp_metrics)
 
         # ---- Bias probe ----
         # A second value head fitted to the ENV part of the return alone, so
@@ -494,7 +563,89 @@ class CCSMLoss(Loss):
 
         # Surprises, returns, masks (no_grad — these are pre-computed data).
         surprises = _surprises_from_token_lp(token_lp_full, token_type_mask)
-        returns = _compute_returns(surprises, token_type_mask, config.gamma)
+
+        # Learning progress: a second no-grad streaming pass under the
+        # reference policy, whose per-token surprise is subtracted from ours
+        # before the backward scan. ``surprises`` itself is left alone, so
+        # L_perc is unchanged.
+        lp_hidden_source = None
+        if getattr(config, "learning_progress_return", False):
+            if getattr(config, "learning_progress_reference", "lagged") == "base":
+                lp_hidden_source = agent.evaluate_hidden_ref_chunked(
+                    input_ids, attention_mask, chunk_size)
+            else:
+                lp_hidden_source = agent.evaluate_hidden_lp_chunked(
+                    input_ids, attention_mask, chunk_size)
+        if lp_hidden_source is not None:
+            ref_token_lp_full = torch.zeros_like(token_lp_full)
+            saw_reference = False
+            with torch.no_grad():
+                for s, e, hidden_chunk in lp_hidden_source:
+                    if hidden_chunk is None:
+                        continue
+                    saw_reference = True
+                    pred_end = min(e, T - 1)
+                    if pred_end <= s:
+                        continue
+                    L = pred_end - s
+                    targets = input_ids[:, s + 1 : pred_end + 1]
+                    hidden_pred = hidden_chunk[:, :L, :]
+                    for vs in range(0, L, _T_CHUNK):
+                        ve = min(vs + _T_CHUNK, L)
+                        # agent.lm_head rather than lm_head_ref: the head is
+                        # not LoRA-wrapped in any current config, so the two
+                        # are the same function, and opening disable_adapter()
+                        # inside this loop is what triggered the
+                        # "backward through graph twice" failure noted below.
+                        logits_chunk = agent.lm_head(hidden_pred[:, vs:ve, :])
+                        V = logits_chunk.shape[-1]
+                        nll = F.cross_entropy(
+                            logits_chunk.reshape(-1, V),
+                            targets[:, vs:ve].reshape(-1),
+                            reduction="none",
+                        ).reshape(B, ve - vs)
+                        ref_token_lp_full[:, s + vs : s + ve] = -nll.to(dtype_h)
+                    del hidden_chunk
+            ref_hidden_marker = ref_token_lp_full if saw_reference else None
+        else:
+            ref_hidden_marker = None
+
+        if getattr(config, "learning_progress_return", False):
+            if ref_hidden_marker is None:
+                raise RuntimeError(
+                    "learning_progress_return is set but the chunked loss path "
+                    "received no reference forward, so the return would "
+                    "silently fall back to the uncorrected surrogate. For "
+                    "learning_progress_reference='lagged' the trainer must "
+                    "call agent.enable_learning_progress_reference(); for "
+                    "'base' the agent must keep the frozen reference model "
+                    "(kl_coef > 0 or always_log_kl)."
+                )
+            ref_surprises = _surprises_from_token_lp(
+                ref_hidden_marker, token_type_mask)
+            return_surprises = surprises - ref_surprises
+            returns, surrogate_returns = _compute_returns_pair(
+                return_surprises, surprises, token_type_mask, config.gamma)
+            lp_metrics_c = {
+                "lp/in_use": 1.0,
+                "lp/reference_is_base": float(
+                    getattr(config, "learning_progress_reference", "lagged")
+                    == "base"),
+            }
+        else:
+            returns = _compute_returns(surprises, token_type_mask, config.gamma)
+            surrogate_returns = returns
+            lp_metrics_c = {}
+        # NOTE: the single-shot path has applied ``return_sign`` to the return
+        # since the novelty-search ablation landed; this path never did, so a
+        # chunked novelty run would have trained the unflipped objective. No
+        # run has combined the two — every novelty config leaves
+        # seq_chunk_size unset — but the omission is fixed here rather than
+        # left as a trap for the next one.
+        _sign_c = float(getattr(config, "return_sign", 1.0))
+        if _sign_c != 1.0:
+            returns = returns * _sign_c
+            surrogate_returns = surrogate_returns * _sign_c
 
         obs_mask = token_type_mask == int(TokenType.OBS)
         if perception_source_indices is not None and len(perception_source_indices) > 0:
@@ -507,6 +658,28 @@ class CCSMLoss(Loss):
             returns, token_type_mask, act_mask, obs_mask, config,
             None, env_log_probs, env_lp_known,
         )
+
+        if lp_metrics_c:
+            if obs_mask.any():
+                own_c = surprises[obs_mask]
+                ref_c = own_c - return_surprises[obs_mask]
+                prog_c = ref_c - own_c
+                lp_metrics_c["lp/ref_surprise_mean"] = float(ref_c.mean())
+                lp_metrics_c["lp/progress_per_token"] = float(prog_c.mean())
+                lp_metrics_c["lp/progress_per_token_std"] = (
+                    float(prog_c.std()) if prog_c.numel() > 1 else 0.0)
+                lp_metrics_c["lp/progress_positive_frac"] = float(
+                    (prog_c > 0).to(torch.float32).mean())
+            if act_mask.any():
+                lp_r_c = returns[act_mask]
+                sg_r_c = surrogate_returns[act_mask]
+                lp_metrics_c["lp/return_mean"] = float(lp_r_c.mean())
+                lp_metrics_c["lp/return_surrogate_mean"] = float(sg_r_c.mean())
+                lp_metrics_c["lp/return_std"] = (
+                    float(lp_r_c.std()) if lp_r_c.numel() > 1 else 0.0)
+                lp_metrics_c["lp/return_surrogate_std"] = (
+                    float(sg_r_c.std()) if sg_r_c.numel() > 1 else 0.0)
+                lp_metrics_c["lp/return_rank_corr"] = _spearman(lp_r_c, sg_r_c)
 
         # Shifted-view (positions 1..T-1) masks for slicing per-chunk
         # contributions. Note: ``n_obs_total`` matches the single-shot
@@ -696,6 +869,7 @@ class CCSMLoss(Loss):
             "kl": kl_acc,
         }
         metrics.update(_envlp_metrics_c)
+        metrics.update(lp_metrics_c)
         return total_loss_scalar, metrics
 
 
@@ -786,6 +960,96 @@ def _compute_returns(
         returns[:, t] = act_here * running
 
     return returns  # (B, T) — non-zero only at ACT positions
+
+
+def _compute_returns_pair(
+    primary: torch.Tensor,
+    secondary: torch.Tensor,
+    token_type_mask: torch.Tensor,
+    gamma: float,
+    seq_ids: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Backward scan over two summands at once.
+
+    ``_compute_returns`` is a Python loop over the sequence axis, so its cost
+    is set by T rather than by batch size. Stacking the two summands along the
+    batch axis gets the second return for free instead of doubling that loop.
+    """
+    B = primary.shape[0]
+    stacked = torch.cat([primary, secondary], dim=0)
+    tm2 = torch.cat([token_type_mask, token_type_mask], dim=0)
+    sid2 = None if seq_ids is None else torch.cat([seq_ids, seq_ids], dim=0)
+    out = _compute_returns(stacked, tm2, gamma, seq_ids=sid2)
+    return out[:B], out[B:]
+
+
+def _learning_progress_surprises(
+    surprises: torch.Tensor,
+    last_hidden_lp: torch.Tensor | None,
+    lm_head_lp: Callable[[torch.Tensor], torch.Tensor],
+    input_ids: torch.Tensor,
+    token_type_mask: torch.Tensor,
+    seq_ids: torch.Tensor | None,
+    config: TrainingConfig,
+) -> tuple[torch.Tensor, dict]:
+    """Replace the return's summand with the improvement over a reference.
+
+    The surrogate pays ``M_s = -ln p_theta(x_s)`` per future observation token,
+    whose expectation is ``KL(p_env || p_theta) + H(p_env)``. Against a second
+    policy ``p_theta^-`` the entropy is common to both cross-entropies:
+
+        H(p_env, p_theta^-) - H(p_env, p_theta)
+            = KL(p_env || p_theta^-) - KL(p_env || p_theta)
+
+    so the summand ``M_s - M_s^-`` has expectation free of ``H(p_env)``, for
+    ANY reference. Minimising the resulting return maximises
+    ``ln p_theta - ln p_theta^-``: the agent is paid for improvement, and the
+    dark room — where that difference is zero — pays nothing.
+
+    Returns ``(summand, metrics)``. When learning progress is off the input
+    tensor is returned unchanged and the metrics dict is empty; the caller
+    branches on the empty dict, so the default path is untouched and a legacy
+    run gains no stray ``lp/*`` key.
+    """
+    if not getattr(config, "learning_progress_return", False):
+        return surprises, {}
+    if last_hidden_lp is None:
+        # Falling back to the surrogate here would produce a run that claims
+        # to be correcting the bias and is not — which is exactly how arm B of
+        # the environment-likelihood study became a duplicate of arm A without
+        # either job failing. A run that cannot compute the objective it
+        # declared is invalid, so stop.
+        raise RuntimeError(
+            "learning_progress_return is set but no reference hidden states "
+            "reached the loss, so the return would silently fall back to the "
+            "uncorrected surrogate. For learning_progress_reference='lagged' "
+            "the trainer must call agent.enable_learning_progress_reference() "
+            "and pass agent.evaluate_hidden_lp(...); for 'base' the agent must "
+            "keep the frozen reference model (kl_coef > 0 or always_log_kl)."
+        )
+    with torch.no_grad():
+        ref_token_lp = _token_log_probs_shifted_chunked(
+            last_hidden_lp, lm_head_lp, input_ids, _T_CHUNK,
+        )
+        ref_surprises = _surprises_from_token_lp(ref_token_lp, token_type_mask)
+        if seq_ids is not None:
+            # Same boundary treatment the agent's own surprises get: a shifted
+            # prediction across a packed-trajectory boundary is meaningless
+            # under the reference too, and a non-zero reference there would
+            # leak a spurious reward into the difference.
+            B = ref_surprises.shape[0]
+            zero_pad = torch.zeros(
+                B, 1, device=ref_surprises.device, dtype=ref_surprises.dtype)
+            valid_shift = (~_seq_boundary_shifted(seq_ids)).to(ref_surprises.dtype)
+            ref_surprises = torch.cat(
+                [zero_pad, ref_surprises[:, 1:] * valid_shift], dim=1
+            )
+    metrics = {
+        "lp/in_use": 1.0,
+        "lp/reference_is_base": float(
+            getattr(config, "learning_progress_reference", "lagged") == "base"),
+    }
+    return surprises - ref_surprises, metrics
 
 
 def _env_returns(

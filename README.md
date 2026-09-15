@@ -29,6 +29,7 @@ The framework uses [PettingZoo](https://pettingzoo.farama.org/) as its environme
 - [Installation](#installation)
 - [Quickstart](#quickstart)
 - [The Algorithm](#the-algorithm)
+  - [The learning-progress return](#the-learning-progress-return)
 - [Training Scripts](#training-scripts)
   - [train.py — single-agent counting](#trainpy--single-agent-counting)
   - [train_negotiation.py — two-agent deal-or-no-deal](#train_negotiationpy--two-agent-deal-or-no-deal)
@@ -149,6 +150,34 @@ $$\mathcal{L}^{\text{perc}} = -\frac{1}{N_{\text{obs}}} \sum_{t:\,\sigma_t=1} \l
 $$\mathcal{L}^{\text{act}} = -\frac{1}{N_{\text{act}}} \sum_{t:\,\sigma_t=0} \ln p_\theta(x_t \mid c, x_{<t}) \cdot \hat{A}_t \;-\; \beta \cdot H[p_\theta(\cdot \mid c, x_{<t})]$$
 
 where the advantage $\hat{A}_t = -(G_t - V_\phi)$ and the intrinsic return $G_t = \sum_{s>t} \sigma_s \gamma^{s-t}(-\ln p_\theta(x_s \mid c, x_{<s}))$ is the discounted future observation surprise. No extrinsic reward. The character prompt $c$ is the only specification of what the agent should do.
+
+### The learning-progress return
+
+`learning_progress_return: true` replaces the return's summand with the
+agent's **improvement** over a second reference policy:
+
+$$G_t \;=\; \sum_{s>t} \sigma_s \gamma^{s-t}\big(\ln p_{\theta^-}(x_s \mid c, x_{<s}) - \ln p_\theta(x_s \mid c, x_{<s})\big)$$
+
+The motivation is that the surrogate above is not the stated objective plus
+noise. Per observation position its expectation is
+$\mathrm{KL}(p_{\text{env}} \Vert p_\theta) + H(p_{\text{env}})$ — the objective
+*plus the entropy of the environment* — and that second term is a REINFORCE
+ascent step on $-H(p_{\text{env}})$. Because $H(p_{\text{env}})$ is common to
+any cross-entropy against $p_{\text{env}}$, it cancels identically in a
+difference of two of them, for **any** second reference however poor.
+
+Two references, chosen with `learning_progress_reference`:
+
+- `lagged` — this agent's own adapter from `learning_progress_lag` iterations
+  ago, held in a second frozen LoRA adapter and rotated through a two-slot
+  buffer so it is never the current weights (at zero lag the return is
+  identically zero). Costs one extra no-grad forward per micro-batch.
+- `base` — the frozen pre-trained model the KL anchor already keeps in memory.
+  Free, but saturates as the agent moves away from base.
+
+The perception arm is untouched in both cases. Details and the experiment
+suite: [`configs/learning_progress/README.md`](configs/learning_progress/README.md)
+and the field comments in [`marlllm/config.py`](marlllm/config.py).
 
 ---
 
@@ -842,6 +871,10 @@ All hyperparameters live in `TrainingConfig`. Every field has a default.
 | `lora_alpha` | `16` | LoRA alpha scaling factor |
 | `lora_target_modules` | `None` | LoRA target module names (None = auto-detect) |
 | `gradient_checkpointing` | `False` | Activation checkpointing for VRAM savings |
+| `return_sign` | `1.0` | Sign of the return. `-1.0` maximises future surprise (novelty search) |
+| `learning_progress_return` | `False` | Pay the action arm for improvement over a second reference instead of accuracy, cancelling `H(p_env)` |
+| `learning_progress_reference` | `"lagged"` | `lagged` (this agent's own earlier adapter) or `base` (the frozen pre-trained model) |
+| `learning_progress_lag` | `25` | Iterations between reference refreshes; realised lag runs `L+1` to `2L` |
 
 ---
 

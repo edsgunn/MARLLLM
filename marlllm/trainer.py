@@ -75,6 +75,18 @@ class Trainer:
                     f"known agents: {list(agents)}"
                 )
 
+        # Learning-progress reference (see TrainingConfig.learning_progress_return).
+        # Attached before the parameter sweep below so the frozen reference
+        # adapter is never enumerated into the optimizer.
+        self._lp_enabled = bool(getattr(config, "learning_progress_return", False))
+        self._lp_reference = str(getattr(config, "learning_progress_reference", "lagged"))
+        self._lp_lag = max(1, int(getattr(config, "learning_progress_lag", 25)))
+        if self._lp_enabled and self._lp_reference == "lagged":
+            for aid, a in agents.items():
+                if aid in self.frozen_agents:
+                    continue
+                a.enable_learning_progress_reference(iteration=0)
+
         # Deduplicate by parameter identity so shared-weight agents (where both
         # dict entries point to the same IndependentAgent) don't double-count.
         # Frozen agents contribute no parameters to the optimizer.
@@ -150,6 +162,12 @@ class Trainer:
         self._logger.info("Output directory: %s", self.config.output_dir)
 
         for iteration in range(start_iteration, self.config.num_iterations + 1):
+            if (self._lp_enabled and self._lp_reference == "lagged"
+                    and iteration > 1 and (iteration - 1) % self._lp_lag == 0):
+                for aid, a in self.agents.items():
+                    if aid not in self.frozen_agents:
+                        a.rotate_learning_progress_reference(iteration - 1)
+
             # 1. Collect episodes — all N episodes run simultaneously so every
             # agent turn is a single batched forward pass instead of N serial ones.
             # Each episode yields per-agent trajectory views (other agents' steps
@@ -222,8 +240,19 @@ class Trainer:
                         mb_token_type     = mb_token_type[:, :actual_len]
                         mb_agent_id       = mb_agent_id[:, :actual_len]
 
+                    # Reference forward first — set_adapter() toggles
+                    # requires_grad, so it must not run between the training
+                    # forward and its backward.
+                    last_hidden_lp = None
+                    if self._lp_enabled and self._lp_reference == "lagged":
+                        last_hidden_lp = agent.evaluate_hidden_lp(
+                            mb_input_ids, mb_attention_mask)
                     last_hidden, values = agent.evaluate_hidden(mb_input_ids, mb_attention_mask)
                     last_hidden_ref = agent.evaluate_hidden_ref(mb_input_ids, mb_attention_mask)
+                    lm_head_lp = None
+                    if self._lp_enabled and self._lp_reference == "base":
+                        last_hidden_lp = last_hidden_ref
+                        lm_head_lp = agent.lm_head_ref
 
                     loss_val, metrics = self.loss.compute_loss(
                         last_hidden=last_hidden,
@@ -237,6 +266,8 @@ class Trainer:
                         last_hidden_ref=last_hidden_ref,
                         lm_head_ref=agent.lm_head_ref if last_hidden_ref is not None else None,
                         perception_source_indices=self._perception_source_indices,
+                        last_hidden_lp=last_hidden_lp,
+                        lm_head_lp=lm_head_lp,
                     )
 
                     (loss_val / num_micros).backward()

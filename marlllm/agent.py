@@ -8,6 +8,7 @@ gradient from the value loss never flows into the LM backbone.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Iterable
 
 import torch
@@ -463,7 +464,337 @@ class ValueHead(nn.Module):
                 "popart/rescale": float(ratio)}
 
 
-class IndependentAgent(Agent):
+class LearningProgressReference:
+    """A frozen second copy of this agent's own policy, lagged in training time.
+
+    Why a second model at all
+    -------------------------
+    The surrogate action return sums this agent's own surprise over future
+    observation tokens, which equals ``KL(p_env || p_theta) + H(p_env)``. The
+    entropy term is the dark room: a REINFORCE reward for making the world
+    simpler. It is common to *any* cross-entropy against ``p_env``, so it
+    cancels exactly in a difference of two of them — which is why a second
+    reference removes it no matter how poor a model of ``p_env`` that
+    reference is. See ``TrainingConfig.learning_progress_return``.
+
+    The two-slot buffer
+    -------------------
+    The reference must never be the current weights: at zero lag the return is
+    identically zero (the plug-in estimator of
+    surprise_minimisation_derivation.md 5.5.4). So we keep two snapshots —
+    ``pending``, taken at the last rotation, and the *active* reference, which
+    is the snapshot taken at the rotation before that. On every rotation the
+    pending snapshot becomes the active reference and a fresh pending snapshot
+    is taken. The effective lag therefore runs from ``L+1`` to ``2L``
+    iterations and never reaches 0.
+
+    Storage
+    -------
+    The active reference lives in the shared backbone as an extra, frozen LoRA
+    adapter; ``pending`` is a plain CPU tensor dict. Neither is ever handed to
+    the optimiser.
+
+    The reference adapter's name is ``lpref_<sha1(live)[:8]>`` and deliberately
+    does NOT contain the live adapter's name. PEFT selects an adapter's weights
+    with a plain substring test —
+
+        {k: v for k, v in sd.items() if "lora_" in k and adapter_name in k}
+
+    (``peft/utils/save_and_load.py``, ``get_peft_model_state_dict``) — so a
+    name like ``agent_0__lp_ref`` would be swept into every
+    ``save_pretrained(selected_adapters=["agent_0"])``. That call is on the
+    vLLM sync path, which runs after every optimiser step, so the rollout
+    engine would have been handed a file containing two policies' weights. The
+    hash keeps the two names disjoint. It never reaches disk: checkpoints
+    re-key the reference to the live adapter's names (see
+    ``learning_progress_state``), so the saved format does not depend on it.
+    """
+
+    _LP_PREFIX = "lpref_"
+
+    # Set by enable_learning_progress_reference(); None means "not enabled".
+    _lp_adapter_name: str | None = None
+    _lp_pending: dict | None = None
+    # Iteration at which each snapshot was taken, for the lag diagnostic.
+    _lp_reference_iteration: int = 0
+    _lp_pending_iteration: int = 0
+
+    # -------------------------------------------------------------- #
+    # Hooks a concrete agent must supply                               #
+    # -------------------------------------------------------------- #
+
+    def _lp_live_adapter_name(self) -> str:
+        """Name of the adapter carrying this agent's trainable weights."""
+        raise NotImplementedError
+
+    def _lp_backbone(self):
+        return self._backbone
+
+    @classmethod
+    def _lp_reference_adapter_name(cls, live: str) -> str:
+        """A name for the reference adapter that cannot contain ``live``.
+
+        See the class docstring: PEFT's adapter selection is a substring test,
+        so the two names must be disjoint or the reference leaks into every
+        adapter file the vLLM sync path writes.
+        """
+        import hashlib
+        return cls._LP_PREFIX + hashlib.sha1(live.encode("utf-8")).hexdigest()[:8]
+
+    # -------------------------------------------------------------- #
+    # Snapshot plumbing (overridden wholesale in the unit tests)       #
+    # -------------------------------------------------------------- #
+
+    def _lp_snapshot_live(self) -> dict:
+        """CPU copy of the live adapter's weights, keyed by live-adapter name."""
+        live = self._lp_live_adapter_name()
+        return {
+            name: param.detach().to("cpu", copy=True)
+            for name, param in self._lp_backbone().named_parameters()
+            if f".{live}." in name
+        }
+
+    def _lp_write_reference(self, state: dict) -> None:
+        """Copy a snapshot into the frozen reference adapter."""
+        live = self._lp_live_adapter_name()
+        lag = self._lp_adapter_name
+        params = dict(self._lp_backbone().named_parameters())
+        missing = []
+        with torch.no_grad():
+            for name, value in state.items():
+                target = params.get(name.replace(f".{live}.", f".{lag}."))
+                if target is None:
+                    missing.append(name)
+                    continue
+                target.data.copy_(value.to(target.device, dtype=target.dtype))
+        if missing:
+            raise KeyError(
+                f"{len(missing)} snapshot keys have no counterpart in the "
+                f"learning-progress reference adapter (first: {missing[:3]}). "
+                "The reference would be a mix of two policies and the return "
+                "would be meaningless."
+            )
+
+    # -------------------------------------------------------------- #
+    # Lifecycle                                                        #
+    # -------------------------------------------------------------- #
+
+    def enable_learning_progress_reference(self, iteration: int = 0) -> None:
+        """Attach the reference adapter and seed both slots with the current
+        weights. Idempotent.
+
+        Seeding both slots with the current weights means the reference is the
+        *initial* policy until the second rotation, so early training measures
+        progress against the pre-trained prior and only becomes genuinely
+        lagged-self later. That is the intended warm start, not an artefact.
+        """
+        if self._lp_adapter_name is not None:
+            return
+        backbone = self._lp_backbone()
+        peft_config = getattr(backbone, "peft_config", None)
+        if not peft_config:
+            raise RuntimeError(
+                "learning_progress_reference='lagged' needs a PEFT-wrapped "
+                "backbone to hold the second adapter, and this agent has none "
+                "(lora_r = 0 means full fine-tuning). Use lora_r > 0, or set "
+                "learning_progress_reference='base' to use the frozen "
+                "pre-trained model as the second reference instead."
+            )
+        live = self._lp_live_adapter_name()
+        if live not in peft_config:
+            raise RuntimeError(
+                f"live adapter {live!r} is not among the backbone's adapters "
+                f"{list(peft_config)}"
+            )
+        lag = self._lp_reference_adapter_name(live)
+        if lag not in peft_config:
+            backbone.add_adapter(lag, peft_config[live])
+        self._lp_adapter_name = lag
+        for name, param in backbone.named_parameters():
+            if f".{lag}." in name:
+                param.requires_grad_(False)
+        # add_adapter can leave the new adapter active; put the live one back
+        # before anything else touches the backbone.
+        backbone.set_adapter(live)
+        self._lp_pending = self._lp_snapshot_live()
+        self._lp_write_reference(self._lp_pending)
+        self._lp_reference_iteration = int(iteration)
+        self._lp_pending_iteration = int(iteration)
+
+    def rotate_learning_progress_reference(self, iteration: int) -> None:
+        """pending -> active reference; current weights -> pending."""
+        if self._lp_adapter_name is None:
+            raise RuntimeError(
+                "rotate_learning_progress_reference called before "
+                "enable_learning_progress_reference"
+            )
+        fresh = self._lp_snapshot_live()
+        self._lp_write_reference(self._lp_pending)
+        self._lp_reference_iteration = self._lp_pending_iteration
+        self._lp_pending = fresh
+        self._lp_pending_iteration = int(iteration)
+
+    def reseed_learning_progress_reference(self, iteration: int = 0) -> None:
+        """Reset both slots to the current weights.
+
+        Used after a checkpoint that carries no reference of its own is loaded
+        into a run that has one: the reference must be the weights just
+        loaded, not the freshly-initialised adapter they replaced.
+        """
+        if self._lp_adapter_name is None:
+            return
+        self._lp_pending = self._lp_snapshot_live()
+        self._lp_write_reference(self._lp_pending)
+        self._lp_reference_iteration = int(iteration)
+        self._lp_pending_iteration = int(iteration)
+
+    def learning_progress_reference_age(self, iteration: int) -> int:
+        """Iterations between the active reference's weights and now."""
+        if self._lp_adapter_name is None:
+            return 0
+        return max(0, int(iteration) - int(self._lp_reference_iteration))
+
+    # -------------------------------------------------------------- #
+    # Checkpointing                                                    #
+    # -------------------------------------------------------------- #
+
+    def learning_progress_state(self) -> dict | None:
+        """Both slots, keyed by LIVE adapter name so migration remapping and
+        checkpoint loading can use the same key rewrite as the live adapter."""
+        if self._lp_adapter_name is None:
+            return None
+        live = self._lp_live_adapter_name()
+        lag = self._lp_adapter_name
+        reference = {
+            name.replace(f".{lag}.", f".{live}."): param.detach().cpu().clone()
+            for name, param in self._lp_backbone().named_parameters()
+            if f".{lag}." in name
+        }
+        return {
+            "reference": reference,
+            "pending": {k: v.cpu().clone() for k, v in self._lp_pending.items()},
+            "reference_iteration": int(self._lp_reference_iteration),
+            "pending_iteration": int(self._lp_pending_iteration),
+        }
+
+    def load_learning_progress_state(self, state: dict) -> None:
+        if self._lp_adapter_name is None:
+            self.enable_learning_progress_reference()
+        self._lp_write_reference(state["reference"])
+        self._lp_pending = {k: v.cpu().clone() for k, v in state["pending"].items()}
+        self._lp_reference_iteration = int(state.get("reference_iteration", 0))
+        self._lp_pending_iteration = int(state.get("pending_iteration", 0))
+
+    # -------------------------------------------------------------- #
+    # Forward passes under the reference                               #
+    # -------------------------------------------------------------- #
+
+    @contextmanager
+    def _lp_reference_mode(self):
+        """Activate the reference adapter, in eval mode, and put everything
+        back afterwards.
+
+        Eval mode matters. ``ln p_theta^-(x_s)`` is a property of the reference
+        *policy*, and a dropout mask is not part of a policy. Left in train
+        mode the reference would be scored under a different random mask from
+        the one the training forward used, and the difference of the two
+        surprises would carry that noise instead of learning progress. Every
+        base model in use has dropout disabled — Qwen2.5 sets
+        ``attention_dropout`` to 0 and has no residual dropout — so the two
+        coincide there, but that is a property of the checkpoint rather than of
+        this code, and gpt2 breaks it.
+
+        Never hold this open across a ``yield``: peft toggles model state on
+        enter and exit, so a suspended generator would leave the caller's frame
+        on the wrong adapter.
+        """
+        backbone = self._lp_backbone()
+        was_training = backbone.training
+        backbone.eval()
+        backbone.set_adapter(self._lp_adapter_name)
+        try:
+            yield
+        finally:
+            backbone.set_adapter(self._lp_live_adapter_name())
+            if was_training:
+                backbone.train()
+
+    @torch.no_grad()
+    def evaluate_hidden_lp(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor | None:
+        """Last hidden states under the lagged reference policy.
+
+        Call this BEFORE the training forward: ``set_adapter`` toggles
+        requires_grad on every adapter, and running it first means
+        ``evaluate_hidden``'s own ``_activate()`` is what the autograd graph
+        is built under.
+        """
+        if self._lp_adapter_name is None:
+            return None
+        backbone = self._lp_backbone()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        kwargs: dict = dict(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+            logits_to_keep=1,
+        )
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+        with self._lp_reference_mode():
+            out = backbone(**kwargs)
+        return out.hidden_states[-1]
+
+    @torch.no_grad()
+    def evaluate_hidden_lp_chunked(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        chunk_size: int,
+    ):
+        """No-grad chunked counterpart of ``evaluate_hidden_lp``.
+
+        Yields ``(s, e, hidden_chunk)``, or ``(s, e, None)`` when no reference
+        is attached — mirroring ``evaluate_hidden_ref_chunked``. The adapter is
+        switched around each forward and never across a ``yield``, so a
+        suspended generator cannot leave the backbone on the wrong adapter.
+        """
+        B, T = input_ids.shape
+        if self._lp_adapter_name is None:
+            for s in range(0, T, chunk_size):
+                yield s, min(s + chunk_size, T), None
+            return
+        backbone = self._lp_backbone()
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device.index or 0)
+        past_kv = None
+        for s in range(0, T, chunk_size):
+            e = min(s + chunk_size, T)
+            position_ids = torch.arange(s, e, device=input_ids.device).unsqueeze(0).expand(B, -1)
+            cache_position = torch.arange(s, e, device=input_ids.device)
+            with self._lp_reference_mode():
+                out = backbone(
+                    input_ids=input_ids[:, s:e],
+                    attention_mask=attention_mask[:, :e],
+                    position_ids=position_ids,
+                    past_key_values=past_kv,
+                    cache_position=cache_position,
+                    output_hidden_states=True,
+                    use_cache=True,
+                )
+            hidden_chunk = out.hidden_states[-1]
+            past_kv = out.past_key_values  # already no_grad; no detach needed
+            del out
+            yield s, e, hidden_chunk
+
+
+class IndependentAgent(LearningProgressReference, Agent):
     """
     Standalone HuggingFace CausalLM with an attached ValueHead.
 
@@ -623,13 +954,34 @@ class IndependentAgent(Agent):
     def parameters(self) -> Iterable[nn.Parameter]:
         # When LoRA is active only yield the trainable adapter weights, not
         # the frozen base. This keeps the optimizer small and correct.
+        #
+        # The learning-progress reference adapter is excluded BY NAME as well
+        # as by requires_grad: set_adapter() toggles requires_grad every time
+        # the reference forward runs, so a requires_grad filter alone would
+        # depend on which adapter happened to be active when the optimiser was
+        # built.
         if self._lora_active:
-            yield from (p for p in self._backbone.parameters() if p.requires_grad)
+            lp = self._lp_adapter_name
+            for name, param in self._backbone.named_parameters():
+                if lp is not None and f".{lp}." in name:
+                    continue
+                if param.requires_grad:
+                    yield param
         else:
             yield from self._backbone.parameters()
         yield from self._value_head.parameters()
         if self._bias_value_head is not None:
             yield from self._bias_value_head.parameters()
+
+    def _lp_live_adapter_name(self) -> str:
+        if not self._lora_active:
+            raise RuntimeError(
+                "IndependentAgent has no LoRA adapter to snapshot "
+                "(lora_r = 0). Use lora_r > 0 or "
+                "learning_progress_reference='base'."
+            )
+        # get_peft_model() installs a single adapter under this name.
+        return "default"
 
 
     def enable_bias_probe(self) -> None:
@@ -839,7 +1191,7 @@ class IndependentAgent(Agent):
 # Shared-base LoRA agent                                                        #
 # ============================================================================ #
 
-class LoRASharedBaseAgent(Agent):
+class LoRASharedBaseAgent(LearningProgressReference, Agent):
     """
     Agent that shares a single PeftModel backbone with one other agent, but
     owns a private LoRA adapter within that backbone.
@@ -925,6 +1277,9 @@ class LoRASharedBaseAgent(Agent):
     def _activate(self) -> None:
         """Switch the backbone to this agent's LoRA adapter."""
         self._backbone.set_adapter(self._adapter_name)
+
+    def _lp_live_adapter_name(self) -> str:
+        return self._adapter_name
 
     # ------------------------------------------------------------------ #
     # Agent interface                                                      #

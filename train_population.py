@@ -352,6 +352,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--bias-probe-enabled', action='store_true', help='Fit a second value head to the environment part of the return, to centre E_s for the gradient-bias covariance. Detached input: trains only its own parameters.')
     p.add_argument('--bias-probe-every', type=int, default=25, help='Iterations between the expensive gradient-direction probe. 0 disables.')
     p.add_argument('--always-log-kl', action='store_true', help='Keep the frozen reference model in memory and log KL even when kl_coef == 0 (no KL gradient applied; useful for diagnostics).')
+    p.add_argument('--learning-progress-return', action=argparse.BooleanOptionalAction, default=False,
+                   help="Pay the action arm for IMPROVEMENT rather than accuracy: the return's "
+                        "per-observation summand becomes ln p_theta - ln p_theta^- against a second "
+                        "reference policy. H(p_env) is common to both cross-entropies and cancels "
+                        "exactly, which removes the dark-room term from the gradient. The perception "
+                        "arm is unchanged. See marlllm/config.py.")
+    p.add_argument('--learning-progress-reference', choices=['lagged', 'base'], default='lagged',
+                   help="Which second model plays p_theta^-. 'lagged' is a frozen copy of this "
+                        "agent's own adapter from earlier in training, refreshed every "
+                        "--learning-progress-lag iterations through a two-slot buffer so it is never "
+                        "the current weights; it tracks a non-stationary environment but costs one "
+                        "extra adapter and one extra no-grad forward. 'base' is the frozen "
+                        "pre-trained model the KL anchor already keeps in memory — nearly free, but "
+                        "it saturates once the agent has moved away from base.")
+    p.add_argument('--learning-progress-lag', type=int, default=25,
+                   help='Iterations between refreshes of the lagged reference. The active reference '
+                        'is always the second-most-recent snapshot, so the effective lag runs from '
+                        'L+1 to 2L and never reaches 0 (at lag 0 the return is identically zero).')
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--grad-accum', type=int, default=8)
     p.add_argument('--gradient-checkpointing', action='store_true')
@@ -469,6 +487,11 @@ def main() -> None:
         target_modules = lora_modules or _find_lora_target_modules(base_model)
         lora_config = LoraConfig(r=args.lora_r, lora_alpha=args.lora_alpha, target_modules=target_modules, lora_dropout=0.0, bias='none')
         keep_ref = args.kl_coef > 0.0 or args.always_log_kl
+        if args.learning_progress_return and args.learning_progress_reference == 'base':
+            if not keep_ref:
+                print('[learning-progress] reference=base scores observation tokens under the '
+                      'frozen pre-trained model; keeping it in memory (implies --always-log-kl).')
+            keep_ref = True
         names = list(character_prompts.keys())
         print(f"Attaching LoRA adapter '{names[0]}' (r={args.lora_r})")
         peft_model = get_peft_model(base_model, lora_config, adapter_name=names[0])
@@ -506,6 +529,8 @@ def main() -> None:
         print(f'LoRA shared base: 1 backbone, {len(names)} independent adapters.')
     else:
         keep_ref = args.kl_coef > 0.0 or args.always_log_kl
+        if args.learning_progress_return and args.learning_progress_reference == 'base':
+            keep_ref = True
         for name, prompt in character_prompts.items():
             prompt_str = prompt[0] if isinstance(prompt, list) else prompt
             print(f"Loading agent '{name}': {args.model}  →  {device}")
@@ -526,7 +551,7 @@ def main() -> None:
             pct = 100 * spec.weight / total_w
             print(f'  {spec.name:30s}  weight={spec.weight:.2f}  ({pct:.0f}%)')
     flat_prompts = {name: p[0] if isinstance(p, list) else p for name, p in character_prompts.items()}
-    config = TrainingConfig(gamma=args.gamma, return_sign=args.return_sign, popart=args.popart, popart_beta=args.popart_beta, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, use_8bit_adam=args.use_8bit_adam, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, snapshot_eval_path=args.snapshot_eval_path, snapshot_samples_per_context=args.snapshot_samples_per_context, snapshot_max_new_tokens=args.snapshot_max_new_tokens, var_decomp_enabled=args.var_decomp_enabled, var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path, var_decomp_n_contexts=args.var_decomp_n_contexts, var_decomp_K=args.var_decomp_K, var_decomp_M=args.var_decomp_M, var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps, var_decomp_n_eval_early=args.var_decomp_n_eval_early, var_decomp_n_eval_late=args.var_decomp_n_eval_late, var_decomp_switch_iter=args.var_decomp_switch_iter, output_dir=args.output_dir, device=device, seed=args.seed, kl_coef=args.kl_coef, always_log_kl=args.always_log_kl, env_likelihood_logging=bool(args.env_likelihood_logging or args.use_env_likelihood_return), use_env_likelihood_return=args.use_env_likelihood_return, bias_probe_enabled=args.bias_probe_enabled, bias_probe_every=args.bias_probe_every, beta=args.beta, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, seq_chunk_size=args.seq_chunk_size, pack_sequences=args.pack_sequences, async_rollout=args.async_rollout, replay_buffer_size=args.replay_buffer_size, max_staleness=args.max_staleness, ppo_clip=args.ppo_clip, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules, frozen_agents=list(args.frozen_agents or []), alpha_perc=args.alpha_perc, alpha_act=args.alpha_act, alpha_val=args.alpha_val, partner_graph_degree=args.partner_graph_degree)
+    config = TrainingConfig(gamma=args.gamma, return_sign=args.return_sign, popart=args.popart, popart_beta=args.popart_beta, value_target_raw=args.value_target_raw, action_loss_denominator=args.action_loss_denominator, normalise_returns=args.normalise_returns, model_name_or_path=args.model, character_prompts=character_prompts, episodes_per_iter=args.rollouts, max_episode_tokens=args.max_episode_tokens, num_iterations=args.iters, lr=args.lr, use_8bit_adam=args.use_8bit_adam, log_every=args.log_every, checkpoint_every=args.checkpoint_every, num_checkpoint_traces=args.num_checkpoint_traces, snapshot_eval_path=args.snapshot_eval_path, snapshot_samples_per_context=args.snapshot_samples_per_context, snapshot_max_new_tokens=args.snapshot_max_new_tokens, var_decomp_enabled=args.var_decomp_enabled, var_decomp_eval_contexts_path=args.var_decomp_eval_contexts_path, var_decomp_n_contexts=args.var_decomp_n_contexts, var_decomp_K=args.var_decomp_K, var_decomp_M=args.var_decomp_M, var_decomp_max_continuation_steps=args.var_decomp_max_continuation_steps, var_decomp_n_eval_early=args.var_decomp_n_eval_early, var_decomp_n_eval_late=args.var_decomp_n_eval_late, var_decomp_switch_iter=args.var_decomp_switch_iter, output_dir=args.output_dir, device=device, seed=args.seed, kl_coef=args.kl_coef, always_log_kl=args.always_log_kl, env_likelihood_logging=bool(args.env_likelihood_logging or args.use_env_likelihood_return), use_env_likelihood_return=args.use_env_likelihood_return, bias_probe_enabled=args.bias_probe_enabled, bias_probe_every=args.bias_probe_every, learning_progress_return=args.learning_progress_return, learning_progress_reference=args.learning_progress_reference, learning_progress_lag=args.learning_progress_lag, beta=args.beta, grad_accum_steps=args.grad_accum, gradient_checkpointing=args.gradient_checkpointing, seq_chunk_size=args.seq_chunk_size, pack_sequences=args.pack_sequences, async_rollout=args.async_rollout, replay_buffer_size=args.replay_buffer_size, max_staleness=args.max_staleness, ppo_clip=args.ppo_clip, lora_r=args.lora_r, lora_alpha=args.lora_alpha, lora_target_modules=lora_modules, frozen_agents=list(args.frozen_agents or []), alpha_perc=args.alpha_perc, alpha_act=args.alpha_act, alpha_val=args.alpha_val, partner_graph_degree=args.partner_graph_degree)
     tokeniser = TextTokeniser(first_agent.tokenizer)
     loss = CCSMLoss()
     store = OnPolicyStore()

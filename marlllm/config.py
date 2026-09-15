@@ -133,6 +133,77 @@ class TrainingConfig:
     #   probe (two backward passes over the action loss). 0 disables it.
     bias_probe_every: int = 25
 
+    # ---------------------------------------------------------------- #
+    # Learning-progress return (the H(p_env) cancellation)                #
+    # ---------------------------------------------------------------- #
+    # The surrogate return drops E_s = ln p_env(x_s) and so optimises
+    #
+    #     L_approx = KL(p_env || p_theta) + H(p_env)
+    #
+    # The second term is a REINFORCE ascent step on -H(p_env): a policy
+    # gradient whose reward is the negative entropy of the agent's own
+    # environment. In a population that environment is other agents, so the
+    # term pays each agent to make its peers simpler.
+    #
+    # H(p_env) is common to ANY cross-entropy against p_env, so it cancels
+    # identically in a difference of two of them:
+    #
+    #     H(p_env, p_theta^-) - H(p_env, p_theta)
+    #         = KL(p_env || p_theta^-) - KL(p_env || p_theta)
+    #
+    # It does not matter how bad p_theta^- is as a model of p_env. We never
+    # needed p_env; we needed a SECOND reference. So the per-observation
+    # reward becomes
+    #
+    #     r_s = ln p_theta(x_s | x_<s) - ln p_theta^-(x_s | x_<s)
+    #
+    # — improvement rather than accuracy. The dark room is exactly where that
+    # is zero, so it stops being rewarding. Implemented by subtracting the
+    # reference's per-token surprise from our own BEFORE the backward scan
+    # that builds G_t, so everything downstream — baseline, standardisation,
+    # return_sign — follows from it. The perception arm is untouched: it still
+    # sees the agent's own surprises.
+    #
+    # The reference is scored in eval mode. ln p_theta^-(x_s) is a property of
+    # the reference POLICY and a dropout mask is not part of one; scoring it
+    # under a different random mask from the training forward's would put that
+    # noise into the difference instead of learning progress. Every base model
+    # in use has dropout disabled, so the two coincide, but the code does not
+    # rely on that.
+    #
+    # NB this does NOT address the length channel. KL(p_env || p_theta)
+    # summed over positions is still extensive in the number of observation
+    # tokens, so "elicit fewer tokens" remains a way to shrink the return.
+    # That needs a fixed observation budget, not a second reference.
+    learning_progress_return: bool = False
+
+    # Which second model plays p_theta^-.
+    #
+    #   "lagged" — a frozen copy of this agent's OWN adapter from an earlier
+    #       point in training, refreshed every ``learning_progress_lag``
+    #       iterations through a two-slot buffer so the reference is never the
+    #       current weights (at lag 0 the return is identically zero, which is
+    #       the degenerate case the plug-in estimator collapses to). Tracks a
+    #       non-stationary environment and does not saturate. Costs one extra
+    #       LoRA adapter plus one extra no-grad forward per micro-batch.
+    #
+    #   "base" — the frozen pre-trained model, i.e. the same pi_ref the KL
+    #       anchor already uses. Nearly free: the reference forward is already
+    #       run for the KL term and only its log-probs at OBS positions are
+    #       new. Stationary target, no staleness, but it saturates once the
+    #       agent has moved away from base — the reward becomes "novelty
+    #       relative to the prior" rather than "learning progress".
+    learning_progress_reference: str = "lagged"
+
+    # Iterations between refreshes of the lagged reference. The reference in
+    # use is always the SECOND-most-recent snapshot, so the effective lag runs
+    # from L+1 to 2L iterations and never reaches 0.
+    #
+    # This is the only knob in the scheme, and it interpolates the whole
+    # family: lag 0 makes the return identically zero, lag -> infinity makes
+    # it novelty relative to base, and intermediate lag is learning progress.
+    learning_progress_lag: int = 25
+
     # Asymmetric multi-agent training (§2.4 of Phase A spec).
     # IDs in this list participate in rollouts but receive NO gradient updates.
     # E.g. frozen_agents=["agent_1"] turns agent_1 into a fixed pretrained

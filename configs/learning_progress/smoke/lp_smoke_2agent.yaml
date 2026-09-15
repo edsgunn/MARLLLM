@@ -1,0 +1,66 @@
+# STATUS: SMOKE TEST. Not an experiment — a 3-iteration CPU run on a 0.5B model
+# that exercises the whole learning-progress path end to end before any GPU job
+# is submitted. Never cite its numbers.
+#
+# WHAT IT CHECKS, AND WHAT TO LOOK AT
+#   * <agent>/lp/in_use == 1.0 on every record. Absent means the corrected
+#     return never reached the loss and the run was the surrogate.
+#   * <agent>/lp/progress_per_token is EXACTLY 0.0 at iteration 1 — no step has
+#     been taken, so the reference is the current model — and non-zero from
+#     iteration 2. A value that stays at 0 means the reference is not diverging
+#     and the action arm is silently ablated.
+#   * <agent>/lp/return_rank_corr is present and finite.
+#   * lp/reference_age_iters rises by 1 per iteration.
+#   * The run does not crash in the optimiser: the reference adapter must not
+#     be enumerated into it.
+#
+# Three iterations rather than two: at lag 2 the first rotation lands on
+# iteration 3, so this also exercises rotate_learning_progress_reference().
+name: lp_smoke_2agent
+script: train_population
+model: Qwen/Qwen2.5-0.5B-Instruct
+dtype: float32
+device: cpu
+attn_impl: eager
+use_vllm: false
+characters:
+- Priya Shah
+- Tom Whitaker
+lora_shared_base: true
+lora_r: 8
+lora_alpha: 16
+lora_modules: q_proj,v_proj
+pairing_strategy: random_no_self
+iters: 3
+rollouts: 1
+lr: 5e-6
+kl_coef: 0.0
+beta: 0.01
+grad_accum: 1
+seed: 1
+log_every: 1
+checkpoint_every: 1000
+num_checkpoint_traces: 1
+max_episode_tokens: 2048
+
+learning_progress_return: true
+learning_progress_reference: lagged
+learning_progress_lag: 2
+
+async_rollout: false
+ppo_clip: 0.0
+pack_sequences: false
+
+environments:
+- name: study_group_ashbourne_gc
+  type: forum
+  characters: study_group_ashbourne
+  environment: study_group_ashbourne_gc
+  post_token_budget: 48
+  total_token_budget: 48
+  character_set: canonical_2
+  max_posts: 4
+  post_order: round_robin
+output_dir: /tmp/lp_smoke/lagged
+gradient_checkpointing: false
+var_decomp_enabled: false
