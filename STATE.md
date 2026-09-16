@@ -834,7 +834,15 @@ anywhere in the campaign. — *established* — sweep NOTES
 
 ## What we are running
 
-**Nothing.** The queue is empty.
+| job | config | what it is for |
+|---|---|---|
+| 6596442, 6596443 | [`learning_progress/lp_lagged_noreg_*`](configs/learning_progress/README.md) | The lagged-reference arm with **both penalties off** — `beta` 0.01 → 0.0 and `kl_coef` 0.05 → 0.0, two seeds. Every learning-progress arm that raised entropy carried `beta` = 0.01, and the 20-cell grid says the bonus is a step function; this isolates whether the entropy rise belongs to the return or to the bonus. |
+| 6596444, 6596445 | [`learning_progress/lp_base_noreg_*`](configs/learning_progress/README.md) | The same, against the frozen base. Read against each arm's own Tier-1 twin (one field pair changed) and against `run7_8agent_7B_study_group_ashbourne_gc_no_reg`, the surrogate at the same settings. |
+
+Falsifier, pre-registered: entropy at 300 falling back to the no-regularisation
+surrogate's 0.626 would mean the 6-of-7 entropy rise belonged to the entropy
+bonus rather than to the corrected return — the one claim this suite made about
+its own effect.
 
 One config is **held** rather than queued: [`env_likelihood_bias/B_corrected_seed1`](configs/env_likelihood_bias/README.md)
 has failed three times and must not be resubmitted before
