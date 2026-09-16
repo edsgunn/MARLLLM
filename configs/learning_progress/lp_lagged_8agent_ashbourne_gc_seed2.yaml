@@ -1,4 +1,6 @@
-# STATUS: SUBMITTED 2026-09-15 as job 6571671, against commit 9e9e25d.
+# STATUS: CLOSED. Ran to iteration 300 of 300 as job 6571671 on 2026-09-15,
+# against commit 9e9e25d. Void conditions PASSED. Analysed at the family
+# level in runs/learning_progress/NOTES.md.
 # Tier 1 of the suite; tiers 2-4 are written and held.
 #
 # TIER 1 — LEARNING PROGRESS, LAGGED SELF. 8 agents, Ashbourne GC, seed 2.
